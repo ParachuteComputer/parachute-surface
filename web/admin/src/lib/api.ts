@@ -166,6 +166,25 @@ export function getUiInfo(name: string): Promise<UiInfoResponse> {
   return call("GET", `/app/${encodeURIComponent(name)}/info`);
 }
 
+// --- Phase 2.1: required_schema provisioning ----------------------------
+
+export type ProvisionSchemaResponse = {
+  ok: boolean;
+  name: string;
+  /** Tag names successfully provisioned. */
+  provisioned: string[];
+  /** Per-tag failures. */
+  errors: Array<{ tag: string; error: string }>;
+  /** Why the pass was skipped (when applicable). */
+  skipReason?: string;
+  /** Resolved vault URL (when one was used). */
+  vaultUrl?: string;
+};
+
+export function provisionSchema(name: string): Promise<ProvisionSchemaResponse> {
+  return call("POST", `/app/${encodeURIComponent(name)}/provision-schema`);
+}
+
 // --- Phase 1.3: dev mode ------------------------------------------------
 
 export type DevModeStatus = {

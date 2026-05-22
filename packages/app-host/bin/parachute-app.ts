@@ -35,6 +35,7 @@ Usage:
   parachute-app remove <name>                Unregister a UI + revoke its OAuth client
   parachute-app list                         List installed UIs with status + OAuth state
   parachute-app reload <name>                Refresh a UI's bundle (no daemon restart)
+  parachute-app provision-schema <name>      Re-trigger required_schema auto-provisioning for <name>
   parachute-app dev <name>                   Enable dev mode for <name> (no-cache + SSE reload)
   parachute-app dev <name> --off             Disable dev mode for <name>
   parachute-app dev <name> --trigger         Broadcast a reload event to connected tabs
@@ -268,6 +269,55 @@ async function runReload(rest: string[]): Promise<void> {
 }
 
 /**
+ * Phase 2.1 `provision-schema` verb — re-trigger the required_schema
+ * auto-provisioner against the named UI's `vault_default`. Best-effort
+ * on the daemon side; we always print the per-tag summary the daemon
+ * returns. Exits with code 1 only when the endpoint itself errors out
+ * (auth, missing UI, etc.) — per-tag PUT failures still exit 0 because
+ * the daemon's response is structured (200 with errors[]).
+ */
+async function runProvisionSchema(rest: string[]): Promise<void> {
+  const name = rest[0];
+  if (!name) {
+    console.error("provision-schema: missing <name>");
+    process.exit(1);
+  }
+  const { status, body } = await callDaemon(
+    "POST",
+    `/app/${encodeURIComponent(name)}/provision-schema`,
+  );
+  if (status >= 200 && status < 300) {
+    const r = body as {
+      ok: boolean;
+      provisioned?: string[];
+      errors?: Array<{ tag: string; error: string }>;
+      skipReason?: string;
+      vaultUrl?: string;
+    };
+    if (r.skipReason) {
+      console.log(`Skipped: ${r.skipReason}`);
+      return;
+    }
+    if (r.vaultUrl) console.log(`Vault: ${r.vaultUrl}`);
+    if (r.provisioned && r.provisioned.length > 0) {
+      console.log(`Provisioned ${r.provisioned.length} tag(s):`);
+      for (const t of r.provisioned) console.log(`  ${t}`);
+    }
+    if (r.errors && r.errors.length > 0) {
+      console.log(`Failed (${r.errors.length}):`);
+      for (const e of r.errors) console.log(`  ${e.tag}: ${e.error}`);
+    }
+    if ((!r.provisioned || r.provisioned.length === 0) && (!r.errors || r.errors.length === 0)) {
+      console.log("(no tags to provision)");
+    }
+    return;
+  }
+  console.error(`provision-schema failed (HTTP ${status}):`);
+  printJson(body);
+  process.exit(1);
+}
+
+/**
  * Phase 1.3 `dev` verb — enable / disable / trigger / list.
  *
  * Sub-shape (matches the design doc operator flow):
@@ -420,6 +470,10 @@ async function main(): Promise<void> {
 
     case "reload":
       await runReload(rest);
+      return;
+
+    case "provision-schema":
+      await runProvisionSchema(rest);
       return;
 
     case "dev":

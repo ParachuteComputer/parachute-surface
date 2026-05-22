@@ -148,4 +148,26 @@ describe("parachute-app CLI", () => {
     expect(r.code).not.toBe(0);
     expect(r.stderr.toLowerCase()).toContain("daemon");
   });
+
+  // --- Phase 2.1 ------------------------------------------------------
+
+  test("--help shows the provision-schema verb", async () => {
+    const r = await runBin(["--help"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("provision-schema <name>");
+  });
+
+  test("provision-schema without name exits non-zero", async () => {
+    const r = await runBin(["provision-schema"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("name");
+  });
+
+  test("provision-schema <name> against unreachable daemon reports friendly error", async () => {
+    const r = await runBin(["provision-schema", "notes"], {
+      PARACHUTE_APP_URL: unreachableBase(),
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("daemon");
+  });
 });
