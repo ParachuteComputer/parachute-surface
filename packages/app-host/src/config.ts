@@ -30,6 +30,28 @@ export type AppConfig = {
   default_scope_required: string[];
   /** Whether `parachute-app dev <name>` is permitted. */
   dev_mode_allowed: boolean;
+  /**
+   * First-boot bootstrap. When `uis/` is empty on `serve` startup, apps
+   * auto-installs each entry in `apps` via the same npm-fetch pipeline
+   * `parachute-app add` uses. Defaults to `{enabled: true, apps:
+   * ["@openparachute/notes-ui"]}` — the friend-deploy story is "spin up
+   * a hub, get Notes for free."
+   *
+   * Operators who want a different default (or no default) can flip
+   * `enabled: false` or set `apps: []`. Per design doc Section 16:
+   * Notes is the canonical first app installed under parachute-app.
+   */
+  bootstrap_default_apps: {
+    enabled: boolean;
+    apps: string[];
+  };
+  /**
+   * When a UI's meta.json declares `required_schema`, auto-provision
+   * its tags in vault at install time (and on manual re-trigger via
+   * `POST /app/<name>/provision-schema`). Best-effort: errors log +
+   * warn but don't fail the install. Default true. Per patterns#57.
+   */
+  auto_provision_required_schema: boolean;
 };
 
 export class ConfigError extends Error {
@@ -69,6 +91,11 @@ export const DEFAULTS: AppConfig = {
   disabled: false,
   default_scope_required: ["vault:*:read"],
   dev_mode_allowed: true,
+  bootstrap_default_apps: {
+    enabled: true,
+    apps: ["@openparachute/notes-ui"],
+  },
+  auto_provision_required_schema: true,
 };
 
 export type LoadConfigOpts = {
@@ -90,7 +117,7 @@ export function loadConfig(opts: LoadConfigOpts = {}): AppConfig {
 
   if (!existsSync(configPath)) {
     logger.log(`[app] config file not found at ${configPath}; using defaults`);
-    return { ...DEFAULTS, default_scope_required: [...DEFAULTS.default_scope_required] };
+    return cloneDefaults();
   }
 
   let raw: Record<string, unknown>;
@@ -180,12 +207,80 @@ export function validateConfig(raw: unknown, configPath = "<inline>"): AppConfig
     dev_mode_allowed = o.dev_mode_allowed;
   }
 
+  // bootstrap_default_apps — { enabled: bool, apps: string[] }; defaults applied.
+  let bootstrap_default_apps = {
+    enabled: DEFAULTS.bootstrap_default_apps.enabled,
+    apps: [...DEFAULTS.bootstrap_default_apps.apps],
+  };
+  if (o.bootstrap_default_apps !== undefined) {
+    if (
+      !o.bootstrap_default_apps ||
+      typeof o.bootstrap_default_apps !== "object" ||
+      Array.isArray(o.bootstrap_default_apps)
+    ) {
+      throw new ConfigError("`bootstrap_default_apps` must be an object", configPath);
+    }
+    const bda = o.bootstrap_default_apps as Record<string, unknown>;
+    let enabled = bootstrap_default_apps.enabled;
+    if (bda.enabled !== undefined) {
+      if (typeof bda.enabled !== "boolean") {
+        throw new ConfigError("`bootstrap_default_apps.enabled` must be a boolean", configPath);
+      }
+      enabled = bda.enabled;
+    }
+    let apps: string[] = [...bootstrap_default_apps.apps];
+    if (bda.apps !== undefined) {
+      if (!Array.isArray(bda.apps)) {
+        throw new ConfigError(
+          "`bootstrap_default_apps.apps` must be an array of strings",
+          configPath,
+        );
+      }
+      const items: string[] = [];
+      for (let i = 0; i < bda.apps.length; i++) {
+        const v = bda.apps[i];
+        if (typeof v !== "string" || v.length === 0) {
+          throw new ConfigError(
+            `\`bootstrap_default_apps.apps[${i}]\` must be a non-empty string`,
+            configPath,
+          );
+        }
+        items.push(v);
+      }
+      apps = items;
+    }
+    bootstrap_default_apps = { enabled, apps };
+  }
+
+  // auto_provision_required_schema — bool; default true.
+  let auto_provision_required_schema = DEFAULTS.auto_provision_required_schema;
+  if (o.auto_provision_required_schema !== undefined) {
+    if (typeof o.auto_provision_required_schema !== "boolean") {
+      throw new ConfigError("`auto_provision_required_schema` must be a boolean", configPath);
+    }
+    auto_provision_required_schema = o.auto_provision_required_schema;
+  }
+
   return {
     hub_url,
     auto_register_oauth_clients,
     disabled,
     default_scope_required,
     dev_mode_allowed,
+    bootstrap_default_apps,
+    auto_provision_required_schema,
+  };
+}
+
+/** Fresh deep-copy of `DEFAULTS` — used when no config file exists. */
+function cloneDefaults(): AppConfig {
+  return {
+    ...DEFAULTS,
+    default_scope_required: [...DEFAULTS.default_scope_required],
+    bootstrap_default_apps: {
+      enabled: DEFAULTS.bootstrap_default_apps.enabled,
+      apps: [...DEFAULTS.bootstrap_default_apps.apps],
+    },
   };
 }
 

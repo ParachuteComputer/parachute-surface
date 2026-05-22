@@ -172,6 +172,9 @@ describe("serve — live integration", () => {
       uisDir,
       manifestPath,
       logger: silentLogger,
+      // Default config bootstraps notes-ui; skip in this test — we're
+      // asserting the "empty install" path, not the bootstrap path.
+      skipBootstrap: true,
     });
     try {
       const url = `http://127.0.0.1:${h.server.port}`;

@@ -14,7 +14,8 @@
 
 import pkg from "../package.json" with { type: "json" };
 
-import { buildUisExtraFieldForBoot } from "./admin-routes.ts";
+import { addUiInternal, buildUisExtraFieldForBoot } from "./admin-routes.ts";
+import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
@@ -37,11 +38,24 @@ export * from "./dev-injection.ts";
 export {
   routeAdmin,
   buildUisExtraFieldForBoot,
+  addUiInternal,
   type AdminHandlerOpts,
   type AdminMutableState,
   type AddRequestBody,
+  type AddUiInternalResult,
   type SerializedUi,
 } from "./admin-routes.ts";
+export {
+  maybeBootstrapDefaultApps,
+  type BootstrapOpts,
+  type BootstrapResult,
+  type BootstrapAddFn,
+} from "./bootstrap.ts";
+export {
+  provisionSchemaForUi,
+  type ProvisionSchemaOpts,
+  type ProvisionSchemaResult,
+} from "./provision-schema.ts";
 export { routeDev, type DevRoutesOpts } from "./dev-routes.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
@@ -90,6 +104,18 @@ export type ServeOptions = {
   operatorTokenOverride?: () => string | undefined;
   /** Override the npm-fetch spawner (tests). */
   npmSpawnFn?: import("./npm-fetch.ts").NpmSpawnFn;
+  /**
+   * Skip the first-boot default-app bootstrap (tests + CI). When omitted,
+   * bootstrap runs iff `state.registeredUis.length === 0` AND
+   * `config.bootstrap_default_apps.enabled === true`.
+   */
+  skipBootstrap?: boolean;
+  /**
+   * Return a promise from `serve()` that callers can await to know when
+   * bootstrap is complete (tests). Production `serve()` callers don't
+   * need this; bootstrap is fire-and-forget for the daemon.
+   */
+  awaitBootstrap?: boolean;
 };
 
 export type ServeHandle = {
@@ -101,6 +127,12 @@ export type ServeHandle = {
   state: AppState;
   /** Stop the daemon. */
   stop: () => Promise<void>;
+  /**
+   * Resolves once first-boot bootstrap completes. `undefined` when
+   * bootstrap was skipped (state non-empty or `skipBootstrap: true`).
+   * Tests `await handle.bootstrap` to assert post-bootstrap state.
+   */
+  bootstrap?: Promise<import("./bootstrap.ts").BootstrapResult>;
 };
 
 /**
@@ -172,6 +204,41 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     logger.log(`[app]   ${ui.meta.path} → ${ui.meta.displayName} (${ui.meta.name})`);
   }
 
+  // Phase 2.1 — first-boot default-app bootstrap. Runs only when no UIs
+  // are mounted (fresh install). Best-effort; failures log + continue so
+  // a network blip or unpublished package doesn't prevent daemon
+  // startup.
+  let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
+  if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
+    // Fire-and-forget — daemon doesn't block on bootstrap. The add path
+    // re-scans + swaps state in-place, so subsequent requests pick up
+    // the newly-mounted UIs without a restart. The promise is exposed
+    // on the handle so tests can `await handle.bootstrap`.
+    bootstrapPromise = runBootstrap({
+      config,
+      uisDir: opts.uisDir ?? resolveUisDir(),
+      adminOpts: {
+        state,
+        uisDir: opts.uisDir,
+        manifestPath: opts.manifestPath,
+        fetchFn: opts.fetchFn,
+        operatorTokenOverride: opts.operatorTokenOverride,
+        npmSpawnFn: opts.npmSpawnFn,
+        logger,
+        // Bootstrap's own callsite owns the post-bootstrap selfRegister;
+        // skip the per-add refresh to avoid stamping a stale partial
+        // services.json mid-iteration.
+        skipSelfRegisterRefresh: true,
+      },
+      manifestPath: opts.manifestPath,
+      skipSelfRegister: opts.skipSelfRegister,
+      logger,
+    }).catch((e) => {
+      logger.warn(`[app] bootstrap failed unexpectedly: ${(e as Error).message}`);
+      return { bootstrapped: [], skipped: [], failed: [], skipReason: "exception" };
+    });
+  }
+
   if (!opts.skipSelfRegister) {
     // `server.port` is `number | undefined` per Bun's types (it's undefined
     // when the server uses unix sockets, which we don't here) — fall back to
@@ -192,7 +259,13 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     logger.log("[app] stopped");
   };
 
-  return { config, server, state, stop };
+  return {
+    config,
+    server,
+    state,
+    stop,
+    ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
+  };
 }
 
 /**
@@ -243,6 +316,72 @@ export function setDevMode(
 ): { name: string; enabled: boolean; enabledAt: number } {
   const state = enable ? enableDevMode(name) : disableDevMode(name);
   return { name, enabled: state.enabled, enabledAt: state.enabledAt };
+}
+
+/**
+ * Internal helper — invokes `maybeBootstrapDefaultApps` with a closure
+ * that delegates to `addUiInternal` for each declared default app.
+ * Exported for tests that want to exercise the wiring without going
+ * through the full `serve()` HTTP boot.
+ *
+ * After the bootstrap iteration completes, if any UIs were added, we
+ * call `selfRegister` once so services.json carries the new `uis` map
+ * in a single atomic write (vs the per-add stamps the admin path would
+ * normally do — `skipSelfRegisterRefresh: true` is set on the addOpts).
+ */
+export async function runBootstrap(args: {
+  config: AppConfig;
+  uisDir: string;
+  /** Pre-built admin opts — same shape `routeAdmin` consumes. */
+  adminOpts: import("./admin-routes.ts").AdminHandlerOpts;
+  /** Override the services.json manifest path (tests). */
+  manifestPath?: string;
+  logger?: Pick<Console, "log" | "warn" | "error">;
+  /** Skip post-bootstrap selfRegister (tests). */
+  skipSelfRegister?: boolean;
+}): Promise<import("./bootstrap.ts").BootstrapResult> {
+  const logger = args.logger ?? console;
+  const result = await maybeBootstrapDefaultApps({
+    config: args.config,
+    uisDir: args.uisDir,
+    logger,
+    add: async (spec) => {
+      const outcome = await addUiInternal({ source: spec }, args.adminOpts);
+      if (!outcome.added) {
+        // Surface the underlying error message — best-effort body parse.
+        let detail = `HTTP ${outcome.response.status}`;
+        try {
+          const parsed = (await outcome.response.clone().json()) as {
+            error?: string;
+            message?: string;
+          };
+          detail = parsed.message ?? parsed.error ?? detail;
+        } catch {
+          // ignore
+        }
+        throw new Error(detail);
+      }
+      return { name: outcome.added.meta.name, path: outcome.added.meta.path };
+    },
+  });
+
+  // One-shot post-bootstrap services.json refresh: stamps the full uis
+  // map atomically so hub's per-request discovery sees the bootstrapped
+  // UIs on its next read.
+  if (!args.skipSelfRegister && result.bootstrapped.length > 0) {
+    try {
+      selfRegister({
+        boundPort: 0,
+        installDir: resolveProjectRoot(),
+        manifestPath: args.manifestPath,
+        extraFields: { uis: buildUisExtraFieldForBoot(args.adminOpts.state.registeredUis) },
+        logger,
+      });
+    } catch (e) {
+      logger.warn(`[app] bootstrap: services.json refresh failed: ${(e as Error).message}`);
+    }
+  }
+  return result;
 }
 
 /** Expose canonical resolvers for the bin. */
