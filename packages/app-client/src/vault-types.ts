@@ -69,6 +69,59 @@ export interface TagSummary {
   count: number;
 }
 
+/**
+ * Per-field declaration inside a tag-identity row. Mirrors vault's
+ * `TagFieldSchema` (see `parachute-vault/src/config.ts`). `type` is a
+ * free-form string at the wire level (vault accepts whatever the
+ * operator declared) but in practice the values are `"string" |
+ * "number" | "boolean" | "date" | ...`.
+ */
+export interface TagFieldSchema {
+  type: string;
+  description?: string;
+  enum?: string[];
+}
+
+/**
+ * Payload accepted by `PUT /api/tags/:name` — vault's tag-identity
+ * upsert. Omitted keys preserve prior values; explicit `null` clears
+ * them. The route is idempotent: replaying the same payload against a
+ * vault that already has the tag is a no-op (vault re-writes the same
+ * row).
+ *
+ * `fields` is merge-on-write — vault preserves prior field keys + only
+ * overwrites the ones declared here. To wipe all fields, send
+ * `fields: null` explicitly. See `parachute-vault/src/routes.ts:PUT
+ * /tags/:name` for the canonical merge logic.
+ */
+export interface TagUpsertPayload {
+  description?: string | null;
+  fields?: Record<string, TagFieldSchema> | null;
+  /**
+   * Relationship vocabulary (one-to-one, one-to-many, etc.) — passed
+   * through to vault opaquely. Used by tag-data-model patterns; apps
+   * provisioning their own schema rarely set this.
+   */
+  relationships?: Record<string, unknown> | null;
+  parent_names?: string[] | null;
+}
+
+/**
+ * Tag-identity record returned by `GET /api/tags/:name` and the
+ * envelope `PUT /api/tags/:name` returns on success. Mirrors the
+ * fields vault stamps on the row.
+ */
+export interface TagRecord {
+  name: string;
+  count?: number;
+  description?: string | null;
+  fields?: Record<string, TagFieldSchema> | null;
+  relationships?: Record<string, unknown> | null;
+  parent_names?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface UpdateNotePayload {
   content?: string;
   path?: string;

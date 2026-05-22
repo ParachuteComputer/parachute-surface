@@ -357,3 +357,159 @@ describe("VaultClient — cursor pagination", () => {
     expect(secondUrl).toContain("limit=5");
   });
 });
+
+describe("VaultClient — tag upsert", () => {
+  test("updateTag PUTs to /api/tags/:name with JSON body", async () => {
+    let capturedUrl: string | undefined;
+    let capturedInit: RequestInit | undefined;
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        (url, init) => {
+          capturedUrl = url;
+          capturedInit = init;
+          return jsonRes({
+            name: "capture",
+            description: "Quick captures",
+            fields: { source: { type: "string" } },
+          });
+        },
+      ]),
+    });
+    const out = await c.updateTag("capture", {
+      description: "Quick captures",
+      fields: { source: { type: "string" } },
+    });
+    expect(out.name).toBe("capture");
+    expect(out.fields?.source?.type).toBe("string");
+    expect(capturedUrl).toBe("http://vault.test/api/tags/capture");
+    expect(capturedInit?.method).toBe("PUT");
+    expect(capturedInit?.body).toContain("Quick captures");
+    const headers = new Headers(capturedInit?.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
+  test("updateTag URL-encodes the tag name", async () => {
+    let capturedUrl: string | undefined;
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        (url) => {
+          capturedUrl = url;
+          return jsonRes({ name: "weird tag" });
+        },
+      ]),
+    });
+    await c.updateTag("weird tag", {});
+    expect(capturedUrl).toBe("http://vault.test/api/tags/weird%20tag");
+  });
+
+  test("updateTag is idempotent — second call with same payload re-resolves", async () => {
+    // Vault's PUT is idempotent at the wire level; we exercise that the
+    // client doesn't add client-side caching that would skip the second
+    // call.
+    let callCount = 0;
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        () => {
+          callCount++;
+          return jsonRes({ name: "capture", description: "v1" });
+        },
+        () => {
+          callCount++;
+          return jsonRes({ name: "capture", description: "v1" });
+        },
+      ]),
+    });
+    await c.updateTag("capture", { description: "v1" });
+    await c.updateTag("capture", { description: "v1" });
+    expect(callCount).toBe(2);
+  });
+
+  test("updateTag 401 → onAuthError refresh → retry", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "stale",
+      fetchImpl: makeFetch([
+        () => new Response("denied", { status: 401 }),
+        () => jsonRes({ name: "capture" }),
+      ]),
+      onAuthError: async () => "fresh",
+    });
+    const out = await c.updateTag("capture", { description: "x" });
+    expect(out.name).toBe("capture");
+  });
+
+  test("updateTag bubbles VaultAuthError when onAuthError returns null", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "stale",
+      fetchImpl: makeFetch([
+        () => jsonRes({ error_type: "insufficient_scope", message: "need vault:admin" }, 403),
+      ]),
+    });
+    await expect(c.updateTag("capture", {})).rejects.toBeInstanceOf(VaultAuthError);
+  });
+
+  test("updateTag — explicit null clears the field", async () => {
+    let capturedBody: string | undefined;
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        (_url, init) => {
+          capturedBody = init?.body as string;
+          return jsonRes({ name: "capture" });
+        },
+      ]),
+    });
+    await c.updateTag("capture", { description: null, fields: null });
+    expect(capturedBody).toContain('"description":null');
+    expect(capturedBody).toContain('"fields":null');
+  });
+
+  test("getTag returns the record on 200", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        () =>
+          jsonRes({
+            name: "capture",
+            count: 7,
+            description: "existing",
+            fields: { source: { type: "string" } },
+          }),
+      ]),
+    });
+    const got = await c.getTag("capture");
+    expect(got?.name).toBe("capture");
+    expect(got?.count).toBe(7);
+    expect(got?.fields?.source?.type).toBe("string");
+  });
+
+  test("getTag returns null on 404 (not VaultNotFoundError)", async () => {
+    // Provisioning callers want a clean null so they can branch
+    // "tag missing → create" without try/catch noise.
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => new Response("Not Found", { status: 404 })]),
+    });
+    const got = await c.getTag("nope");
+    expect(got).toBeNull();
+  });
+
+  test("getTag still throws on 5xx (not swallowed by the 404 catch)", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => new Response("oops", { status: 502 })]),
+    });
+    await expect(c.getTag("capture")).rejects.toBeInstanceOf(VaultUnreachableError);
+  });
+});
