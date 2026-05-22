@@ -34,6 +34,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
+import { type AdminHandlerOpts, routeAdmin } from "./admin-routes.ts";
 import { cacheHeadersFor } from "./cache-headers.ts";
 import { type AppConfig, loadConfig } from "./config.ts";
 import type { UiMeta } from "./meta-schema.ts";
@@ -72,6 +73,18 @@ export type HttpServerOpts = {
    * `.parachute/` next to `package.json`. Tests inject a tmpdir.
    */
   parachuteDir?: string;
+  /**
+   * Override the absolute path to the `dist/admin/` directory that holds the
+   * built admin SPA. Tests inject a tmpdir with a fake index.html. Production
+   * resolves to `<package-root>/dist/admin/` via `defaultAdminDir()`.
+   */
+  adminDir?: string;
+  /**
+   * Phase 1.2 admin-route handlers need a couple of side-channel hooks
+   * (tests inject the uis-dir, services.json path, npm-spawn, fetch). The
+   * server exposes them so callers don't have to thread them in by hand.
+   */
+  adminOpts?: Omit<AdminHandlerOpts, "state">;
 };
 
 /**
@@ -85,10 +98,13 @@ export function startHttpServer(opts: HttpServerOpts): ReturnType<typeof Bun.ser
   const parachuteDir = opts.parachuteDir ?? defaultParachuteDir();
   const logger = opts.logger ?? console;
 
+  const adminDir = opts.adminDir ?? defaultAdminDir();
+  const adminOpts = opts.adminOpts ?? {};
   return serve({
     port,
     hostname,
-    fetch: (req) => handle(req, opts.state, { startedAt, parachuteDir, logger }),
+    fetch: (req) =>
+      handle(req, opts.state, { startedAt, parachuteDir, logger, adminDir, adminOpts }),
   });
 }
 
@@ -96,18 +112,14 @@ type HandleCtx = {
   startedAt: Date;
   parachuteDir: string;
   logger: Pick<Console, "log" | "warn" | "error">;
+  adminDir: string;
+  adminOpts: Omit<AdminHandlerOpts, "state">;
 };
 
-function handle(req: Request, state: AppState, ctx: HandleCtx): Response {
+function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promise<Response> {
   const url = new URL(req.url);
   const pathname = url.pathname;
   const method = req.method;
-
-  // Only GETs (and HEADs for static asset probes) for Phase 1.1. Phase 1.2
-  // adds POST/PUT/DELETE for admin endpoints.
-  if (method !== "GET" && method !== "HEAD") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
 
   // /healthz: open, both with and without /app prefix so hub-as-supervisor
   // (forwards via /app) and direct localhost probes both work.
@@ -117,7 +129,10 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response {
   // The JSON key is `skippedUis` (matching the `AppState.skippedUis` field
   // name) per reviewer Open Q 2 — keeps the shape consistent across the
   // wire format and the internal state.
-  if (pathname === "/healthz" || pathname === "/app/healthz") {
+  if (
+    (method === "GET" || method === "HEAD") &&
+    (pathname === "/healthz" || pathname === "/app/healthz")
+  ) {
     return Response.json({
       status: state.config.disabled ? "disabled" : "ok",
       uis: state.registeredUis.length,
@@ -127,25 +142,51 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response {
   }
 
   // .parachute/* — module-protocol surface, open (no secrets in app config).
-  if (pathname === "/.parachute/info") {
+  if (method === "GET" && pathname === "/.parachute/info") {
     return serveStaticFile(path.join(ctx.parachuteDir, "info"), "application/json");
   }
-  if (pathname === "/.parachute/config/schema") {
+  if (method === "GET" && pathname === "/.parachute/config/schema") {
     return serveStaticFile(path.join(ctx.parachuteDir, "config", "schema"), "application/json");
   }
-  if (pathname === "/.parachute/config") {
+  if (method === "GET" && pathname === "/.parachute/config") {
     return Response.json(state.config);
+  }
+
+  // Phase 1.2 admin SPA — mounted at /app/admin/. Reserved namespace: hosted
+  // UIs are rejected from claiming `/app/admin` by `meta-schema` + admin
+  // /app/add. The bundle is `dist/admin/` shipped inside the npm package.
+  // Bundle path serving deliberately runs BEFORE the per-UI matcher so
+  // /app/admin/* always resolves to admin assets, even if a malformed UI
+  // somehow registers `/app/admin` (path-pattern + reserved-path checks
+  // prevent that, but defense-in-depth).
+  if (
+    (method === "GET" || method === "HEAD") &&
+    (pathname === "/app/admin" || pathname === "/app/admin/" || pathname.startsWith("/app/admin/"))
+  ) {
+    return serveAdminAsset(req, ctx.adminDir, pathname);
+  }
+
+  // Phase 1.2 admin endpoints (POST /app/add, DELETE /app/<name>, etc.).
+  const admin = routeAdmin(req, { state, ...ctx.adminOpts });
+  if (admin.handled) {
+    return admin.response;
   }
 
   // Per-UI mount paths. Find the matching UI (longest mount-path wins,
   // though Phase 1.1's PATH_PATTERN constrains mounts to single-segment
   // so there's no overlap in practice — the longest-prefix loop is
   // forward-defensive for Phase 2's multi-segment relaxation).
-  const ui = matchUi(pathname, state.registeredUis);
-  if (ui) {
-    return serveUiAsset(req, ui, pathname);
+  if (method === "GET" || method === "HEAD") {
+    const ui = matchUi(pathname, state.registeredUis);
+    if (ui) {
+      return serveUiAsset(req, ui, pathname);
+    }
   }
 
+  // Fall-through: unknown route for an unsupported method → 405, otherwise 404.
+  if (method !== "GET" && method !== "HEAD" && method !== "POST" && method !== "DELETE") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
   return new Response("Not Found", { status: 404 });
 }
 
@@ -338,6 +379,105 @@ function serveStaticFile(filePath: string, contentType: string): Response {
  */
 function defaultParachuteDir(): string {
   return path.resolve(import.meta.dir, "..", ".parachute");
+}
+
+/**
+ * Default location of the built admin SPA. Shipped via `package.json#files`
+ * (`dist/admin/**`) so `bunx @openparachute/app` resolves it.
+ */
+function defaultAdminDir(): string {
+  return path.resolve(import.meta.dir, "..", "dist", "admin");
+}
+
+/**
+ * Serve a file from the admin SPA's dist directory. Same cache shape Phase 1.1
+ * used for hosted UIs: `index.html` no-cache; hashed assets immutable;
+ * everything else 1-hour. SPA-fallback: anything that doesn't resolve serves
+ * index.html (react-router runs).
+ *
+ * If the admin SPA bundle isn't present (e.g. tests, fresh dev checkout
+ * before `bun run build`), we return a friendly placeholder so operators
+ * see "admin SPA not built" instead of a bare 404. Production npm installs
+ * ship the bundle so this branch is the dev affordance.
+ */
+function serveAdminAsset(req: Request, adminDir: string, pathname: string): Response {
+  const indexHtmlPath = path.join(adminDir, "index.html");
+
+  if (!existsSync(indexHtmlPath)) {
+    // Dev / pre-build branch: return a static placeholder so the operator
+    // sees the daemon is healthy but the bundle isn't shipped yet.
+    return new Response(adminSpaPlaceholder(), {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
+    });
+  }
+
+  // Strip the `/app/admin/` prefix, falling back to index.html on root.
+  if (pathname === "/app/admin" || pathname === "/app/admin/") {
+    return serveAdminFile(req, indexHtmlPath, "index.html");
+  }
+  const rel = pathname.slice("/app/admin/".length);
+  if (rel.includes("\0") || rel.split("/").some((seg) => seg === "..")) {
+    return serveAdminFile(req, indexHtmlPath, "index.html");
+  }
+  const resolved = path.resolve(adminDir, rel);
+  if (resolved !== adminDir && !resolved.startsWith(`${adminDir}${path.sep}`)) {
+    return serveAdminFile(req, indexHtmlPath, "index.html");
+  }
+  if (existsSync(resolved)) {
+    try {
+      const st = statSync(resolved);
+      if (st.isFile()) {
+        return serveAdminFile(req, resolved, path.basename(resolved));
+      }
+    } catch {
+      // race with deletion — SPA fallback
+    }
+  }
+  return serveAdminFile(req, indexHtmlPath, "index.html");
+}
+
+function serveAdminFile(req: Request, filePath: string, filenameForHeaders: string): Response {
+  let body: Buffer;
+  try {
+    body = readFileSync(filePath);
+  } catch (e) {
+    console.warn(`[app] admin serve: ${filePath} unreadable (${(e as Error).message})`);
+    return new Response("Not Found", { status: 404 });
+  }
+  const headers: Record<string, string> = {
+    "content-type": contentTypeFor(filenameForHeaders),
+    // Mirror the hosted-UI policy: index.html → no-cache; everything else
+    // → 1 year + immutable when content-hashed, 1h otherwise. The admin
+    // SPA doesn't have meta.json so we use a `pwa: false`-equivalent shim.
+    ...cacheHeadersFor(filenameForHeaders, {
+      name: "admin",
+      displayName: "Admin",
+      path: "/app/admin",
+      scopes_required: [],
+      pwa: false,
+      public: false,
+    } as UiMeta),
+  };
+  if (req.method === "HEAD") {
+    headers["content-length"] = String(body.length);
+    return new Response(null, { status: 200, headers });
+  }
+  return new Response(body, { status: 200, headers });
+}
+
+/**
+ * Placeholder served when the admin SPA bundle isn't built. The dev
+ * affordance — production installs always ship `dist/admin/`. Keeps the
+ * /app/admin/ route from 404'ing in a fresh checkout.
+ */
+function adminSpaPlaceholder(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>parachute-app admin</title></head>
+<body style="font-family:system-ui;margin:2rem;color:#222;max-width:42rem;">
+  <h1>parachute-app admin</h1>
+  <p>The admin SPA bundle isn't present. Run <code>bun run build</code> from this checkout to build it.</p>
+  <p>API endpoints under <code>/app/list</code>, <code>/app/add</code>, etc. are live; CLI <code>parachute-app list</code> works.</p>
+</body></html>`;
 }
 
 /**

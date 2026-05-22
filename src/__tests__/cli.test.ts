@@ -1,12 +1,16 @@
 /**
  * Tests for `bin/parachute-app.ts` — the CLI surface.
  *
- * Coverage:
- *   - --version prints package.json version
- *   - --help / -h / no-args prints usage referencing Phase 1.1
+ * Phase 1.2 covers:
+ *   - --version / -v print package.json version
+ *   - --help / -h / no-args print usage with the current verb list
  *   - Unknown command exits non-zero
- *   - Phase 1.2 stubs (add/remove/list/reload) report not-yet-implemented
- *   - Phase 1.3 stub (dev) reports not-yet-implemented
+ *   - `add` without source exits non-zero with helpful error
+ *   - `remove` without name exits non-zero with helpful error
+ *   - `reload` without name exits non-zero with helpful error
+ *   - `add`/`remove`/`list`/`reload` against an unreachable daemon report
+ *     friendly connection error
+ *   - `dev` still reports Phase 1.3 not-implemented
  */
 
 import { describe, expect, test } from "bun:test";
@@ -16,10 +20,15 @@ import pkg from "../../package.json" with { type: "json" };
 
 const BIN = path.resolve(import.meta.dir, "..", "..", "bin", "parachute-app.ts");
 
-async function runBin(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+async function runBin(
+  args: string[],
+  envOverrides: Record<string, string> = {},
+): Promise<{ stdout: string; stderr: string; code: number }> {
+  const env = { ...process.env, ...envOverrides };
   const proc = Bun.spawn(["bun", "run", BIN, ...args], {
     stdout: "pipe",
     stderr: "pipe",
+    env,
   });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -27,6 +36,17 @@ async function runBin(args: string[]): Promise<{ stdout: string; stderr: string;
   ]);
   const code = await proc.exited;
   return { stdout, stderr, code };
+}
+
+/**
+ * Localhost port that's guaranteed-not-listening — used to assert the CLI's
+ * unreachable-daemon error path. Picks a high port and assumes nothing's on
+ * it; if a test environment has noise on this port, the test re-rolls.
+ */
+function unreachableBase(): string {
+  // 1 is reserved + privileged-only-bind on most OSes, so connecting to it
+  // is guaranteed to fail. ECONNREFUSED on macOS; ENOTSUP / EACCES on Linux.
+  return "http://127.0.0.1:1";
 }
 
 describe("parachute-app CLI", () => {
@@ -42,12 +62,15 @@ describe("parachute-app CLI", () => {
     expect(r.stdout.trim()).toBe(pkg.version);
   });
 
-  test("--help references Phase 1.1", async () => {
+  test("--help shows the full Phase 1.2 verb list", async () => {
     const r = await runBin(["--help"]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("parachute-app");
-    expect(r.stdout).toContain("Phase 1.1");
     expect(r.stdout).toContain("serve");
+    expect(r.stdout).toContain("add <source>");
+    expect(r.stdout).toContain("remove <name>");
+    expect(r.stdout).toContain("list");
+    expect(r.stdout).toContain("reload <name>");
   });
 
   test("no args prints usage", async () => {
@@ -62,16 +85,28 @@ describe("parachute-app CLI", () => {
     expect(r.stderr).toContain("Unknown command");
   });
 
-  test("add reports Phase 1.2 stub", async () => {
-    const r = await runBin(["add"]);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("Phase 1.2");
+  test("add without source exits non-zero", async () => {
+    const r = await runBin(["add"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("source");
   });
 
-  test("list reports Phase 1.2 stub", async () => {
-    const r = await runBin(["list"]);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("Phase 1.2");
+  test("remove without name exits non-zero", async () => {
+    const r = await runBin(["remove"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("name");
+  });
+
+  test("reload without name exits non-zero", async () => {
+    const r = await runBin(["reload"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("name");
+  });
+
+  test("list against unreachable daemon reports friendly error", async () => {
+    const r = await runBin(["list"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("daemon");
   });
 
   test("dev reports Phase 1.3 stub", async () => {

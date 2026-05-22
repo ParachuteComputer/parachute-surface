@@ -366,20 +366,34 @@ describe("HTTP — 404 + 405", () => {
     }
   });
 
-  test("405 on POST", async () => {
+  test("POST to a non-admin route returns 404", async () => {
+    // Phase 1.2 opened POST/DELETE for admin endpoints. Non-admin paths still
+    // fall through to 404 — the prior 405 shape only fit when no method ever
+    // matched a write.
     const srv = startServer(makeState([]));
     try {
       const r = await fetch(`${srv.url}/healthz`, { method: "POST" });
-      expect(r.status).toBe(405);
+      expect(r.status).toBe(404);
     } finally {
       srv.stop();
     }
   });
 
-  test("405 on DELETE", async () => {
+  test("DELETE to a non-admin route returns 404", async () => {
+    // /not-an-app/x doesn't match the `/app/<name>` admin DELETE regex.
     const srv = startServer(makeState([]));
     try {
-      const r = await fetch(`${srv.url}/app/healthz`, { method: "DELETE" });
+      const r = await fetch(`${srv.url}/not-an-app/something`, { method: "DELETE" });
+      expect(r.status).toBe(404);
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("PATCH (unsupported method) returns 405", async () => {
+    const srv = startServer(makeState([]));
+    try {
+      const r = await fetch(`${srv.url}/app/healthz`, { method: "PATCH" });
       expect(r.status).toBe(405);
     } finally {
       srv.stop();

@@ -1,5 +1,112 @@
 # Changelog
 
+## [0.1.0-rc.3] - 2026-05-22
+
+feat(app): Phase 1.2 — admin endpoints + DCR + npm-fetch + Vite+React admin SPA.
+
+Phase 1.2 takes the bundled-UI-host daemon from "operator manually drops
+dist/ into uis/" to "operator runs `parachute-app add <source>` and the
+daemon handles copy + DCR + re-scan." Adds the admin HTTP surface, the
+Dynamic Client Registration call to hub, an npm-fetch shorthand for
+sourcing UIs by package specifier, and a Vite + React admin SPA mounted
+at `/app/admin/`.
+
+### Added
+
+- `src/auth.ts` — hub-JWT validation via `@openparachute/scope-guard@^0.3.0`.
+  Audience `app`; scopes `app:read` (list/info) and `app:admin` (add/remove/
+  reload). `enforceScope` mirrors runner's pattern; `hasReadAccess` lets
+  admin imply read.
+- `src/operator-token.ts` — operator bearer sourcing for outbound DCR
+  calls. Priority: `PARACHUTE_HUB_TOKEN` env > `~/.parachute/operator.token`
+  file (chmod 0o600 required on Unix). Missing token returns undefined; the
+  caller decides whether that's fatal.
+- `src/dcr.ts` — RFC 7591 Dynamic Client Registration with hub. Sends
+  `client_name`, `redirect_uris` (`/app/<name>/` + `/app/<name>/oauth-callback`),
+  `scope` (joined), `token_endpoint_auth_method: "none"`, `grant_types:
+  ["authorization_code"]`, `response_types: ["code"]`. Persists the returned
+  `client_id` to `~/.parachute/app/uis/<name>/.oauth-client.json` (chmod 0o600).
+  Surfaces hub errors as a typed `DcrError` (status: hub_unreachable /
+  hub_rejected / invalid_response). Best-effort `DELETE /oauth/clients/<id>`
+  on remove; tolerates 404/405 (RFC 7592 not universally implemented yet).
+- `src/npm-fetch.ts` — `bun add <spec>` into a `/tmp/parachute-app-staging-*`
+  dir, then copies `node_modules/<pkg>/dist/` into the UI's home. Distinguishes
+  404 / network / generic errors by sniffing stderr. Cleanup always runs.
+  Supports plain names, scoped names, and `@version` tails.
+- `src/admin-routes.ts` — the Phase 1.2 admin endpoints:
+  - `GET /app/list` (`app:read`) — serialized UI summaries + skipped list
+  - `POST /app/add` (`app:admin`) — accepts local path OR npm spec; copies
+    bundle + writes meta.json + (optionally) fires DCR + re-scans
+  - `DELETE /app/<name>` (`app:admin`) — revokes OAuth + removes dir +
+    re-scans
+  - `POST /app/<name>/reload` (`app:admin`) — re-scans without daemon restart
+  - `GET /app/<name>/info` (`app:read`) — full info: meta + oauth + paths
+  - `GET /app/<name>/oauth-client` — UNAUTHENTICATED — returns
+    `{client_id, hub_url, scope, redirect_uris}` for the UI to use at boot
+  - Auto-rejects `/app/admin` as a reserved mount path.
+  - Validates name + path patterns; rejects collisions with 409.
+  - After every mutation: re-runs `scanUis()` + refreshes `services.json`
+    with the per-UI `uis` map (design doc section 12 shape).
+- `src/http-server.ts` — wires the admin routes into the existing Bun.serve
+  handler. POST/DELETE now flow through the admin matcher; non-admin POST/
+  DELETE returns 404 (was 405). Unknown methods still return 405. New
+  `/app/admin/[*]` static mount serves the built SPA from `dist/admin/`;
+  falls back to a dev-time placeholder when the bundle is absent.
+- `web/admin/` — Vite + React + TypeScript admin SPA. React 19, react-router
+  7. Routes: `/` (Modules), `/add` (Add UI form), `/info/:name`. Auth via
+  `localStorage["parachute_operator_token"]` (Phase 1.3 wires hub-session
+  auth). Builds to root `dist/admin/`. Per-UI Reload + Remove buttons hit
+  the live admin endpoints. Skipped UIs surface inline with their failure
+  reason.
+- `bin/parachute-app.ts` — `add`, `remove`, `list`, `reload` verbs are no
+  longer stubs. Each calls the local daemon's admin endpoints over HTTP
+  (`PARACHUTE_APP_URL` env overrides). Sources the operator bearer via the
+  same `readOperatorToken` the daemon uses.
+- Tests:
+  - `src/__tests__/auth.test.ts` — bearer extraction, scope checks,
+    `validateBearer` 401 paths, `getHubOrigin` resolution
+  - `src/__tests__/operator-token.test.ts` — env vs file priority, mode
+    0o600 defense
+  - `src/__tests__/dcr.test.ts` — DCR request shape, operator-bearer
+    forwarding, hub-error surfacing, file persistence + revocation
+  - `src/__tests__/npm-fetch.test.ts` — spec parsing, fake-bun-add
+    integration, error-code mapping
+  - `src/__tests__/admin-routes.test.ts` — auth gates + full happy paths
+    with the `enforceScopeFn` test seam
+  - `src/__tests__/admin-integration.test.ts` — end-to-end add/delete/
+    reload through Bun.serve
+  - `web/admin/src/lib/api.test.ts` — api.ts wrapper coverage
+  - `web/admin/src/routes/Modules.test.tsx` — list view, error banner,
+    Reload + Remove button flows
+  - `web/admin/src/routes/Add.test.tsx` — form submission shape + success
+    rendering
+  - `web/admin/src/App.test.tsx` — shell + token banner
+
+### Changed
+
+- Bumped to `0.1.0-rc.3`. `.parachute/info` capabilities now include
+  `admin-spa`.
+- `bin/parachute-app.ts` help text reflects the live `add`/`remove`/`list`/
+  `reload` verbs.
+- `src/http-server.ts` 405 policy: POST/DELETE no longer return 405 globally;
+  they flow to admin routes and fall through to 404 when no admin route
+  matches. PATCH and other unhandled methods still return 405.
+- `package.json#files` now includes `dist/admin/**` so the npm-published
+  bundle ships the admin SPA. Added `build` / `test:admin` / `typecheck:all`
+  scripts coordinating root + web/admin.
+- `package.json` now depends on `@openparachute/scope-guard@^0.3.0` for
+  hub-JWT validation.
+
+### Verified
+
+- `bun test ./src` → 213 pass / 0 fail (was 117).
+- `cd web/admin && bun run test` → 21 pass / 0 fail.
+- `bun run typecheck` → clean (root + web/admin).
+- `bunx biome check .` → clean.
+- `cd web/admin && bun run build` → `dist/admin/` populated.
+- `bin/parachute-app.ts --version` → 0.1.0-rc.3.
+- `bin/parachute-app.ts --help` → shows full Phase 1.2 verb list.
+
 ## [0.1.0-rc.2] - 2026-05-22
 
 feat(app): Phase 1.1 — core UI hosting with smart cache headers + PWA opt-in.
