@@ -23,13 +23,13 @@
     },
     "packages/app-host": {
       "name": "@openparachute/app",
-      "version": "0.2.0-rc.3",
+      "version": "0.2.0-rc.4",
       "bin": {
         "parachute-app": "bin/parachute-app.ts",
       },
       "dependencies": {
-        "@openparachute/app-client": "workspace:*",
-        "@openparachute/scope-guard": "^0.3.0",
+        "@openparachute/app-client": "^0.1.0-rc.3",
+        "@openparachute/scope-guard": "^0.4.0-rc.1",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -207,7 +207,7 @@
 
     "@openparachute/app-client": ["@openparachute/app-client@workspace:packages/app-client"],
 
-    "@openparachute/scope-guard": ["@openparachute/scope-guard@0.3.0", "", { "dependencies": { "jose": "^6.2.2" }, "peerDependencies": { "typescript": "^5" } }, "sha512-3ZDgPGEeC5YDmXcZmby2+Kq8g7DozYNEQdfMMquGWEZ5h9aea4DmW1zbJ13XyeMT7U1GoXmHze4Ujjy5fz0GGg=="],
+    "@openparachute/scope-guard": ["@openparachute/scope-guard@0.4.0-rc.1", "", { "dependencies": { "jose": "^6.2.2" }, "peerDependencies": { "typescript": "^5" } }, "sha512-tN0vMTIgG5OfbbDnFHcXxhH3ULrBFM5Yzc9Xp2f81LGHc4xmFGabYA8gTAk9eNcY810k2zEaOTKypYsRNcxC0g=="],
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 

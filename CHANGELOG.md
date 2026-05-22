@@ -9,6 +9,53 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.4] - 2026-05-22
+
+fix(app): resolve workspace deps in published manifest (`workspace:*`
+→ `^0.1.0-rc.3`). Bumps `@openparachute/scope-guard` floor to
+`^0.4.0-rc.1` to pick up hub#322 jti hardening at scope-guard's
+matching rc.
+
+### Root cause
+
+The published tarball for `@openparachute/app@0.2.0-rc.3` carried
+`"@openparachute/app-client": "workspace:*"` in its manifest. npm
+does NOT rewrite `workspace:*` at publish time (Bun does, but the
+publish path we use can't depend on Bun being the publisher).
+Anyone installing `@openparachute/app@0.2.0-rc.3` from npm gets:
+
+```
+error: @openparachute/app-client@workspace:* failed to resolve
+```
+
+### Fix
+
+`packages/app-host/package.json` now pins
+`"@openparachute/app-client": "^0.1.0-rc.3"` as a concrete semver.
+Local-dev workspace resolution still finds the sibling package
+(Bun resolves `^0.1.0-rc.3` against the workspace before falling
+back to the registry), so the dev loop is unchanged. The published
+tarball now declares a real, resolvable npm dependency.
+
+Same applies to scope-guard — bumped from `^0.3.0` to `^0.4.0-rc.1`
+so app is hardened against the jti-replay vector hub#322 closed.
+
+### Verified
+
+- `npm pack --dry-run` from `packages/app-host/` — manifest
+  dependencies block contains only concrete semver, no
+  `workspace:` / `link:` strings.
+- `bun install` from repo root — succeeds, lockfile updates.
+- `bun run typecheck:all` — clean.
+- `bun test` — all suites pass (no behavior change).
+
+### RELEASING.md
+
+The repo's `RELEASING.md` grows a new "Workspace dependencies"
+section explaining the gotcha + the rule (concrete semver in any
+package.json that gets published; never `workspace:*` or `link:`)
+so this doesn't recur.
+
 ## [app-client 0.1.0-rc.3] - 2026-05-22
 
 feat(app-client): lift `VaultClient.request` /
