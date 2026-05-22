@@ -9,6 +9,120 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.3] + [app-client 0.1.0-rc.2] - 2026-05-22
+
+feat(app): Phase 3.0 — file watcher + auto-rebuild for dev mode
+(closes the operator UX loop Phase 1.3 left half-open).
+
+Phase 1.3 (`0.2.0-rc.1`) shipped dev mode with the manual `parachute-app
+dev <name> --trigger` to broadcast reload. The operator still had to
+hand-fire the trigger (or rebuild a watched `dist/`) after every edit.
+Phase 3.0 wires a per-UI file watcher so any edit under the UI's
+source tree (a) optionally re-runs an operator-declared `dev_build_cmd`
+to produce a fresh bundle, then (b) broadcasts a `reload` event to
+every connected SSE subscriber — no manual `--trigger` needed.
+
+Reference: [design doc Section 18](https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-apps-design.md#18-caching--reload-strategy).
+
+### meta.json — three new optional fields — `@openparachute/app` 0.2.0-rc.3
+
+```json
+{
+  "dev_watch_dir": "../src",
+  "dev_build_cmd": "bun run build",
+  "dev_debounce_ms": 250
+}
+```
+
+- `dev_watch_dir` — path (relative to the UI's root dir) the watcher
+  monitors recursively. Default: the UI's root dir; the watcher filter
+  drops events inside `dist/`, `node_modules/`, and `.git/` so the
+  build-output loop doesn't reload-thrash.
+- `dev_build_cmd` — shell command run on each debounced batch via
+  `Bun.spawn(["sh", "-c", cmd], { cwd: uiRootDir })`. Absent → the
+  watcher broadcasts a reload directly (operator builds manually).
+- `dev_debounce_ms` — debounce window for batched file events. Default
+  250ms; floor 50ms. Build tools that touch many files in quick
+  succession (esbuild, Vite, tsc --watch) produce one reload per
+  quiet-window, not one per file.
+
+The schema validator rejects empty strings, non-integer debounce, and
+debounce values below the 50ms floor.
+
+### `src/dev-watcher.ts` — new module — `@openparachute/app` 0.2.0-rc.3
+
+`startWatcher({ name, uiRootDir, watchDir?, buildCmd?, debounceMs?,
+spawnFn?, logger? })` arms a per-UI recursive file watcher using
+`node:fs.watch(..., { recursive: true })` (works out-of-the-box on
+macOS via FSEvents + Linux via inotify). The watcher:
+
+- **Debounces** file events into one reload per quiet window.
+- **Single-flights** the build per UI: if a build is already running
+  when the next batch lands, marks `rerunPending` and re-runs once the
+  current build finishes — never two builds in parallel for the same
+  UI (that race is a reliable way to corrupt `dist/`).
+- **Aborts hanging builds at 60s** via an `AbortController` wired into
+  the spawn signal hook.
+- **Falls through gracefully** on build failure: logs stdout/stderr
+  (truncated to 4KB), does NOT broadcast reload, leaves the watch
+  armed so the next edit retries.
+- **Filters** events from `dist/`, `node_modules/`, and `.git/`, plus
+  common editor turds (`.#foo`, `foo~`), to keep the watcher quiet on
+  the build's own output.
+
+`stopWatcher(name)` cancels pending timers, aborts in-flight builds,
+and closes the FSWatcher — idempotent. `stopAllWatchers()` is the
+shutdown reaper wired into `serve().stop()` so a daemon SIGINT cleans
+up FSEvents subscriptions.
+
+### dev-routes wiring — `@openparachute/app` 0.2.0-rc.3
+
+`POST /app/<name>/dev/enable` now arms the watcher with the UI's
+`uiDir` + meta `dev_watch_dir` / `dev_build_cmd` / `dev_debounce_ms`,
+and the response carries a `watcher` field surfacing the resolved
+absolute watch dir, debounce, and build cmd (or a `warning` when the
+watcher couldn't start — e.g. a missing `dev_watch_dir`). The
+operator-facing flow becomes:
+
+```
+1. parachute-app dev gitcoin-brain
+2. Edit ~/Gitcoin/gitcoin-brain-ui/src/something.tsx
+3. apps detects change, runs `bun run build`, broadcasts reload
+4. Browser tab refreshes automatically
+```
+
+`POST /app/<name>/dev/disable` tears down the watcher. The manual
+`--trigger` still works as a fallback when an operator wants to
+re-fire a reload without an actual file change.
+
+The status / list endpoints (`GET /app/<name>/dev`, `GET
+/app/dev/list`) now report watcher state per UI: `watching`,
+`watchDir`, `debounceMs`, `buildCmd`, `building`. Admin SPA renders
+"watching …/<dir>" sub-text on the Dev ON badge.
+
+### CLI — `parachute-app` 0.2.0-rc.3
+
+`parachute-app dev <name>` now prints the watcher state in the
+post-enable summary — operator sees the resolved watch dir, debounce,
+and (when configured) the build command on the same line they enabled
+dev mode. `parachute-app dev list` adds a second line per UI showing
+the watch dir + build command.
+
+### Tests — 30 new
+
+- `dev-watcher.test.ts` — 17 new tests covering: idempotent restart;
+  debounce floor; default + custom watch dirs; rapid changes batched
+  to one broadcast; dist/ + node_modules/ filtering; build success →
+  reload; build failure → no reload; single-flight + rerun-pending;
+  stopWatcher cancels pending timers; `watcherStatus` snapshot shape;
+  integration with `broadcastReload`.
+- `dev-routes.test.ts` — 5 new tests covering enable wiring,
+  warning surfacing, disable teardown, status + list watcher reporting.
+- `meta-schema.test.ts` — 8 new tests for the three new fields +
+  schema-JSON surface.
+
+Test counts: 355 host tests (was 325), 90 client tests unchanged.
+
 ## [app 0.2.0-rc.2] + [app-client 0.1.0-rc.2] - 2026-05-22
 
 feat(app): Phase 2.1 — bootstrap default Notes UI on first boot +
