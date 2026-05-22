@@ -18,7 +18,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import type { AppConfig } from "../config.ts";
 import { isDevMode, resetDevMode, subscriberCount } from "../dev-mode.ts";
-import { type DevRoutesOpts, routeDev } from "../dev-routes.ts";
+import { type DevRoutesOpts, type DevWatcherFns, routeDev } from "../dev-routes.ts";
+import { DevWatcherError } from "../dev-watcher.ts";
 import type { RegisteredUi } from "../ui-registry.ts";
 
 function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -56,6 +57,53 @@ const allowAll: DevRoutesOpts["enforceScopeFn"] = async (_req, scope) => ({
 });
 const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
 
+/**
+ * Fake watcherFns recording calls — keeps dev-routes tests from arming a
+ * real FSWatcher (and the per-platform flakiness that would imply).
+ */
+function makeFakeWatcherFns(overrides: Partial<DevWatcherFns> = {}): DevWatcherFns & {
+  startCalls: Array<{ name: string; uiRootDir: string; buildCmd?: string; watchDir?: string }>;
+  stopCalls: string[];
+  watching: Set<string>;
+} {
+  const startCalls: Array<{
+    name: string;
+    uiRootDir: string;
+    buildCmd?: string;
+    watchDir?: string;
+  }> = [];
+  const stopCalls: string[] = [];
+  const watching = new Set<string>();
+  const fns: DevWatcherFns = {
+    startWatcher: (o) => {
+      startCalls.push({
+        name: o.name,
+        uiRootDir: o.uiRootDir,
+        buildCmd: o.buildCmd,
+        watchDir: o.watchDir,
+      });
+      watching.add(o.name);
+      return { watchedAbsDir: o.uiRootDir, debounceMs: 250 };
+    },
+    stopWatcher: (name) => {
+      stopCalls.push(name);
+      watching.delete(name);
+    },
+    isWatching: (name) => watching.has(name),
+    watcherStatus: (name) =>
+      watching.has(name)
+        ? {
+            name,
+            watchedAbsDir: `/tmp/${name}`,
+            debounceMs: 250,
+            building: false,
+          }
+        : undefined,
+    ...overrides,
+  };
+  return Object.assign(fns, { startCalls, stopCalls, watching });
+}
+
 function makeOpts(overrides: Partial<DevRoutesOpts> = {}): DevRoutesOpts {
   return {
     state: {
@@ -64,6 +112,7 @@ function makeOpts(overrides: Partial<DevRoutesOpts> = {}): DevRoutesOpts {
     },
     enforceScopeFn: allowAll,
     logger: silentLogger,
+    watcherFns: makeFakeWatcherFns(),
     ...overrides,
   };
 }
@@ -233,6 +282,93 @@ describe("dev-routes — SSE stream", () => {
     await dispatch(new Request("http://x/app/notes/dev/disable", { method: "POST" }), makeOpts());
     expect(subscriberCount("notes")).toBe(0);
     await res.body!.cancel();
+  });
+});
+
+describe("dev-routes — Phase 3.0 watcher wiring", () => {
+  test("enable starts the watcher with the UI's root + meta dev_* fields", async () => {
+    const watcherFns = makeFakeWatcherFns();
+    const ui = makeUi("notes");
+    ui.meta.dev_watch_dir = "src";
+    ui.meta.dev_build_cmd = "bun run build";
+    const opts = makeOpts({
+      state: { config: makeConfig(), registeredUis: [ui] },
+      watcherFns,
+    });
+    const res = await dispatch(
+      new Request("http://x/app/notes/dev/enable", { method: "POST" }),
+      opts,
+    );
+    expect(res.status).toBe(200);
+    expect(watcherFns.startCalls.length).toBe(1);
+    expect(watcherFns.startCalls[0]).toMatchObject({
+      name: "notes",
+      uiRootDir: "/tmp/notes",
+      watchDir: "src",
+      buildCmd: "bun run build",
+    });
+    const body = (await res.json()) as {
+      watcher: { watching: boolean; watchDir: string; debounceMs: number; buildCmd: string | null };
+    };
+    expect(body.watcher.watching).toBe(true);
+    expect(body.watcher.buildCmd).toBe("bun run build");
+  });
+
+  test("enable surfaces a watcher warning when startWatcher throws DevWatcherError", async () => {
+    const watcherFns = makeFakeWatcherFns({
+      startWatcher: () => {
+        throw new DevWatcherError("watch dir does not exist: /tmp/foo", "watch_dir_missing");
+      },
+    });
+    const opts = makeOpts({ watcherFns });
+    const res = await dispatch(
+      new Request("http://x/app/notes/dev/enable", { method: "POST" }),
+      opts,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      enabled: boolean;
+      watcher: { watching: boolean; warning?: string };
+    };
+    // Dev mode still flipped on — the watcher is best-effort.
+    expect(body.enabled).toBe(true);
+    expect(body.watcher.watching).toBe(false);
+    expect(body.watcher.warning).toContain("watch dir does not exist");
+  });
+
+  test("disable stops the watcher", async () => {
+    const watcherFns = makeFakeWatcherFns();
+    const opts = makeOpts({ watcherFns });
+    await dispatch(new Request("http://x/app/notes/dev/enable", { method: "POST" }), opts);
+    expect(watcherFns.watching.has("notes")).toBe(true);
+    await dispatch(new Request("http://x/app/notes/dev/disable", { method: "POST" }), opts);
+    expect(watcherFns.stopCalls).toContain("notes");
+    expect(watcherFns.watching.has("notes")).toBe(false);
+  });
+
+  test("status endpoint surfaces watcher info", async () => {
+    const watcherFns = makeFakeWatcherFns();
+    const opts = makeOpts({ watcherFns });
+    await dispatch(new Request("http://x/app/notes/dev/enable", { method: "POST" }), opts);
+    const res = await dispatch(new Request("http://x/app/notes/dev"), opts);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      watcher: { watching: boolean; watchDir?: string };
+    };
+    expect(body.watcher.watching).toBe(true);
+    expect(body.watcher.watchDir).toBe("/tmp/notes");
+  });
+
+  test("list endpoint reports watcher info per UI", async () => {
+    const watcherFns = makeFakeWatcherFns();
+    const opts = makeOpts({ watcherFns });
+    await dispatch(new Request("http://x/app/notes/dev/enable", { method: "POST" }), opts);
+    const res = await dispatch(new Request("http://x/app/dev/list"), opts);
+    const body = (await res.json()) as {
+      uis: Array<{ name: string; watcher?: { watching: boolean } }>;
+    };
+    expect(body.uis.length).toBe(1);
+    expect(body.uis[0]?.watcher?.watching).toBe(true);
   });
 });
 

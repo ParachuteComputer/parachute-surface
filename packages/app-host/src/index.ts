@@ -18,6 +18,7 @@ import { addUiInternal, buildUisExtraFieldForBoot } from "./admin-routes.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
+import { stopAllWatchers } from "./dev-watcher.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { scanUis } from "./ui-registry.ts";
@@ -35,6 +36,7 @@ export * from "./dcr.ts";
 export * from "./npm-fetch.ts";
 export * from "./dev-mode.ts";
 export * from "./dev-injection.ts";
+export * from "./dev-watcher.ts";
 export {
   routeAdmin,
   buildUisExtraFieldForBoot,
@@ -255,6 +257,10 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
 
   const stop = async () => {
     logger.log("[app] shutting down");
+    // Tear down any dev-mode file watchers so the process exits cleanly.
+    // The watcher slots own AbortControllers + FSWatchers; without this
+    // the daemon can hang on shutdown until the FSEvents stream closes.
+    stopAllWatchers();
     server.stop();
     logger.log("[app] stopped");
   };

@@ -40,8 +40,38 @@ import {
   removeSubscriber,
   subscriberCount,
 } from "./dev-mode.ts";
+import {
+  type DevSpawnFn,
+  DevWatcherError,
+  startWatcher as defaultStartWatcher,
+  stopWatcher as defaultStopWatcher,
+  watcherStatus as defaultWatcherStatus,
+  isWatching,
+} from "./dev-watcher.ts";
 
 import type { AppState } from "./http-server.ts";
+
+/**
+ * Pluggable façade over the dev-watcher module so tests can swap in
+ * fakes without forking shells or arming real FSWatchers. Production
+ * code uses the defaults from `./dev-watcher.ts` directly.
+ */
+export type DevWatcherFns = {
+  startWatcher: (opts: Parameters<typeof defaultStartWatcher>[0]) => {
+    watchedAbsDir: string;
+    debounceMs: number;
+  };
+  stopWatcher: (name: string) => void;
+  isWatching: (name: string) => boolean;
+  watcherStatus: (name: string) => ReturnType<typeof defaultWatcherStatus>;
+};
+
+const DEFAULT_WATCHER_FNS: DevWatcherFns = {
+  startWatcher: defaultStartWatcher,
+  stopWatcher: defaultStopWatcher,
+  isWatching,
+  watcherStatus: defaultWatcherStatus,
+};
 
 export type DevRoutesOpts = {
   state: Pick<AppState, "config" | "registeredUis">;
@@ -50,6 +80,18 @@ export type DevRoutesOpts = {
     req: Request,
     requiredScope: typeof SCOPE_ADMIN | typeof SCOPE_READ,
   ) => Promise<Response | { scopes: readonly string[] }>;
+  /**
+   * Test-only seam: replace the dev-watcher module functions. When
+   * omitted, the real `./dev-watcher.ts` exports are used so the
+   * production daemon arms a real FSWatcher on enable.
+   */
+  watcherFns?: DevWatcherFns;
+  /**
+   * Phase 3.0 — override the build-command spawner (tests). Forwarded
+   * to `startWatcher` so a test can assert on the spawn argv without
+   * actually shelling out.
+   */
+  watcherSpawnFn?: DevSpawnFn;
   /** Logger override; default console. */
   logger?: Pick<Console, "log" | "warn" | "error">;
 };
@@ -127,12 +169,25 @@ function notFoundJson(name: string): Response {
 async function handleList(req: Request, opts: DevRoutesOpts): Promise<Response> {
   const auth = await runEnforce(req, SCOPE_READ, opts);
   if (auth instanceof Response) return auth;
-  const active = listDevMode().map(({ name, state }) => ({
-    name,
-    enabled: state.enabled,
-    enabledAt: state.enabledAt,
-    subscribers: subscriberCount(name),
-  }));
+  const watcherFns = opts.watcherFns ?? DEFAULT_WATCHER_FNS;
+  const active = listDevMode().map(({ name, state }) => {
+    const ws = watcherFns.watcherStatus(name);
+    return {
+      name,
+      enabled: state.enabled,
+      enabledAt: state.enabledAt,
+      subscribers: subscriberCount(name),
+      watcher: ws
+        ? {
+            watching: true,
+            watchDir: ws.watchedAbsDir,
+            debounceMs: ws.debounceMs,
+            buildCmd: ws.buildCmd ?? null,
+            building: ws.building,
+          }
+        : { watching: false },
+    };
+  });
   return Response.json({ uis: active });
 }
 
@@ -144,11 +199,22 @@ async function handleStatus(req: Request, name: string, opts: DevRoutesOpts): Pr
   const ui = findUi(name, opts);
   if (!ui) return notFoundJson(name);
   const state = getDevMode(name);
+  const watcherFns = opts.watcherFns ?? DEFAULT_WATCHER_FNS;
+  const ws = watcherFns.watcherStatus(name);
   return Response.json({
     name,
     enabled: state.enabled,
     enabledAt: state.enabledAt,
     subscribers: subscriberCount(name),
+    watcher: ws
+      ? {
+          watching: true,
+          watchDir: ws.watchedAbsDir,
+          debounceMs: ws.debounceMs,
+          buildCmd: ws.buildCmd ?? null,
+          building: ws.building,
+        }
+      : { watching: false },
   });
 }
 
@@ -174,13 +240,53 @@ async function handleEnable(req: Request, name: string, opts: DevRoutesOpts): Pr
   if (!ui) return notFoundJson(name);
 
   const state = enableDevMode(name);
-  opts.logger?.log(`[app] dev mode ON for ${name}`);
+
+  // Phase 3.0 — arm the file watcher. Best-effort: a watcher failure
+  // doesn't unwind dev mode (the operator can still use `--trigger`),
+  // but we surface the reason in the response so the admin SPA / CLI
+  // can show it. `meta.dev_watch_dir` is the operator override; absent,
+  // we default to the UI's root dir (the watcher filters dist/ +
+  // node_modules/ to avoid the build-output loop).
+  const watcherFns = opts.watcherFns ?? DEFAULT_WATCHER_FNS;
+  let watcher: { watchedAbsDir: string; debounceMs: number } | undefined;
+  let watcherWarning: string | undefined;
+  try {
+    watcher = watcherFns.startWatcher({
+      name,
+      uiRootDir: ui.uiDir,
+      watchDir: ui.meta.dev_watch_dir,
+      buildCmd: ui.meta.dev_build_cmd,
+      debounceMs: ui.meta.dev_debounce_ms,
+      spawnFn: opts.watcherSpawnFn,
+      logger: opts.logger,
+    });
+  } catch (e) {
+    if (e instanceof DevWatcherError) {
+      watcherWarning = e.message;
+      opts.logger?.warn(`[app] dev-watcher: failed to start for ${name}: ${e.message}`);
+    } else {
+      watcherWarning = `unexpected error starting watcher: ${(e as Error).message}`;
+      opts.logger?.warn(`[app] dev-watcher: ${watcherWarning}`);
+    }
+  }
+
+  opts.logger?.log(
+    `[app] dev mode ON for ${name}${watcher ? ` (watching ${watcher.watchedAbsDir})` : ""}`,
+  );
   return Response.json({
     ok: true,
     name,
     enabled: state.enabled,
     enabledAt: state.enabledAt,
     subscribers: subscriberCount(name),
+    watcher: watcher
+      ? {
+          watching: true,
+          watchDir: watcher.watchedAbsDir,
+          debounceMs: watcher.debounceMs,
+          buildCmd: ui.meta.dev_build_cmd ?? null,
+        }
+      : { watching: false, warning: watcherWarning ?? "watcher_unavailable" },
   });
 }
 
@@ -193,6 +299,9 @@ async function handleDisable(req: Request, name: string, opts: DevRoutesOpts): P
   // state cleaned up, and the in-memory map may have a stale entry.
   const before = isDevMode(name);
   disableDevMode(name);
+  // Phase 3.0 — tear down the file watcher (idempotent; no-op if absent).
+  const watcherFns = opts.watcherFns ?? DEFAULT_WATCHER_FNS;
+  watcherFns.stopWatcher(name);
   opts.logger?.log(`[app] dev mode OFF for ${name}${before ? "" : " (was already off)"}`);
   return Response.json({ ok: true, name, enabled: false, was_on: before });
 }

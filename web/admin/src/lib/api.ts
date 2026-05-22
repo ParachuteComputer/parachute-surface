@@ -187,11 +187,28 @@ export function provisionSchema(name: string): Promise<ProvisionSchemaResponse> 
 
 // --- Phase 1.3: dev mode ------------------------------------------------
 
+/**
+ * Phase 3.0 — dev-mode watcher status surfaced alongside the existing
+ * Phase 1.3 dev state. When `watching: false`, the optional `warning`
+ * carries the start-time failure reason for the admin SPA to render.
+ */
+export type DevWatcherInfo =
+  | {
+      watching: true;
+      watchDir: string;
+      debounceMs: number;
+      buildCmd: string | null;
+      building?: boolean;
+    }
+  | { watching: false; warning?: string };
+
 export type DevModeStatus = {
   name: string;
   enabled: boolean;
   enabledAt: number;
   subscribers: number;
+  /** Phase 3.0 — watcher diagnostics. May be missing on older daemons. */
+  watcher?: DevWatcherInfo;
 };
 
 export type DevListResponse = {
