@@ -1,30 +1,54 @@
 /**
  * Modules — list of installed UIs.
  *
- * Each row shows displayName, mount path, version, scopes, and OAuth client
- * state. Per-row actions: Reload (re-scan from disk), Remove (delete + revoke).
- * A skipped/invalid UI surfaces with its reason inline.
+ * Each row shows displayName, mount path, version, scopes, OAuth client
+ * state, and dev-mode status (Phase 1.3). Per-row actions: Reload (re-scan
+ * from disk), Remove (delete + revoke), and the dev-mode triad — Enable
+ * dev / Disable dev / Trigger reload. The dev-status map is fetched in
+ * parallel with the UI list and re-fetched on every refresh; a row shows
+ * a "Dev" badge when the UI's name is in the active set.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { type ListResponse, formatError, listUis, reloadUi, removeUi } from "../lib/api.ts";
+import {
+  type DevModeStatus,
+  type ListResponse,
+  disableDevMode,
+  enableDevMode,
+  formatError,
+  listDevMode,
+  listUis,
+  reloadUi,
+  removeUi,
+  triggerReload,
+} from "../lib/api.ts";
 
 export function Modules() {
   const [data, setData] = useState<ListResponse | null>(null);
+  const [devMap, setDevMap] = useState<Map<string, DevModeStatus>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     setError(null);
-    try {
-      const res = await listUis();
-      setData(res);
-    } catch (e) {
-      setError(formatError(e));
-    } finally {
-      setLoaded(true);
+    // Fetch list + dev-status in parallel — both endpoints carry the same
+    // auth, and a dev-mode fetch failure shouldn't blank the list.
+    const [listRes, devRes] = await Promise.allSettled([listUis(), listDevMode()]);
+    if (listRes.status === "fulfilled") {
+      setData(listRes.value);
+    } else {
+      setError(formatError(listRes.reason));
     }
+    if (devRes.status === "fulfilled") {
+      const next = new Map<string, DevModeStatus>();
+      for (const u of devRes.value.uis) next.set(u.name, u);
+      setDevMap(next);
+    } else {
+      // Dev-list failure is non-fatal — just log; reload list still rendered.
+      console.warn("[admin] dev-list fetch failed:", devRes.reason);
+    }
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -52,6 +76,47 @@ export function Modules() {
     setError(null);
     try {
       await removeUi(name);
+      await refresh();
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onEnableDev = async (name: string) => {
+    setBusy(`dev-enable:${name}`);
+    setError(null);
+    try {
+      await enableDevMode(name);
+      await refresh();
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onDisableDev = async (name: string) => {
+    setBusy(`dev-disable:${name}`);
+    setError(null);
+    try {
+      await disableDevMode(name);
+      await refresh();
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onTriggerReload = async (name: string) => {
+    setBusy(`dev-trigger:${name}`);
+    setError(null);
+    try {
+      const res = await triggerReload(name);
+      // Tiny side-channel: surface the notified count in the success path.
+      console.log(`[admin] dev reload for ${name}: notified ${res.notified}`);
       await refresh();
     } catch (e) {
       setError(formatError(e));
@@ -94,74 +159,122 @@ export function Modules() {
               <th>Version</th>
               <th>OAuth client</th>
               <th>Scopes</th>
+              <th>Dev</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {data.uis.map((u) => (
-              <tr key={u.name}>
-                <td>
-                  <a href={u.path} className="modules__mount">
-                    {u.path}
-                  </a>
-                </td>
-                <td>
-                  <Link to={`/info/${u.name}`}>{u.displayName}</Link>
-                  <br />
-                  <small>
-                    <code>{u.name}</code>
-                  </small>
-                  {u.pwa && (
-                    <>
-                      <br />
-                      <span className="badge">PWA</span>
-                    </>
-                  )}
-                  {u.public && (
-                    <>
-                      <br />
-                      <span className="badge">public</span>
-                    </>
-                  )}
-                </td>
-                <td>{u.version ?? "—"}</td>
-                <td>
-                  {u.oauthClientId ? (
-                    <>
-                      <code className="small-code">{u.oauthClientId.slice(0, 16)}…</code>
-                      {u.oauthStatus && <small>{` (${u.oauthStatus})`}</small>}
-                    </>
-                  ) : (
-                    <span className="muted">not registered</span>
-                  )}
-                </td>
-                <td>
-                  <ul className="modules__scopes">
-                    {u.scopes_required.map((s) => (
-                      <li key={s}>
-                        <code>{s}</code>
-                      </li>
-                    ))}
-                  </ul>
-                </td>
-                <td className="modules__actions">
-                  <button
-                    type="button"
-                    onClick={() => void onReload(u.name)}
-                    disabled={busy === `reload:${u.name}`}
-                  >
-                    Reload
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onRemove(u.name)}
-                    disabled={busy === `remove:${u.name}`}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {data.uis.map((u) => {
+              const dev = devMap.get(u.name);
+              const devOn = dev?.enabled === true;
+              return (
+                <tr key={u.name}>
+                  <td>
+                    <a href={u.path} className="modules__mount">
+                      {u.path}
+                    </a>
+                  </td>
+                  <td>
+                    <Link to={`/info/${u.name}`}>{u.displayName}</Link>
+                    <br />
+                    <small>
+                      <code>{u.name}</code>
+                    </small>
+                    {u.pwa && (
+                      <>
+                        <br />
+                        <span className="badge">PWA</span>
+                      </>
+                    )}
+                    {u.public && (
+                      <>
+                        <br />
+                        <span className="badge">public</span>
+                      </>
+                    )}
+                  </td>
+                  <td>{u.version ?? "—"}</td>
+                  <td>
+                    {u.oauthClientId ? (
+                      <>
+                        <code className="small-code">{u.oauthClientId.slice(0, 16)}…</code>
+                        {u.oauthStatus && <small>{` (${u.oauthStatus})`}</small>}
+                      </>
+                    ) : (
+                      <span className="muted">not registered</span>
+                    )}
+                  </td>
+                  <td>
+                    <ul className="modules__scopes">
+                      {u.scopes_required.map((s) => (
+                        <li key={s}>
+                          <code>{s}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td className="modules__dev">
+                    {devOn ? (
+                      <>
+                        <span className="badge badge-dev" aria-label={`dev mode on for ${u.name}`}>
+                          Dev ON
+                        </span>
+                        {dev && dev.subscribers > 0 && (
+                          <>
+                            <br />
+                            <small>{dev.subscribers} tab(s)</small>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <span className="muted">off</span>
+                    )}
+                  </td>
+                  <td className="modules__actions">
+                    <button
+                      type="button"
+                      onClick={() => void onReload(u.name)}
+                      disabled={busy === `reload:${u.name}`}
+                    >
+                      Reload
+                    </button>
+                    {devOn ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void onTriggerReload(u.name)}
+                          disabled={busy === `dev-trigger:${u.name}`}
+                        >
+                          Trigger reload
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onDisableDev(u.name)}
+                          disabled={busy === `dev-disable:${u.name}`}
+                        >
+                          Disable dev
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void onEnableDev(u.name)}
+                        disabled={busy === `dev-enable:${u.name}`}
+                      >
+                        Enable dev
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void onRemove(u.name)}
+                      disabled={busy === `remove:${u.name}`}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

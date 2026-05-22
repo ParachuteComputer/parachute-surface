@@ -6,12 +6,17 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   TOKEN_STORAGE_KEY,
   addUi,
+  disableDevMode,
+  enableDevMode,
   formatError,
+  getDevModeStatus,
   getOperatorToken,
+  listDevMode,
   listUis,
   reloadUi,
   removeUi,
   setOperatorToken,
+  triggerReload,
 } from "./api.ts";
 
 const realFetch = globalThis.fetch;
@@ -108,6 +113,81 @@ describe("api calls", () => {
     expect(caught).toBeTruthy();
     expect((caught as { status: number }).status).toBe(400);
     expect((caught as { error: string }).error).toBe("bad_request");
+  });
+});
+
+describe("dev-mode helpers", () => {
+  test("listDevMode → GET /app/dev/list", async () => {
+    let captured: { url: string; method: string } | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      captured = { url, method: init?.method ?? "GET" };
+      return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
+    }) as unknown as typeof fetch;
+    const res = await listDevMode();
+    expect(captured?.url).toBe("/app/dev/list");
+    expect(captured?.method).toBe("GET");
+    expect(res.uis).toEqual([]);
+  });
+
+  test("getDevModeStatus → GET /app/<name>/dev", async () => {
+    let capturedUrl: string | undefined;
+    globalThis.fetch = vi.fn((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ name: "notes", enabled: true, enabledAt: 1, subscribers: 0 }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    const res = await getDevModeStatus("notes");
+    expect(capturedUrl).toBe("/app/notes/dev");
+    expect(res.enabled).toBe(true);
+  });
+
+  test("enableDevMode → POST /app/<name>/dev/enable", async () => {
+    let captured: { url: string; method: string } | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      captured = { url, method: init?.method ?? "GET" };
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ ok: true, name: "notes", enabled: true, enabledAt: 1, subscribers: 0 }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    await enableDevMode("notes");
+    expect(captured?.url).toBe("/app/notes/dev/enable");
+    expect(captured?.method).toBe("POST");
+  });
+
+  test("disableDevMode → POST /app/<name>/dev/disable", async () => {
+    let captured: { url: string; method: string } | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      captured = { url, method: init?.method ?? "GET" };
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, name: "notes", enabled: false, was_on: true }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await disableDevMode("notes");
+    expect(captured?.url).toBe("/app/notes/dev/disable");
+    expect(captured?.method).toBe("POST");
+  });
+
+  test("triggerReload → POST /app/<name>/dev/trigger", async () => {
+    let captured: { url: string; method: string } | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      captured = { url, method: init?.method ?? "GET" };
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, name: "notes", notified: 3 }), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+    const res = await triggerReload("notes");
+    expect(captured?.url).toBe("/app/notes/dev/trigger");
+    expect(captured?.method).toBe("POST");
+    expect(res.notified).toBe(3);
   });
 });
 

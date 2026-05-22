@@ -35,7 +35,10 @@ Usage:
   parachute-app remove <name>                Unregister a UI + revoke its OAuth client
   parachute-app list                         List installed UIs with status + OAuth state
   parachute-app reload <name>                Refresh a UI's bundle (no daemon restart)
-  parachute-app dev <name> [--off]           Dev mode with live reload (Phase 1.3+)
+  parachute-app dev <name>                   Enable dev mode for <name> (no-cache + SSE reload)
+  parachute-app dev <name> --off             Disable dev mode for <name>
+  parachute-app dev <name> --trigger         Broadcast a reload event to connected tabs
+  parachute-app dev list                     List UIs currently in dev mode
   parachute-app --help, -h                   Show this help
   parachute-app --version, -v                Print version and exit
 
@@ -48,8 +51,16 @@ Environment:
   Reads $PARACHUTE_HOME/app/config.json (or built-in defaults).
   Scans $PARACHUTE_HOME/app/uis/ for declared UIs; each subdir needs
   a meta.json + dist/index.html. Mounts each UI at its declared path
-  under /app/<name>/. Phase 1.2 admin endpoints + admin SPA under
-  /app/admin/ are served by the same daemon.
+  under /app/<name>/. Admin endpoints + admin SPA under /app/admin/
+  are served by the same daemon.
+
+\`dev\` behavior:
+  Dev mode is process-local — a daemon restart resets every UI to
+  production cache headers. While on, every response from the UI is
+  no-cache, no-store, must-revalidate (overrides the immutable default
+  for hashed assets); index.html gets a small EventSource shim that
+  reloads the tab on a \`--trigger\` event. Phase 2 will wire an
+  automatic file-watcher in place of the manual trigger.
 
 Design:
   https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-apps-design.md
@@ -256,11 +267,101 @@ async function runReload(rest: string[]): Promise<void> {
   process.exit(1);
 }
 
-function stub(phase: string): void {
-  console.log(
-    `Phase ${phase} — not yet implemented. Run \`parachute-app --help\` for current capabilities.`,
-  );
-  process.exit(0);
+/**
+ * Phase 1.3 `dev` verb — enable / disable / trigger / list.
+ *
+ * Sub-shape (matches the design doc operator flow):
+ *   parachute-app dev <name>             # enable (idempotent)
+ *   parachute-app dev <name> --off       # disable
+ *   parachute-app dev <name> --trigger   # broadcast reload event
+ *   parachute-app dev list               # show UIs currently in dev mode
+ */
+async function runDev(rest: string[]): Promise<void> {
+  const { positionals, flags } = parseFlags(rest);
+  const sub = positionals[0];
+
+  // `dev list` (no other args).
+  if (sub === "list") {
+    const { status, body } = await callDaemon("GET", "/app/dev/list");
+    if (status >= 200 && status < 300) {
+      const r = body as {
+        uis?: Array<{ name: string; enabled: boolean; enabledAt: number; subscribers: number }>;
+      };
+      const uis = r.uis ?? [];
+      if (uis.length === 0) {
+        console.log("(no UIs in dev mode)");
+      } else {
+        for (const u of uis) {
+          const since = u.enabledAt > 0 ? new Date(u.enabledAt).toISOString() : "—";
+          console.log(
+            `  ${u.name}  enabled=${u.enabled}  since=${since}  subscribers=${u.subscribers}`,
+          );
+        }
+      }
+      return;
+    }
+    console.error(`dev list failed (HTTP ${status}):`);
+    printJson(body);
+    process.exit(1);
+  }
+
+  if (!sub) {
+    console.error("dev: missing <name> (or `list`)");
+    console.error("Run `parachute-app --help` for usage.");
+    process.exit(1);
+  }
+
+  const name = sub;
+  const off = flags.off === true;
+  const trigger = flags.trigger === true;
+
+  if (off && trigger) {
+    console.error("dev: --off and --trigger are mutually exclusive");
+    process.exit(1);
+  }
+
+  if (off) {
+    const { status, body } = await callDaemon(
+      "POST",
+      `/app/${encodeURIComponent(name)}/dev/disable`,
+    );
+    if (status >= 200 && status < 300) {
+      const r = body as { was_on?: boolean };
+      console.log(`Dev mode OFF for ${name}${r.was_on === false ? " (was already off)" : ""}`);
+      return;
+    }
+    console.error(`dev --off failed (HTTP ${status}):`);
+    printJson(body);
+    process.exit(1);
+  }
+
+  if (trigger) {
+    const { status, body } = await callDaemon(
+      "POST",
+      `/app/${encodeURIComponent(name)}/dev/trigger`,
+    );
+    if (status >= 200 && status < 300) {
+      const r = body as { notified?: number };
+      console.log(`Reload broadcast for ${name}: notified ${r.notified ?? 0} client(s)`);
+      return;
+    }
+    console.error(`dev --trigger failed (HTTP ${status}):`);
+    printJson(body);
+    process.exit(1);
+  }
+
+  // Default sub-verb: enable dev mode.
+  const { status, body } = await callDaemon("POST", `/app/${encodeURIComponent(name)}/dev/enable`);
+  if (status >= 200 && status < 300) {
+    console.log(`Dev mode ON for ${name}`);
+    console.log("  Edit, build, then run:");
+    console.log(`  parachute-app dev ${name} --trigger`);
+    console.log(`  parachute-app dev ${name} --off   # when done`);
+    return;
+  }
+  console.error(`dev failed (HTTP ${status}):`);
+  printJson(body);
+  process.exit(1);
 }
 
 async function runServe(): Promise<void> {
@@ -322,7 +423,7 @@ async function main(): Promise<void> {
       return;
 
     case "dev":
-      stub("1.3");
+      await runDev(rest);
       return;
 
     default:

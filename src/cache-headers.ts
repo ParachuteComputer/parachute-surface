@@ -56,8 +56,26 @@ const HASHED_ASSET_REGEX = /(^|[.\-_])(?=[a-f0-9]*[a-f])[a-f0-9]{8,}(\.|$)/;
  *
  * `meta` is optional so caller can elide it for the `/.parachute/*` admin
  * endpoints; those skip the PWA-aware branch.
+ *
+ * `devMode` (Phase 1.3) overrides every other branch with
+ * `no-cache, no-store, must-revalidate`. When the operator runs
+ * `parachute-app dev <name>` we want zero caching from any layer — index,
+ * hashed assets, SW, the lot. The smart-cache rules below are silent
+ * during dev iteration.
  */
-export function cacheHeadersFor(filename: string, meta?: UiMeta): Record<string, string> {
+export function cacheHeadersFor(
+  filename: string,
+  meta?: UiMeta,
+  devMode = false,
+): Record<string, string> {
+  // Dev mode trumps every other branch — no caching anywhere. Even
+  // content-hashed assets get no-cache so an operator who manually
+  // edits a hashed bundle (e.g. swapped from disk) sees the change
+  // without reasoning about the filename.
+  if (devMode) {
+    return { "Cache-Control": "no-cache, no-store, must-revalidate" };
+  }
+
   // PWA service worker — always no-cache so updates propagate immediately
   // on rebuild. The SW path is meta-driven so each UI controls its own.
   if (meta?.pwa && meta.pwa_service_worker && filename === meta.pwa_service_worker) {

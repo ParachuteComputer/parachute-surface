@@ -119,6 +119,39 @@ describe("cacheHeadersFor", () => {
       "Cache-Control": "public, max-age=31536000, immutable",
     });
   });
+
+  // --- Phase 1.3: dev mode override ------------------------------------
+
+  test("devMode=true overrides immutable on hashed assets", () => {
+    expect(cacheHeadersFor("app.a3b9f2c1.js", minimalMeta, true)).toEqual({
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+    });
+  });
+
+  test("devMode=true overrides 1-hour on non-hashed assets", () => {
+    expect(cacheHeadersFor("icon.svg", minimalMeta, true)).toEqual({
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+    });
+  });
+
+  test("devMode=true overrides PWA SW no-cache → no-store", () => {
+    const meta: UiMeta = { ...minimalMeta, pwa: true, pwa_service_worker: "sw.js" };
+    expect(cacheHeadersFor("sw.js", meta, true)).toEqual({
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+    });
+  });
+
+  test("devMode=true on index.html is no-store (vs default no-cache, no-store, must-revalidate — same)", () => {
+    expect(cacheHeadersFor("index.html", minimalMeta, true)).toEqual({
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+    });
+  });
+
+  test("devMode=false (default) leaves smart-cache rules intact", () => {
+    expect(cacheHeadersFor("app.a3b9f2c1.js", minimalMeta, false)).toEqual({
+      "Cache-Control": "public, max-age=31536000, immutable",
+    });
+  });
 });
 
 describe("looksContentHashed", () => {

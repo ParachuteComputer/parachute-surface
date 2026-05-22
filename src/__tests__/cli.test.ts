@@ -1,7 +1,7 @@
 /**
  * Tests for `bin/parachute-app.ts` — the CLI surface.
  *
- * Phase 1.2 covers:
+ * Coverage (Phase 1.3):
  *   - --version / -v print package.json version
  *   - --help / -h / no-args print usage with the current verb list
  *   - Unknown command exits non-zero
@@ -10,7 +10,10 @@
  *   - `reload` without name exits non-zero with helpful error
  *   - `add`/`remove`/`list`/`reload` against an unreachable daemon report
  *     friendly connection error
- *   - `dev` still reports Phase 1.3 not-implemented
+ *   - `dev <name>` / `dev <name> --off` / `dev <name> --trigger` / `dev list`
+ *     hit the right paths (asserted via unreachable-daemon connection error)
+ *   - `dev` without name exits non-zero with helpful error
+ *   - `dev <name> --off --trigger` is rejected as mutually exclusive
  */
 
 import { describe, expect, test } from "bun:test";
@@ -62,7 +65,7 @@ describe("parachute-app CLI", () => {
     expect(r.stdout.trim()).toBe(pkg.version);
   });
 
-  test("--help shows the full Phase 1.2 verb list", async () => {
+  test("--help shows the full Phase 1.3 verb list", async () => {
     const r = await runBin(["--help"]);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("parachute-app");
@@ -71,6 +74,9 @@ describe("parachute-app CLI", () => {
     expect(r.stdout).toContain("remove <name>");
     expect(r.stdout).toContain("list");
     expect(r.stdout).toContain("reload <name>");
+    expect(r.stdout).toContain("dev <name>");
+    expect(r.stdout).toContain("--trigger");
+    expect(r.stdout).toContain("dev list");
   });
 
   test("no args prints usage", async () => {
@@ -109,9 +115,37 @@ describe("parachute-app CLI", () => {
     expect(r.stderr.toLowerCase()).toContain("daemon");
   });
 
-  test("dev reports Phase 1.3 stub", async () => {
+  test("dev without name exits non-zero", async () => {
     const r = await runBin(["dev"]);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("Phase 1.3");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("name");
+  });
+
+  test("dev <name> against unreachable daemon hits enable endpoint", async () => {
+    const r = await runBin(["dev", "my-ui"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("daemon");
+  });
+
+  test("dev list against unreachable daemon reports friendly error", async () => {
+    const r = await runBin(["dev", "list"], { PARACHUTE_APP_URL: unreachableBase() });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("daemon");
+  });
+
+  test("dev <name> --off and --trigger together is rejected", async () => {
+    const r = await runBin(["dev", "my-ui", "--off", "--trigger"], {
+      PARACHUTE_APP_URL: unreachableBase(),
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("mutually exclusive");
+  });
+
+  test("dev <name> --trigger against unreachable daemon reports friendly error", async () => {
+    const r = await runBin(["dev", "my-ui", "--trigger"], {
+      PARACHUTE_APP_URL: unreachableBase(),
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("daemon");
   });
 });
