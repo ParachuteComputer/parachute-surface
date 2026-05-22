@@ -117,8 +117,7 @@ describe("getClientId", () => {
 
   test("non-2xx throws explicit message", async () => {
     const oauth = makeOAuth({
-      "http://hub.test/app/notes/oauth-client": () =>
-        new Response("not found", { status: 404 }),
+      "http://hub.test/app/notes/oauth-client": () => new Response("not found", { status: 404 }),
     });
     await expect(oauth.getClientId()).rejects.toThrow(/oauth-client/);
   });

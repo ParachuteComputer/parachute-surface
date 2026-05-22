@@ -383,9 +383,7 @@ function parseRequiredSchema(
           }
           const fields: Record<string, TagSchemaFieldDeclaration> = {};
           let fieldsBad = false;
-          for (const [fieldName, fieldRaw] of Object.entries(
-            t.fields as Record<string, unknown>,
-          )) {
+          for (const [fieldName, fieldRaw] of Object.entries(t.fields as Record<string, unknown>)) {
             const fieldPath = `${pathPrefix}.fields.${fieldName}`;
             if (!fieldRaw || typeof fieldRaw !== "object" || Array.isArray(fieldRaw)) {
               errors.push({ path: fieldPath, message: "must be an object" });

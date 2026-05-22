@@ -52,7 +52,12 @@ describe("VaultClient — happy path", () => {
       vaultUrl: "http://vault.test",
       accessToken: "t",
       fetchImpl: makeFetch([
-        () => jsonRes({ name: "default", description: "test", stats: { noteCount: 5, tagCount: 1, linkCount: 0 } }),
+        () =>
+          jsonRes({
+            name: "default",
+            description: "test",
+            stats: { noteCount: 5, tagCount: 1, linkCount: 0 },
+          }),
       ]),
       onReachability: (s) => reachability.push(s),
     });
@@ -65,9 +70,7 @@ describe("VaultClient — happy path", () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
-      fetchImpl: makeFetch([
-        () => jsonRes([{ id: "n1", createdAt: "2026-05-21" }]),
-      ]),
+      fetchImpl: makeFetch([() => jsonRes([{ id: "n1", createdAt: "2026-05-21" }])]),
     });
     const notes = await c.queryNotes({ tag: "x" });
     expect(notes.length).toBe(1);
@@ -110,7 +113,7 @@ describe("VaultClient — happy path", () => {
   });
 
   test("setAccessToken rotates in-place", async () => {
-    let auths: string[] = [];
+    const auths: string[] = [];
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "old",
@@ -171,8 +174,7 @@ describe("VaultClient — auth error paths", () => {
       vaultUrl: "http://vault.test",
       accessToken: "t",
       fetchImpl: makeFetch([
-        () =>
-          jsonRes({ error_type: "vault_scope_mismatch", message: "scope mismatch" }, 403),
+        () => jsonRes({ error_type: "vault_scope_mismatch", message: "scope mismatch" }, 403),
       ]),
       onAuthRevoked: (status, detail) => {
         revokedStatus = status;
@@ -317,8 +319,7 @@ describe("VaultClient — cursor pagination", () => {
       vaultUrl: "http://vault.test",
       accessToken: "t",
       fetchImpl: makeFetch([
-        () =>
-          jsonRes([{ id: "n1", createdAt: "x" }], 200, { "X-Next-Cursor": "abc123" }),
+        () => jsonRes([{ id: "n1", createdAt: "x" }], 200, { "X-Next-Cursor": "abc123" }),
       ]),
     });
     const out = await c.queryNotesCursor({ tag: "x" }, undefined, 10);
@@ -330,9 +331,7 @@ describe("VaultClient — cursor pagination", () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
-      fetchImpl: makeFetch([
-        () => jsonRes([{ id: "n1", createdAt: "x" }], 200, {}),
-      ]),
+      fetchImpl: makeFetch([() => jsonRes([{ id: "n1", createdAt: "x" }], 200, {})]),
     });
     const out = await c.queryNotesCursor({});
     expect(out.nextCursor).toBeUndefined();

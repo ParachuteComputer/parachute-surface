@@ -120,11 +120,7 @@ export function loadToken(
   // caller's refresh-on-401 path will rotate this for us; we return the
   // expired record so the in-flight request gets one shot at refresh
   // before forcing a new OAuth flow.
-  if (
-    typeof parsed.expiresAt === "number" &&
-    parsed.expiresAt <= now() &&
-    !parsed.refreshToken
-  ) {
+  if (typeof parsed.expiresAt === "number" && parsed.expiresAt <= now() && !parsed.refreshToken) {
     try {
       storage.removeItem(key);
     } catch {
@@ -151,11 +147,7 @@ export function saveToken(
   }
 }
 
-export function clearToken(
-  appName: string,
-  vaultScope: string,
-  opts: TokenStorageOpts = {},
-): void {
+export function clearToken(appName: string, vaultScope: string, opts: TokenStorageOpts = {}): void {
   const storage = opts.storage ?? resolveStorage();
   const key = tokenKey(appName, vaultScope);
   try {
@@ -171,10 +163,7 @@ export function clearToken(
  * effort across storage failures; partial removal is the expected
  * outcome when quota or sandboxing intervenes.
  */
-export function clearAllTokensForApp(
-  appName: string,
-  opts: TokenStorageOpts = {},
-): number {
+export function clearAllTokensForApp(appName: string, opts: TokenStorageOpts = {}): number {
   const storage = opts.storage ?? resolveStorage();
   const prefix = `${TOKEN_KEY_PREFIX}:${appName}:`;
   // Two-pass: collect keys before removing — `removeItem` shifts
@@ -183,7 +172,7 @@ export function clearAllTokensForApp(
   try {
     for (let i = 0; i < storage.length; i++) {
       const k = storage.key(i);
-      if (k && k.startsWith(prefix)) toRemove.push(k);
+      if (k?.startsWith(prefix)) toRemove.push(k);
     }
   } catch {
     return 0;

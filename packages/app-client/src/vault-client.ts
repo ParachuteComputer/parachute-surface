@@ -39,15 +39,15 @@
  */
 
 import type {
+  CreateNotePayload,
   Note,
   NoteAttachment,
-  TagSummary,
-  VaultInfo,
-  UpdateNotePayload,
-  CreateNotePayload,
-  StorageUploadResult,
-  UploadProgress,
   ReachabilitySignal,
+  StorageUploadResult,
+  TagSummary,
+  UpdateNotePayload,
+  UploadProgress,
+  VaultInfo,
 } from "./vault-types.js";
 
 export class VaultUploadError extends Error {
@@ -158,10 +158,7 @@ export interface VaultClientOptions {
    * `insufficient_scope` / `tag_scope_violation` diagnostics in the
    * halt banner (notes#150).
    */
-  onAuthRevoked?: (
-    status: number,
-    detail?: { errorType?: string; message?: string },
-  ) => void;
+  onAuthRevoked?: (status: number, detail?: { errorType?: string; message?: string }) => void;
   /** Coarse reachability signal — fires on every fetch outcome. */
   onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
 }
@@ -231,10 +228,7 @@ export class VaultClient {
       if (err instanceof DOMException && err.name === "AbortError") throw err;
       const message = err instanceof Error ? err.message : String(err);
       this.onReachability?.("unreachable", message);
-      throw new VaultUnreachableError(
-        `${init.method ?? "GET"} ${path} failed: ${message}`,
-        0,
-      );
+      throw new VaultUnreachableError(`${init.method ?? "GET"} ${path} failed: ${message}`, 0);
     }
 
     if (res.status >= 500) {
@@ -418,10 +412,7 @@ export class VaultClient {
     return rows ?? null;
   }
 
-  async createNote(
-    payload: CreateNotePayload,
-    opts: { signal?: AbortSignal } = {},
-  ): Promise<Note> {
+  async createNote(payload: CreateNotePayload, opts: { signal?: AbortSignal } = {}): Promise<Note> {
     const init: RequestInit = { method: "POST", body: JSON.stringify(payload) };
     if (opts.signal) init.signal = opts.signal;
     return this.request<Note>("/api/notes", init);

@@ -67,9 +67,7 @@ describe("discoverAuthServer", () => {
 
   test("missing S256 rejects", async () => {
     const bad = { ...happy, code_challenge_methods_supported: ["plain"] };
-    await expect(discoverAuthServer("http://hub.test", fetchOk(bad))).rejects.toThrow(
-      /S256 PKCE/,
-    );
+    await expect(discoverAuthServer("http://hub.test", fetchOk(bad))).rejects.toThrow(/S256 PKCE/);
   });
 
   test("trailing slash on issuer is normalized", async () => {

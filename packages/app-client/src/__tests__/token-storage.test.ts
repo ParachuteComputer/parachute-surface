@@ -108,12 +108,7 @@ describe("saveToken + loadToken", () => {
 
 describe("clearToken", () => {
   test("removes the key", () => {
-    saveToken(
-      "notes",
-      "v",
-      { accessToken: "x", scope: "vault:read" },
-      { storage },
-    );
+    saveToken("notes", "v", { accessToken: "x", scope: "vault:read" }, { storage });
     clearToken("notes", "v", { storage });
     expect(loadToken("notes", "v", { storage })).toBeNull();
   });

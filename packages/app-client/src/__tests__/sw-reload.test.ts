@@ -10,10 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
-import {
-  __resetReloadArmedForTests,
-  reloadAfterServiceWorkerUpdate,
-} from "../sw-reload.ts";
+import { __resetReloadArmedForTests, reloadAfterServiceWorkerUpdate } from "../sw-reload.ts";
 
 class FakeSWContainer {
   private listeners: Array<(e?: Event) => void> = [];

@@ -13,8 +13,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test } from "vitest";
 
-import { SchemaRequirements } from "./SchemaRequirements.tsx";
 import type { RequiredSchemaDeclaration } from "../lib/api.ts";
+import { SchemaRequirements } from "./SchemaRequirements.tsx";
 
 describe("SchemaRequirements", () => {
   test("renders nothing when schema is undefined", () => {
@@ -74,9 +74,7 @@ describe("SchemaRequirements", () => {
     const schema: RequiredSchemaDeclaration = {
       tags: [{ name: "capture" }],
     };
-    const { container } = render(
-      <SchemaRequirements schema={schema} defaultExpanded={true} />,
-    );
+    const { container } = render(<SchemaRequirements schema={schema} defaultExpanded={true} />);
     const details = container.querySelector("details");
     expect(details).toHaveAttribute("open");
   });

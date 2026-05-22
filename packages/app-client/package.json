@@ -33,11 +33,7 @@
       "import": "./dist/vault-id.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public"
   },

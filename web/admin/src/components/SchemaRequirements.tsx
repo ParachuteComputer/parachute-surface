@@ -38,10 +38,7 @@ export function SchemaRequirements({
 
   const tags = schema.tags ?? [];
   const empty = tags.length === 0;
-  const fieldCount = tags.reduce(
-    (sum, t) => sum + Object.keys(t.fields ?? {}).length,
-    0,
-  );
+  const fieldCount = tags.reduce((sum, t) => sum + Object.keys(t.fields ?? {}).length, 0);
 
   // Always render the summary line so operators can tell at-a-glance
   // that the app declared `required_schema: {}` (deliberate empty)

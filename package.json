@@ -5,10 +5,7 @@
   "description": "Workspace root for parachute-app — host module (@openparachute/app) + shared client library (@openparachute/app-client).",
   "license": "AGPL-3.0",
   "type": "module",
-  "workspaces": [
-    "packages/*",
-    "web/admin"
-  ],
+  "workspaces": ["packages/*", "web/admin"],
   "scripts": {
     "build": "bun run --filter '@openparachute/app-client' build && bun run --filter '@openparachute/app' build",
     "build:app-host": "bun run --filter '@openparachute/app' build",

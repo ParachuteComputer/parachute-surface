@@ -310,7 +310,11 @@ describe("parseMeta — required_schema (patterns#57)", () => {
             name: "capture",
             description: "Quick captures from voice or text",
             fields: {
-              source: { type: "string", required: true, description: "Where the capture came from" },
+              source: {
+                type: "string",
+                required: true,
+                description: "Where the capture came from",
+              },
               count: { type: "number" },
               archived: { type: "boolean", required: false },
               createdAt: { type: "date" },
