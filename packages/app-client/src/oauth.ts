@@ -42,7 +42,12 @@ import {
   generateCodeVerifier,
   generateState,
 } from "./pkce.js";
-import { loadToken, saveToken, storedFromTokenResponse } from "./token-storage.js";
+import {
+  clearToken as clearStoredToken,
+  loadToken,
+  saveToken,
+  storedFromTokenResponse,
+} from "./token-storage.js";
 import type {
   AuthorizationServerMetadata,
   PendingOAuthState,
@@ -368,34 +373,11 @@ export class ParachuteOAuth {
    * compromised vs just stale.
    */
   clearToken(vaultScope: string): void {
-    const key = `${this.appName}:${vaultScope}`;
-    const storageOpts = this.tokenStorage
-      ? { storage: this.tokenStorage, now: this.now }
-      : { now: this.now };
-    // Importing the helper would create a circular dep with index.ts —
-    // call through the loadToken/saveToken/clearToken trio's clear path.
-    saveToken(this.appName, vaultScope, {
-      // Empty access token + immediate expiry so loadToken returns null
-      // even if the operator pokes at storage directly. Then remove the
-      // key for cleanliness.
-      accessToken: "",
-      scope: "",
-      expiresAt: this.now() - 1,
-    });
-    // Mirror token-storage's clearToken: best-effort removeItem.
-    try {
-      this.tokenStorage?.removeItem(`parachute_token:${key}`);
-    } catch {
-      // best-effort
-    }
-    // Fall through to localStorage path for the common case.
-    if (!this.tokenStorage && typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem(`parachute_token:${key}`);
-      } catch {
-        // best-effort
-      }
-    }
+    clearStoredToken(
+      this.appName,
+      vaultScope,
+      this.tokenStorage ? { storage: this.tokenStorage, now: this.now } : { now: this.now },
+    );
   }
 
   /**

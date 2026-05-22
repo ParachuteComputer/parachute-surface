@@ -149,9 +149,15 @@ export interface VaultClientOptions {
    * Invoked when a 401/403 ultimately can't be recovered — either there
    * was no refresh callback, or the post-refresh retry also got a
    * 401/403 (the new token is dead too). Lets the consumer mark the
-   * vault as needing reconnect. Skipped when `onAuthError` returned
-   * null (refresh.ts paths record their own halt with a more specific
-   * reason).
+   * vault as needing reconnect.
+   *
+   * NOT called when `onAuthError` returns null. The convention: when
+   * `onAuthError` returns null, the caller's own refresh-handling
+   * mechanism is assumed to have recorded the halt state via a separate
+   * path (e.g. its own state store). Callers that rely on
+   * `onAuthRevoked` for ALL revocation signals should NOT pass an
+   * `onAuthError` handler that returns null — either omit `onAuthError`
+   * entirely, or throw from it.
    *
    * `detail` carries vault's `error_type` + `message` when the body
    * was JSON-parseable — surfaces `vault_scope_mismatch` /
@@ -263,6 +269,8 @@ export class VaultClient {
           this.token = fresh;
           return this.requestWithRetry<T>(path, init, false);
         }
+        // onAuthError returned null → caller's refresh path owns the halt
+        // (see onAuthRevoked JSDoc); skip onAuthRevoked here.
       } else {
         this.onAuthRevoked?.(res.status, { errorType, message: serverMessage });
       }
@@ -376,6 +384,8 @@ export class VaultClient {
           this.token = fresh;
           return this.requestCursorWithRetry(path, false);
         }
+        // onAuthError returned null → caller's refresh path owns the halt
+        // (see onAuthRevoked JSDoc); skip onAuthRevoked here.
       } else {
         this.onAuthRevoked?.(res.status, { errorType, message: serverMessage });
       }

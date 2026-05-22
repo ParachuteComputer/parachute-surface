@@ -323,6 +323,58 @@ describe("getToken + clearToken", () => {
     oauth.clearToken("default");
     expect(oauth.getToken("default")).toBeNull();
   });
+
+  test("clearToken removes the key without a poisoned-tombstone setItem", async () => {
+    // Spy storage records every setItem/removeItem call so we can assert
+    // the clear path does NOT write a tombstone before deleting (which
+    // would surface a transient zero-token record in devtools).
+    type Op = { kind: "set" | "remove"; key: string };
+    const ops: Op[] = [];
+    const spyStorage = {
+      data: new Map<string, string>(),
+      getItem(k: string): string | null {
+        return this.data.get(k) ?? null;
+      },
+      setItem(k: string, v: string): void {
+        ops.push({ kind: "set", key: k });
+        this.data.set(k, v);
+      },
+      removeItem(k: string): void {
+        ops.push({ kind: "remove", key: k });
+        this.data.delete(k);
+      },
+      key(i: number): string | null {
+        return Array.from(this.data.keys())[i] ?? null;
+      },
+      get length(): number {
+        return this.data.size;
+      },
+    };
+    const oauth = new ParachuteOAuth({
+      appName: "notes",
+      hubUrl: "http://hub.test",
+      fetchImpl: makeFetch({
+        "http://hub.test/app/notes/oauth-client": () =>
+          new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+        "http://hub.test/.well-known/oauth-authorization-server": () =>
+          new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+        "http://hub.test/oauth/token": () =>
+          new Response(JSON.stringify(HAPPY_TOKEN_RESPONSE), { status: 200 }),
+      }),
+      sessionStorage,
+      tokenStorage: spyStorage,
+      now: () => 1_000_000,
+    });
+    const { pending } = await oauth.beginFlow({ redirectUri: "http://x/cb" });
+    await oauth.handleCallback("code", pending.state, "default");
+    // Reset ops so we only see clearToken's writes
+    ops.length = 0;
+    oauth.clearToken("default");
+    const tokenKeyOps = ops.filter((o) => o.key === "parachute_token:notes:default");
+    // Exactly one op total, and it MUST be the remove (no set-then-remove).
+    expect(tokenKeyOps.length).toBe(1);
+    expect(tokenKeyOps[0]!.kind).toBe("remove");
+  });
 });
 
 describe("refreshAccessToken", () => {

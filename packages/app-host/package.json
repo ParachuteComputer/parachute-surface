@@ -4,6 +4,10 @@
   "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./meta-schema": "./src/meta-schema.ts"
+  },
   "private": false,
   "license": "AGPL-3.0",
   "bin": {
