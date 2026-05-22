@@ -213,11 +213,23 @@ export class VaultClient {
     return this.baseUrl;
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /**
+   * Protected: subclasses can call this directly to add domain-specific
+   * endpoints without re-implementing the auth/refresh/error-classification
+   * loop (e.g. a NotesVaultClient adding `linkAttachment`). Wraps
+   * `requestWithRetry` with `allowRetry: true`.
+   */
+  protected async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return this.requestWithRetry<T>(path, init, true);
   }
 
-  private async requestWithRetry<T>(
+  /**
+   * Protected: the inner JSON-request loop with explicit retry control.
+   * Subclasses normally call `request` instead; reach for this only when
+   * you need to opt out of the refresh-and-retry path (e.g. on the retry
+   * leg itself).
+   */
+  protected async requestWithRetry<T>(
     path: string,
     init: RequestInit,
     allowRetry: boolean,
@@ -347,7 +359,13 @@ export class VaultClient {
     return this.requestCursorWithRetry(path, true);
   }
 
-  private async requestCursorWithRetry(
+  /**
+   * Protected: cursor-paginated variant of `requestWithRetry` that preserves
+   * the Response so the `X-Next-Cursor` header survives the auth-retry path.
+   * Subclasses can call this directly when adding cursor-paginated
+   * domain-specific list endpoints.
+   */
+  protected async requestCursorWithRetry(
     path: string,
     allowRetry: boolean,
   ): Promise<{ items: Note[]; nextCursor?: string }> {

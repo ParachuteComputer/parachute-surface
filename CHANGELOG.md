@@ -9,6 +9,19 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app-client 0.1.0-rc.3] - 2026-05-22
+
+feat(app-client): lift `VaultClient.request` /
+`requestWithRetry` / `requestCursorWithRetry` from `private` to
+`protected` for subclass-based extension (closes
+[app#9](https://github.com/ParachuteComputer/parachute-app/issues/9)).
+
+Backwards-compatible visibility relaxation. New consumers (Notes is
+the canonical downstream) can now subclass `VaultClient` to add
+domain-specific endpoints without re-implementing the auth/refresh/
+error-classification loop. Zero behavior change — test counts
+unchanged. See `packages/app-client/CHANGELOG.md` for details.
+
 ## [app 0.2.0-rc.3] + [app-client 0.1.0-rc.2] - 2026-05-22
 
 feat(app): Phase 3.0 — file watcher + auto-rebuild for dev mode

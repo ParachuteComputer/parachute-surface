@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/app-client",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "Shared browser-side library for Parachute apps — OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id helpers.",
   "license": "AGPL-3.0",
   "type": "module",
