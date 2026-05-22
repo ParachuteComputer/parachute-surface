@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/app",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
@@ -13,6 +13,7 @@
     "src/**/*.ts",
     "!src/**/*.test.ts",
     "bin/**/*.ts",
+    "dist/admin/**",
     ".parachute/module.json",
     ".parachute/info",
     ".parachute/config/schema",
@@ -25,8 +26,14 @@
   },
   "scripts": {
     "start": "bun run bin/parachute-app.ts serve",
+    "build": "cd web/admin && bun install --frozen-lockfile && bun run build",
+    "build:admin": "cd web/admin && bun run build",
     "test": "bun test src/",
+    "test:admin": "cd web/admin && bun run test",
+    "test:all": "bun test src/ && cd web/admin && bun run test",
     "typecheck": "tsc --noEmit",
+    "typecheck:admin": "cd web/admin && bun run typecheck",
+    "typecheck:all": "tsc --noEmit && cd web/admin && bun run typecheck",
     "lint": "biome check ."
   },
   "devDependencies": {
@@ -36,5 +43,8 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@openparachute/scope-guard": "^0.3.0"
   }
 }
