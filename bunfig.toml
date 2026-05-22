@@ -1,0 +1,9 @@
+# Scope `bun test` (no args) to the root daemon test suite under `src/`.
+#
+# Without this, `bun test` from the repo root globs `web/admin/src/`
+# (the Vite + React admin SPA), whose tests need vitest's happy-dom env
+# and fail with `ReferenceError: localStorage is not defined` under bun's
+# runner. The admin SPA has its own runner: `cd web/admin && bun run test`.
+
+[test]
+root = "src"

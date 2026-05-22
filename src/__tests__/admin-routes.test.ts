@@ -510,7 +510,7 @@ describe("POST /app/add via npm-fetch", () => {
   test("happy path via mocked bun add", async () => {
     const state = makeState();
     const npmSpawn: NpmSpawnFn = async (argv, cwd) => {
-      expect(argv).toEqual(["bun", "add", "@openparachute/notes-ui"]);
+      expect(argv).toEqual(["bun", "add", "--ignore-scripts", "@openparachute/notes-ui"]);
       const root = path.join(cwd, "node_modules", "@openparachute", "notes-ui");
       fs.mkdirSync(path.join(root, "dist"), { recursive: true });
       fs.writeFileSync(path.join(root, "dist", "index.html"), "<n>notes</n>");

@@ -134,8 +134,41 @@ describe("fetchNpmPackage", () => {
       spawnFn: spawn,
       logger: silentLogger,
     });
-    expect(capturedArgv).toEqual(["bun", "add", "@openparachute/notes-ui@0.1.2"]);
+    expect(capturedArgv).toEqual([
+      "bun",
+      "add",
+      "--ignore-scripts",
+      "@openparachute/notes-ui@0.1.2",
+    ]);
     expect(r.version).toBe("0.1.2");
+    r.cleanup();
+  });
+
+  test("spawn argv includes --ignore-scripts (defense against malicious postinstall)", async () => {
+    let capturedArgv: string[] | undefined;
+    const spawn: NpmSpawnFn = async (argv, cwd) => {
+      capturedArgv = [...argv];
+      const distDir = path.join(cwd, "node_modules", "@openparachute", "notes-ui", "dist");
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+      return { exitCode: 0, stderr: "", stdout: "" };
+    };
+    const r = await fetchNpmPackage({
+      spec: "@openparachute/notes-ui",
+      stagingParent,
+      spawnFn: spawn,
+      logger: silentLogger,
+    });
+    expect(capturedArgv).toBeDefined();
+    expect(capturedArgv).toContain("--ignore-scripts");
+    // The flag must appear *between* `add` and the spec so bun parses it as a
+    // flag, not as a package name.
+    const addIdx = capturedArgv!.indexOf("add");
+    const flagIdx = capturedArgv!.indexOf("--ignore-scripts");
+    const specIdx = capturedArgv!.indexOf("@openparachute/notes-ui");
+    expect(addIdx).toBeGreaterThanOrEqual(0);
+    expect(flagIdx).toBeGreaterThan(addIdx);
+    expect(specIdx).toBeGreaterThan(flagIdx);
     r.cleanup();
   });
 

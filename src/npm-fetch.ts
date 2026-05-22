@@ -25,7 +25,16 @@
  * `finally` regardless of outcome.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -188,9 +197,13 @@ export async function fetchNpmPackage(opts: NpmFetchOpts): Promise<NpmFetchResul
   }
 
   // `bun add <spec>` — install into the staging dir.
+  // `--ignore-scripts` prevents malicious `postinstall` (et al.) hooks in the
+  // fetched package or any of its deps from executing arbitrary code in the
+  // daemon's process context. We only need the package's `dist/` output, not
+  // any install-time codegen.
   let spawnResult: Awaited<ReturnType<NpmSpawnFn>>;
   try {
-    spawnResult = await spawn(["bun", "add", specForBunAdd], stagingDir);
+    spawnResult = await spawn(["bun", "add", "--ignore-scripts", specForBunAdd], stagingDir);
   } catch (e) {
     cleanup();
     throw new NpmFetchError(`failed to spawn bun: ${(e as Error).message}`, "network_error", {
@@ -292,9 +305,6 @@ export function copyDir(srcDir: string, destDir: string): void {
 }
 
 function copyDirInner(src: string, dest: string): void {
-  // Bun gives us `Bun.file` but no recursive copy; we use Node's fs for
-  // portability + simplicity.
-  const { readdirSync, statSync, copyFileSync } = require("node:fs") as typeof import("node:fs");
   for (const entry of readdirSync(src)) {
     const s = path.join(src, entry);
     const d = path.join(dest, entry);
