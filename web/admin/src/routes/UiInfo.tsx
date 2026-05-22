@@ -3,6 +3,7 @@
  */
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { SchemaRequirements } from "../components/SchemaRequirements.tsx";
 import { type UiInfoResponse, formatError, getUiInfo } from "../lib/api.ts";
 
 export function UiInfo() {
@@ -73,6 +74,13 @@ export function UiInfo() {
         </ul>
       ) : (
         <p className="muted">no OAuth client registered</p>
+      )}
+
+      {data.ui.required_schema && (
+        <>
+          <h3>Schema requirements</h3>
+          <SchemaRequirements schema={data.ui.required_schema} defaultExpanded={true} />
+        </>
       )}
 
       <h3>meta.json</h3>

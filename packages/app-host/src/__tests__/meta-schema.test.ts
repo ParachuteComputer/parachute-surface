@@ -275,11 +275,180 @@ describe("metaSchemaJson", () => {
         "public",
         "pwa",
         "pwa_service_worker",
+        "required_schema",
         "scopes_required",
         "tagline",
         "vault_default",
         "version",
       ].sort(),
     );
+  });
+
+  test("required_schema property describes the tag-role shape", () => {
+    const schema = metaSchemaJson();
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    const rs = props.required_schema!;
+    expect(rs.type).toBe("object");
+    expect(rs.additionalProperties).toBe(false);
+    const rsProps = rs.properties as Record<string, Record<string, unknown>>;
+    expect(rsProps.tags?.type).toBe("array");
+  });
+});
+
+describe("parseMeta — required_schema (patterns#57)", () => {
+  // Phase 2.0 SHAPE test: validator accepts a UI with required_schema
+  // declared; the auto-provisioner (Phase 2.1+) is out of scope.
+
+  test("accepts a meta.json with required_schema.tags declared", () => {
+    const meta = parseMeta({
+      name: "notes",
+      displayName: "Notes",
+      path: "/app/notes",
+      required_schema: {
+        tags: [
+          {
+            name: "capture",
+            description: "Quick captures from voice or text",
+            fields: {
+              source: {
+                type: "string",
+                required: true,
+                description: "Where the capture came from",
+              },
+              count: { type: "number" },
+              archived: { type: "boolean", required: false },
+              createdAt: { type: "date" },
+            },
+          },
+          {
+            name: "pinned",
+          },
+        ],
+      },
+    });
+    expect(meta.required_schema?.tags?.length).toBe(2);
+    expect(meta.required_schema?.tags?.[0]?.name).toBe("capture");
+    expect(meta.required_schema?.tags?.[0]?.fields?.source?.type).toBe("string");
+    expect(meta.required_schema?.tags?.[0]?.fields?.source?.required).toBe(true);
+    expect(meta.required_schema?.tags?.[1]?.name).toBe("pinned");
+    expect(meta.required_schema?.tags?.[1]?.fields).toBeUndefined();
+  });
+
+  test("accepts an explicit empty required_schema (deliberate 'no schema needed')", () => {
+    const meta = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+      required_schema: {},
+    });
+    expect(meta.required_schema).toEqual({});
+  });
+
+  test("absent required_schema leaves field undefined", () => {
+    const meta = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+    });
+    expect(meta.required_schema).toBeUndefined();
+  });
+
+  test("rejects non-object required_schema", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: "tags",
+      }),
+    ).toThrow(InvalidMetaError);
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: [],
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects non-array required_schema.tags", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: { tags: { name: "x" } },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects tag entry without name", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: { tags: [{ description: "missing name" }] },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects tag fields with disallowed type", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", fields: { foo: { type: "object" } } }],
+        },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects tag fields with non-boolean required", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", fields: { foo: { type: "string", required: "yes" } } }],
+        },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects tag fields container that isn't an object", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", fields: [] }],
+        },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("InvalidMetaError.details point at the field path", () => {
+    try {
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", fields: { foo: { type: "garbage" } } }],
+        },
+      });
+      throw new Error("expected throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidMetaError);
+      const err = e as InvalidMetaError;
+      const paths = err.details.map((d) => d.path);
+      expect(paths.some((p) => p.includes("required_schema.tags[0].fields.foo.type"))).toBe(true);
+    }
   });
 });

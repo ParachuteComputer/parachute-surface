@@ -1,0 +1,51 @@
+{
+  "name": "@openparachute/app",
+  "version": "0.2.0-rc.1",
+  "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "module": "src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./meta-schema": "./src/meta-schema.ts"
+  },
+  "private": false,
+  "license": "AGPL-3.0",
+  "bin": {
+    "parachute-app": "bin/parachute-app.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "bin/**/*.ts",
+    "dist/admin/**",
+    ".parachute/module.json",
+    ".parachute/info",
+    ".parachute/config/schema",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "bun run bin/parachute-app.ts serve",
+    "build": "cd ../../web/admin && bun install --frozen-lockfile && bun run build",
+    "build:admin": "cd ../../web/admin && bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@openparachute/app-client": "workspace:*",
+    "@openparachute/scope-guard": "^0.3.0"
+  }
+}

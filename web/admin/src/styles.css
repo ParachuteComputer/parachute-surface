@@ -264,3 +264,60 @@ input[type="password"] {
 .ui-info ul {
   padding-left: 1.2rem;
 }
+
+/* SchemaRequirements (patterns#57): per-UI tag-role schema declaration. */
+.schema-requirements {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+.schema-requirements summary {
+  cursor: pointer;
+  color: #1e6bb8;
+  padding: 0.15rem 0;
+}
+.schema-requirements summary:hover {
+  text-decoration: underline;
+}
+.schema-requirements__tags {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+}
+.schema-requirements__tag {
+  margin-bottom: 0.75rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid #ddd;
+}
+.schema-requirements__tag-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.schema-requirements__tag-desc {
+  color: #555;
+  font-size: 0.85rem;
+}
+.schema-requirements__fields {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  border-collapse: collapse;
+}
+.schema-requirements__fields th,
+.schema-requirements__fields td {
+  padding: 0.2rem 0.6rem 0.2rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+.schema-requirements__fields th {
+  color: #666;
+  font-weight: 500;
+  border-bottom: 1px solid #eee;
+}
+.schema-requirements__note {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.78rem;
+  color: #888;
+  font-style: italic;
+}
+.schema-requirements--compact .schema-requirements__fields {
+  font-size: 0.78rem;
+}

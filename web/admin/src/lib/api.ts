@@ -7,6 +7,23 @@
  * `TokenSetup` banner.
  */
 
+// Canonical type definitions live in app-host (`packages/app-host/src/
+// meta-schema.ts`) — re-imported here so the admin SPA can't drift from
+// the server's shape. Type-only import keeps zero runtime bundle cost.
+import type {
+  RequiredSchemaDeclaration,
+  RequiredSchemaFieldType,
+  TagSchemaDeclaration,
+  TagSchemaFieldDeclaration,
+} from "@openparachute/app/meta-schema";
+
+export type {
+  RequiredSchemaDeclaration,
+  RequiredSchemaFieldType,
+  TagSchemaDeclaration,
+  TagSchemaFieldDeclaration,
+};
+
 export const TOKEN_STORAGE_KEY = "parachute_operator_token";
 
 export type UiSummary = {
@@ -23,6 +40,7 @@ export type UiSummary = {
   status: "active";
   oauthClientId?: string;
   oauthStatus?: string;
+  required_schema?: RequiredSchemaDeclaration;
 };
 
 export type SkippedUi = {

@@ -1,0 +1,53 @@
+{
+  "name": "@openparachute/app-client",
+  "version": "0.1.0-rc.1",
+  "description": "Shared browser-side library for Parachute apps — OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id helpers.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./oauth": {
+      "types": "./dist/oauth.d.ts",
+      "import": "./dist/oauth.js"
+    },
+    "./vault-client": {
+      "types": "./dist/vault-client.d.ts",
+      "import": "./dist/vault-client.js"
+    },
+    "./token-storage": {
+      "types": "./dist/token-storage.d.ts",
+      "import": "./dist/token-storage.js"
+    },
+    "./sw-reload": {
+      "types": "./dist/sw-reload.d.ts",
+      "import": "./dist/sw-reload.js"
+    },
+    "./vault-id": {
+      "types": "./dist/vault-id.d.ts",
+      "import": "./dist/vault-id.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
