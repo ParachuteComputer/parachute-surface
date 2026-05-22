@@ -9,6 +9,133 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.2] + [app-client 0.1.0-rc.2] - 2026-05-22
+
+feat(app): Phase 2.1 — bootstrap default Notes UI on first boot +
+auto-provision `required_schema` declarations on `add` (folds
+[patterns#57](https://github.com/ParachuteComputer/parachute-patterns/issues/57)
+Phase 2 + Notes migration Phase 1 — design doc Section 16).
+
+This release completes the "friend-deploy" story: a fresh
+`parachute-app serve` on a new install gets Notes for free, and apps
+that declare `required_schema` get their vault tags seeded on install
+without operator hand-holding.
+
+### Bootstrap default Notes UI on first boot — `@openparachute/app` 0.2.0-rc.2
+
+When `serve()` starts up with an empty `~/.parachute/app/uis/`, apps
+now auto-installs each entry in `config.bootstrap_default_apps.apps`
+via the same npm-fetch pipeline `parachute-app add` uses.
+
+Default config: `{enabled: true, apps: ["@openparachute/notes-ui"]}`.
+Operators who want a different default flip `enabled: false` or set
+`apps: []`. Per design doc Section 16, Notes is the canonical first
+app installed under parachute-app.
+
+Skip conditions (any one triggers an early return):
+- `config.bootstrap_default_apps.enabled === false`
+- `config.bootstrap_default_apps.apps === []`
+- `uis/` exists AND contains at least one non-dotfile entry (operator
+  was here; bootstrap doesn't trample existing installs)
+
+Failure modes are best-effort: if `bun add` 404s, the network is down,
+or the package isn't published yet, the daemon logs a warning + the
+operator can retry via `parachute-app add @openparachute/notes-ui`
+once the underlying issue is fixed.
+
+Surfaces shipped:
+- `src/bootstrap.ts` — `maybeBootstrapDefaultApps()` orchestrator
+- `src/index.ts` — `serve()` wires bootstrap after the initial scan;
+  `ServeHandle.bootstrap` exposes the promise for tests
+- `serve()` opts: `skipBootstrap: true` for CI/tests
+- `src/admin-routes.ts` — `addUiInternal()` extracted from the HTTP
+  handler so bootstrap can reuse the staging/meta-merge/DCR pipeline
+
+### Auto-provision `required_schema` on `add` + manual endpoint — `@openparachute/app` 0.2.0-rc.2
+
+When `POST /app/add` succeeds AND the UI's meta declares
+`required_schema.tags` AND `config.auto_provision_required_schema`
+(default `true`), app now calls `VaultClient.updateTag` against each
+declared tag so vault has the schema row the app expects.
+
+Also adds a manual re-trigger:
+- `POST /app/<name>/provision-schema` (scope: `app:admin`)
+- CLI: `parachute-app provision-schema <name>`
+- Admin SPA: "Provision schema" button on the per-UI detail page
+
+The provisioner is idempotent (vault's `PUT /api/tags/:name` upserts;
+omitted keys preserve), best-effort (per-tag errors log + record but
+never unwind the install), and surfaces a structured per-tag summary
+in the response (`provisioned`, `errors`, `skipReason`, `vaultUrl`).
+
+Which vault?
+- `meta.vault_default` set → provision against `<hub_url>/vault/<name>`
+- Unset → skip with reason (vault-agnostic apps don't know which
+  vault to seed; the operator runs `provision-schema` against each
+  manually).
+
+Bug-fix folded in: the on-disk meta.json projection in the `add`
+write step now preserves `required_schema`. Phase 2.0 added the meta
+field but the write step dropped it; a `reload` would have lost the
+declaration. Caught while wiring Phase 2.1 integration tests.
+
+Surfaces shipped:
+- `src/provision-schema.ts` — `provisionSchemaForUi()` helper
+- `src/admin-routes.ts` — `POST /app/<name>/provision-schema` handler
+  + post-add auto-trigger hook in `addUiInternal()`
+- `bin/parachute-app.ts` — `provision-schema <name>` verb
+- `web/admin/src/lib/api.ts` — `provisionSchema(name)` helper
+- `web/admin/src/routes/UiInfo.tsx` — "Provision schema" button +
+  inline result rendering
+
+### Config schema additions — `@openparachute/app` 0.2.0-rc.2
+
+`.parachute/config/schema` grows two new fields:
+
+- `bootstrap_default_apps: {enabled: bool, apps: string[]}` — default
+  `{enabled: true, apps: ["@openparachute/notes-ui"]}`
+- `auto_provision_required_schema: bool` — default `true`
+
+Both have explicit per-field validation + clone-on-load (nested
+defaults are mutation-safe).
+
+### `@openparachute/app-client` 0.1.0-rc.2 — `VaultClient.updateTag` + `getTag`
+
+Two new methods on `VaultClient`:
+
+- `updateTag(name, payload)` — `PUT /api/tags/:name` upsert. Vault's
+  contract: omitted keys preserve prior values, explicit `null`
+  clears, `fields` is merge-on-write. Idempotent.
+- `getTag(name)` — single tag-identity read; returns `null` on 404
+  so provisioning callers can branch "missing → create" without
+  try/catch noise.
+
+Also adds the `TagUpsertPayload`, `TagRecord`, `TagFieldSchema` types
+mirroring vault's wire format (see `parachute-vault/src/config.ts`).
+
+### Verified
+
+| Suite | Before (0.2.0-rc.1) | After (0.2.0-rc.2) |
+|---|---|---|
+| `bun test packages/app-host/src/` | 281 / 0 | 314 / 0 |
+| `bun test packages/app-client/src/` | 81 / 0 | 90 / 0 |
+| `cd web/admin && bun run test` | 40 / 0 | 43 / 0 |
+
+Typecheck clean. Build clean. Biome clean.
+
+### Dependencies
+
+This release depends on `@openparachute/notes-ui` being publishable
+on npm for the bootstrap default to actually pull a real package
+(today the published name doesn't yet exist; bootstrap will warn +
+continue until it does, which is the intended best-effort behavior).
+The Notes migration arc (design doc Section 16, Phase 1) lands
+`@openparachute/notes-ui` as the publish target; once that ships,
+`parachute-app serve` from scratch ends with Notes mounted at
+`/app/notes/` on first boot.
+
+---
+
 ## [app 0.2.0-rc.1] + [app-client 0.1.0-rc.1] - 2026-05-21
 
 feat(app): Phase 2.0 — extract `@openparachute/app-client` shared
