@@ -25,7 +25,7 @@
     "default_scope_required": {
       "type": "array",
       "items": { "type": "string" },
-      "default": ["vault:read"],
+      "default": ["vault:*:read"],
       "description": "Fallback OAuth scopes when a UI's meta.json doesn't declare any."
     },
     "dev_mode_allowed": {

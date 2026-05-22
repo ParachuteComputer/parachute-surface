@@ -35,13 +35,18 @@ import type { UiMeta } from "./meta-schema.ts";
  *   - `app.js`
  *   - `app-2024.js` (no hex run that long; "2024" is 4 chars)
  *   - `vendor-1234.js`
+ *   - `app-20240101.js` (date stamp — 8 digits but pure-decimal, no a-f)
  *   - `icon.svg`
  *
  * The match looks for a dot-separated segment of ≥8 hex chars anywhere in
- * the filename. That catches both `app.a3b9f2c1.js` and `chunk-a3b9f2c1.js`
- * (Vite's lib-mode pattern + some other build tools' patterns).
+ * the filename, AND requires at least one a-f character in that segment.
+ * The lookahead `(?=[a-f0-9]*[a-f])` is the load-bearing line: it filters
+ * out pure-digit runs (date stamps like `20240101`) that would otherwise
+ * masquerade as hex hashes. Vite/Webpack hashes are random hex so they
+ * almost always contain at least one letter — and on the rare run that
+ * doesn't, the 1-hour fallback is harmless. False-positive avoidance wins.
  */
-const HASHED_ASSET_REGEX = /(^|[.\-_])[a-f0-9]{8,}(\.|$)/;
+const HASHED_ASSET_REGEX = /(^|[.\-_])(?=[a-f0-9]*[a-f])[a-f0-9]{8,}(\.|$)/;
 
 /**
  * Type signature exposed by section 5 of the brief — explicit per-asset

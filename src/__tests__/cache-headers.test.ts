@@ -19,7 +19,7 @@ const minimalMeta: UiMeta = {
   name: "x",
   displayName: "X",
   path: "/app/x",
-  scopes_required: ["vault:read"],
+  scopes_required: ["vault:*:read"],
   pwa: false,
   public: false,
 };
@@ -67,6 +67,22 @@ describe("cacheHeadersFor", () => {
     });
     expect(cacheHeadersFor("app-abcdef.js", minimalMeta)).toEqual({
       "Cache-Control": "public, max-age=3600",
+    });
+  });
+
+  test("rejects date-format filenames (8+ digits but no a-f)", () => {
+    // Pure-decimal runs of 8+ digits (date stamps, build numbers) must not
+    // masquerade as hex hashes. The lookahead `(?=[a-f0-9]*[a-f])` filters
+    // these out so `app-20240101.js` falls through to the 1-hour default.
+    expect(cacheHeadersFor("app-20240101.js", minimalMeta)).toEqual({
+      "Cache-Control": "public, max-age=3600",
+    });
+    expect(cacheHeadersFor("vendor-20231205.js", minimalMeta)).toEqual({
+      "Cache-Control": "public, max-age=3600",
+    });
+    // Baseline: a real hex hash with at least one a-f still matches.
+    expect(cacheHeadersFor("app-abc12345.js", minimalMeta)).toEqual({
+      "Cache-Control": "public, max-age=31536000, immutable",
     });
   });
 

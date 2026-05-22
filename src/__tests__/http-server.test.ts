@@ -49,7 +49,7 @@ function makeUi(
       name,
       displayName: name,
       path: mountPath,
-      scopes_required: ["vault:read"],
+      scopes_required: ["vault:*:read"],
       pwa: false,
       public: false,
       ...extraMeta,
@@ -63,7 +63,7 @@ function makeState(uis: RegisteredUi[] = []): AppState {
       hub_url: "http://127.0.0.1:1939",
       auto_register_oauth_clients: true,
       disabled: false,
-      default_scope_required: ["vault:read"],
+      default_scope_required: ["vault:*:read"],
       dev_mode_allowed: true,
     },
     registeredUis: uis,
@@ -325,6 +325,32 @@ describe("HTTP — 404 + 405", () => {
     try {
       const r = await fetch(`${srv.url}/unrelated-path`);
       expect(r.status).toBe(404);
+      // Body is the generic "Not Found" — must not leak any path / error detail.
+      expect(await r.text()).toBe("Not Found");
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("404 body is generic — no OS error path leak when file vanishes mid-request", async () => {
+    // Register a UI, then delete index.html so serveFileWithHeaders catches the
+    // readFileSync ENOENT and falls into the 404 path. The body must NOT contain
+    // the absolute filesystem path that ENOENT's error message exposes.
+    const ui = makeUi("notes", "/app/notes", { "index.html": "<!doctype html>" });
+    fs.unlinkSync(path.join(ui.distDir, "index.html"));
+    const srv = startServer(makeState([ui]));
+    try {
+      // Any subpath under the mount routes through serveUiAsset → SPA fallback
+      // → serveFileWithHeaders(indexHtmlPath) → ENOENT → generic 404.
+      const r = await fetch(`${srv.url}/app/notes/`);
+      expect(r.status).toBe(404);
+      const body = await r.text();
+      expect(body).toBe("Not Found");
+      // Sanity: the OS error format ("ENOENT", absolute path, "no such file")
+      // must NOT appear in the response body.
+      expect(body).not.toContain("ENOENT");
+      expect(body).not.toContain(ui.distDir);
+      expect(body).not.toContain("no such file");
     } finally {
       srv.stop();
     }

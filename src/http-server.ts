@@ -111,11 +111,17 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response {
 
   // /healthz: open, both with and without /app prefix so hub-as-supervisor
   // (forwards via /app) and direct localhost probes both work.
+  //
+  // When `config.disabled` is true, surface `status: "disabled"` so probes
+  // can distinguish "daemon's up but intentionally not hosting" from "ok".
+  // The JSON key is `skippedUis` (matching the `AppState.skippedUis` field
+  // name) per reviewer Open Q 2 — keeps the shape consistent across the
+  // wire format and the internal state.
   if (pathname === "/healthz" || pathname === "/app/healthz") {
     return Response.json({
-      status: "ok",
+      status: state.config.disabled ? "disabled" : "ok",
       uis: state.registeredUis.length,
-      skipped: state.skippedUis.length,
+      skippedUis: state.skippedUis.length,
       uptime_seconds: Math.floor((Date.now() - ctx.startedAt.getTime()) / 1000),
     });
   }
@@ -221,6 +227,13 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
  * Read a file from disk and wrap it with content-type + cache headers.
  * Returns 404 if the file is unreadable — caller passes a path it already
  * stat'd, so the only realistic 404 is a race with deletion mid-request.
+ *
+ * Body is the literal string `"Not Found"` — we deliberately don't include
+ * the underlying error message because ENOENT's `Error.message` leaks the
+ * absolute filesystem path (e.g. `ENOENT: no such file or directory, open
+ * '/Users/.../app/uis/notes/dist/missing.js'`). That information is fine in
+ * logs but not in a client-visible response. We log the path-loss event
+ * server-side and return the generic body to the client.
  */
 function serveFileWithHeaders(
   req: Request,
@@ -232,7 +245,9 @@ function serveFileWithHeaders(
   try {
     body = readFileSync(filePath);
   } catch (e) {
-    return new Response(`Not Found: ${(e as Error).message}`, { status: 404 });
+    // Log the actual path server-side for debugging — never returns to the client.
+    console.warn(`[app] serve: file vanished mid-request: ${filePath} (${(e as Error).message})`);
+    return new Response("Not Found", { status: 404 });
   }
   const headers: Record<string, string> = {
     "content-type": contentTypeFor(filenameForHeaders),
@@ -305,10 +320,14 @@ function serveStaticFile(filePath: string, contentType: string): Response {
     const body = readFileSync(filePath, "utf8");
     return new Response(body, { status: 200, headers: { "content-type": contentType } });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ error: "not_found", message: `${filePath}: ${(e as Error).message}` }),
-      { status: 404, headers: { "content-type": "application/json" } },
-    );
+    // Same posture as serveFileWithHeaders: log the path server-side but
+    // return a generic body so ENOENT's absolute filesystem path doesn't
+    // leak to the client.
+    console.warn(`[app] serve-static: ${filePath} unreadable (${(e as Error).message})`);
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
   }
 }
 

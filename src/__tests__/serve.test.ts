@@ -183,6 +183,38 @@ describe("serve — live integration", () => {
       await h.stop();
     }
   });
+
+  test("config.disabled=true skips UI scan + healthz reports disabled", async () => {
+    // Seed a UI that WOULD be mounted normally; with disabled=true it must not be.
+    seedUi("test-ui", "/app/test-ui", { "index.html": "should not be served" });
+    // Write a config file with disabled: true so loadConfig picks it up.
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ disabled: true }));
+    const h = serve({
+      port: 0,
+      configPath,
+      uisDir,
+      manifestPath,
+      logger: silentLogger,
+    });
+    try {
+      const url = `http://127.0.0.1:${h.server.port}`;
+      // Healthz reports disabled + zero UIs (scan was skipped).
+      const r = await fetch(`${url}/app/healthz`);
+      expect(r.status).toBe(200);
+      const body = (await r.json()) as { status: string; uis: number };
+      expect(body.status).toBe("disabled");
+      expect(body.uis).toBe(0);
+      // No UI is mounted — the would-be /app/test-ui/ falls through to 404.
+      const r2 = await fetch(`${url}/app/test-ui/`);
+      expect(r2.status).toBe(404);
+      // `.parachute/*` admin surface still works (operator path back to re-enable).
+      const r3 = await fetch(`${url}/.parachute/config`);
+      expect(r3.status).toBe(200);
+    } finally {
+      await h.stop();
+    }
+  });
 });
 
 describe("runOnce", () => {

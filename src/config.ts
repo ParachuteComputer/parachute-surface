@@ -67,7 +67,7 @@ export const DEFAULTS: AppConfig = {
   hub_url: "http://127.0.0.1:1939",
   auto_register_oauth_clients: true,
   disabled: false,
-  default_scope_required: ["vault:read"],
+  default_scope_required: ["vault:*:read"],
   dev_mode_allowed: true,
 };
 
@@ -151,7 +151,7 @@ export function validateConfig(raw: unknown, configPath = "<inline>"): AppConfig
     disabled = o.disabled;
   }
 
-  // default_scope_required — array of non-empty strings; default ["vault:read"].
+  // default_scope_required — array of non-empty strings; default ["vault:*:read"].
   let default_scope_required: string[] = [...DEFAULTS.default_scope_required];
   if (o.default_scope_required !== undefined) {
     if (!Array.isArray(o.default_scope_required)) {

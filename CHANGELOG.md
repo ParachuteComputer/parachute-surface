@@ -17,7 +17,7 @@ dist/ contents with smart cache headers + SPA-routing fallback.
 - `src/meta-schema.ts` — hand-rolled validator for per-UI meta.json.
   Required fields: `name` (pattern `^[a-z][a-z0-9-]*$`), `displayName`,
   `path` (pattern `^/app/[a-z0-9-]+$`). Optional: `tagline`, `version`,
-  `iconUrl`, `scopes_required` (defaults to `["vault:read"]`),
+  `iconUrl`, `scopes_required` (defaults to `["vault:*:read"]`),
   `vault_default`, `pwa` (default false), `pwa_service_worker` (required
   when `pwa: true`), `public` (default false). Exposes
   `InvalidMetaError` with a flat `details` list.

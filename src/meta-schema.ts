@@ -24,8 +24,16 @@ export const NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 /** Allowed pattern for a UI's mount `path` (always under `/app/`). */
 export const PATH_PATTERN = /^\/app\/[a-z0-9-]+$/;
 
-/** Default scopes applied when meta.json omits `scopes_required`. */
-export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:read"];
+/**
+ * Default scopes applied when meta.json omits `scopes_required`.
+ *
+ * Per design doc section 5: vault-agnostic UIs (those that don't pin a
+ * specific vault via `vault_default`) default to the wildcard form
+ * `vault:*:read` — the `*` is the `<vault-name>` segment, expressing
+ * "read access to whichever vault the session is bound to." The bare
+ * `vault:read` form is not a valid scope shape (missing the name segment).
+ */
+export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
 
 /**
  * Validated, in-memory shape of a UI's meta.json. Optional fields are filled
@@ -45,7 +53,7 @@ export type UiMeta = {
   version?: string;
   /** Path to icon, relative to the UI bundle (e.g. `"icon.svg"`). */
   iconUrl?: string;
-  /** OAuth scopes the UI declares as required. Defaults to `["vault:read"]`. */
+  /** OAuth scopes the UI declares as required. Defaults to `["vault:*:read"]`. */
   scopes_required: string[];
   /** Optional single-vault binding hint for vault-specific UIs. */
   vault_default?: string;
@@ -76,7 +84,7 @@ export class InvalidMetaError extends Error {
  * with a flat list of field-level reasons on any structural problem.
  *
  * Defaults filled at parse time:
- *   - `scopes_required` → `["vault:read"]` when absent
+ *   - `scopes_required` → `["vault:*:read"]` when absent
  *   - `pwa` → `false` when absent
  *   - `public` → `false` when absent
  */

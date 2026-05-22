@@ -90,7 +90,19 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   const hostname = opts.hostname ?? "127.0.0.1";
 
   const config = loadConfig({ configPath: opts.configPath, logger });
-  const scan = scanUis({ uisDir: opts.uisDir, logger });
+
+  // Kill-switch: when `config.disabled` is true, skip the UI scan entirely
+  // so no bundles are mounted. The HTTP server still binds (healthz + the
+  // `.parachute/*` admin surface keep working) so an operator can flip the
+  // flag back via the admin SPA (Phase 1.2) without restarting the daemon.
+  // Per design doc + reviewer nit 3 — `disabled` was loaded but not honored.
+  const scan = config.disabled
+    ? { registered: [], skipped: [] as Array<{ dirName: string; status: string; reason: string }> }
+    : scanUis({ uisDir: opts.uisDir, logger });
+
+  if (config.disabled) {
+    logger.log("[app] disabled (config.disabled=true) — no UIs mounted");
+  }
 
   const state: AppState = {
     config,
