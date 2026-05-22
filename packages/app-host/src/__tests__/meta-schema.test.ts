@@ -341,6 +341,48 @@ describe("parseMeta — Phase 3.0 dev-mode fields", () => {
     ).toThrow(InvalidMetaError);
   });
 
+  test("rejects absolute-path dev_watch_dir (operator footgun guard)", () => {
+    // dev_watch_dir is resolved relative to the UI's root directory.
+    // Allowing absolute paths like "/etc" or "/" would let a misconfigured
+    // meta.json arm a recursive FSWatcher on the host filesystem.
+    // Mirrors pwa_service_worker's leading-slash rejection.
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: "/etc" }),
+    ).toThrow(InvalidMetaError);
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: "/" }),
+    ).toThrow(InvalidMetaError);
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        dev_watch_dir: "/Users/alice/code",
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("accepts relative dev_watch_dir variants", () => {
+    // Relative forms — including `..`-escaping the bundle (the documented
+    // "watch a checkout next to the install" use case) and `./`-prefixed.
+    expect(
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: "src" })
+        .dev_watch_dir,
+    ).toBe("src");
+    expect(
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: "./src" })
+        .dev_watch_dir,
+    ).toBe("./src");
+    expect(
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        dev_watch_dir: "../gitcoin-brain-ui/src",
+      }).dev_watch_dir,
+    ).toBe("../gitcoin-brain-ui/src");
+  });
+
   test("rejects non-string dev_build_cmd", () => {
     expect(() =>
       parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_build_cmd: true as unknown }),

@@ -144,6 +144,13 @@ export type WatchOpts = {
   debounceMs?: number;
   /** Spawner override (tests). Defaults to `Bun.spawn`. */
   spawnFn?: DevSpawnFn;
+  /**
+   * Per-call override for the build timeout. Production code never sets
+   * this — it exists so unit tests can drop the 60s ceiling to something
+   * a test can wait for (~100ms) without slowing the suite. Falsy /
+   * undefined → use `BUILD_TIMEOUT_MS`.
+   */
+  buildTimeoutMs?: number;
   /** Logger override; default console. */
   logger?: Pick<Console, "log" | "warn" | "error">;
 };
@@ -163,6 +170,8 @@ type WatcherSlot = {
   cwd: string;
   /** Spawn function captured at start time. */
   spawn: DevSpawnFn;
+  /** Per-slot build-timeout (test seam). Defaults to `BUILD_TIMEOUT_MS`. */
+  buildTimeoutMs: number;
   /** Logger captured at start time. */
   logger: Pick<Console, "log" | "warn" | "error">;
   /** A build is currently in flight (single-flight per UI). */
@@ -253,6 +262,8 @@ export function startWatcher(opts: WatchOpts): { watchedAbsDir: string; debounce
     debounceMs,
     cwd: opts.uiRootDir,
     spawn,
+    buildTimeoutMs:
+      opts.buildTimeoutMs && opts.buildTimeoutMs > 0 ? opts.buildTimeoutMs : BUILD_TIMEOUT_MS,
     logger,
     building: false,
     rerunPending: false,
@@ -419,10 +430,10 @@ async function runDebouncedCycle(name: string): Promise<void> {
   const startedAt = Date.now();
   slot.logger.log(`[app] dev-watcher: build for ${name} starting: \`${cmd}\``);
 
-  // 60s timeout — abort if the build hangs.
+  // Per-slot timeout (default 60s) — abort if the build hangs.
   const timeoutHandle = setTimeout(() => {
     slot.buildAbort?.abort();
-  }, BUILD_TIMEOUT_MS);
+  }, slot.buildTimeoutMs);
 
   try {
     const result = await slot.spawn(["sh", "-c", cmd], {

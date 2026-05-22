@@ -277,6 +277,63 @@ describe("dev-watcher: build command", () => {
     expect(subscriber.reloads).toBe(0);
   });
 
+  test("build exceeding buildTimeoutMs is aborted; slot unblocks + next batch arms a new build", async () => {
+    // Cover the 60s AbortController path: inject a spawnFn that NEVER
+    // resolves on its own — only an aborted signal can settle it. With a
+    // 100ms test-only timeout override, the watcher must (a) abort the
+    // hanging build, (b) clear `building`, and (c) honor the next file
+    // change as a fresh build instead of leaving rerunPending stuck.
+    const dir = makeScratch();
+    const subscriber = fakeSubscriber("ui-a");
+    let buildsStarted = 0;
+    let abortsObserved = 0;
+    startWatcher({
+      name: "ui-a",
+      uiRootDir: dir,
+      buildCmd: "sleep 9999",
+      debounceMs: 50,
+      buildTimeoutMs: 100,
+      logger: silentLogger,
+      spawnFn: (_argv, { signal }) => {
+        buildsStarted++;
+        // Resolve only when aborted — mirrors a process that ignored TERM
+        // until its AbortSignal-bridged kill landed. Return exit=null
+        // (kill code) so the watcher's "exit != 0 → no broadcast" branch
+        // fires for both timeout and natural-fail paths uniformly.
+        return new Promise((resolve) => {
+          if (!signal) return; // tests always pass signal
+          const onAbort = () => {
+            abortsObserved++;
+            resolve({ exitCode: 137, stdout: "", stderr: "aborted" });
+          };
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        });
+      },
+    });
+
+    // Trigger build 1 — it parks until the 100ms timeout aborts it.
+    await sleep(20);
+    writeFileSync(join(dir, "a.ts"), "a\n");
+    // Wait debounce (50ms) + timeout (100ms) + slack for the finally{}
+    // block to reset `building` and process rerunPending.
+    await sleep(300);
+    expect(buildsStarted).toBe(1);
+    expect(abortsObserved).toBe(1);
+    expect(subscriber.reloads).toBe(0); // aborted build never broadcasts
+
+    // Slot is unblocked: a fresh change triggers a new (independent) build,
+    // not a stuck "rerunPending" carry-over from the aborted one.
+    writeFileSync(join(dir, "b.ts"), "b\n");
+    await sleep(300);
+    expect(buildsStarted).toBe(2);
+    expect(abortsObserved).toBe(2);
+    expect(subscriber.reloads).toBe(0);
+
+    // Status reflects no in-flight build after the abort settles.
+    expect(watcherStatus("ui-a")?.building).toBe(false);
+  });
+
   test("build is single-flight: overlapping batches re-run after completion", async () => {
     const dir = makeScratch();
     const subscriber = fakeSubscriber("ui-a");

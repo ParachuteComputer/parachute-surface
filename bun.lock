@@ -23,7 +23,7 @@
     },
     "packages/app-host": {
       "name": "@openparachute/app",
-      "version": "0.2.0-rc.2",
+      "version": "0.2.0-rc.3",
       "bin": {
         "parachute-app": "bin/parachute-app.ts",
       },
@@ -42,7 +42,7 @@
     },
     "web/admin": {
       "name": "@openparachute/app-admin-ui",
-      "version": "0.2.0-rc.2",
+      "version": "0.2.0-rc.3",
       "dependencies": {
         "@openparachute/app": "workspace:*",
         "react": "^19.0.0",

@@ -324,13 +324,22 @@ export function parseMeta(raw: unknown): UiMeta {
   // Phase 2.1+ auto-provisions).
   const required_schema = parseRequiredSchema(o.required_schema, errors);
 
-  // dev_watch_dir — optional string; Phase 3.0.
+  // dev_watch_dir — optional string; Phase 3.0. Must be relative to the
+  // UI's root directory — absolute paths are rejected as a footgun guard
+  // (operators who genuinely want to watch an absolute path should use a
+  // symlink or different tooling). Mirrors `pwa_service_worker`'s
+  // leading-slash rejection.
   let dev_watch_dir: string | undefined;
   if (o.dev_watch_dir !== undefined) {
     if (typeof o.dev_watch_dir !== "string" || o.dev_watch_dir.length === 0) {
       errors.push({
         path: "dev_watch_dir",
         message: "must be a non-empty string (path relative to UI root)",
+      });
+    } else if (o.dev_watch_dir.startsWith("/")) {
+      errors.push({
+        path: "dev_watch_dir",
+        message: `must be relative to the UI's root directory (got absolute path: "${o.dev_watch_dir}")`,
       });
     } else {
       dev_watch_dir = o.dev_watch_dir;
