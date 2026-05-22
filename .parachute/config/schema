@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://parachute.computer/schemas/app-config.json",
+  "title": "parachute-app config",
+  "description": "Runtime configuration for parachute-app. Persisted at $PARACHUTE_HOME/app/config.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "hub_url": {
+      "type": "string",
+      "format": "uri",
+      "default": "http://127.0.0.1:1939",
+      "description": "Hub origin for DCR registration."
+    },
+    "auto_register_oauth_clients": {
+      "type": "boolean",
+      "default": true,
+      "description": "Auto-register each added UI as an OAuth client with hub."
+    },
+    "disabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Stop hosting all UIs. Useful for maintenance."
+    },
+    "default_scope_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["vault:read"],
+      "description": "Fallback OAuth scopes when a UI's meta.json doesn't declare any."
+    },
+    "dev_mode_allowed": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether `parachute-app dev <name>` is permitted."
+    }
+  },
+  "x-scopes": ["app:read", "app:admin"]
+}

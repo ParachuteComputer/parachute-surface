@@ -1,0 +1,7 @@
+{
+  "name": "parachute-app",
+  "displayName": "App",
+  "tagline": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "version": "0.1.0-rc.1",
+  "capabilities": ["ui-host", "oauth-client-registration"]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "@openparachute/app",
+  "version": "0.1.0-rc.1",
+  "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": false,
+  "license": "AGPL-3.0",
+  "bin": {
+    "parachute-app": "bin/parachute-app.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "bin/**/*.ts",
+    ".parachute/module.json",
+    ".parachute/info",
+    ".parachute/config/schema",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "bun run bin/parachute-app.ts serve",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
