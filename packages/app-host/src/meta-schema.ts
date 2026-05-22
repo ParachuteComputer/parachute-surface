@@ -36,6 +36,57 @@ export const PATH_PATTERN = /^\/app\/[a-z0-9-]+$/;
 export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
 
 /**
+ * Allowed field types for `required_schema.tags[].fields`. Mirrors what
+ * vault's tag-identity schema accepts on the `fields` column — `string`,
+ * `number`, `boolean`, `date`. New types should be added here AND in
+ * vault's schema before being declared by an app, otherwise the
+ * Phase 2.1+ auto-provisioner will reject the declaration.
+ */
+export const REQUIRED_SCHEMA_FIELD_TYPES = ["string", "number", "boolean", "date"] as const;
+export type RequiredSchemaFieldType = (typeof REQUIRED_SCHEMA_FIELD_TYPES)[number];
+
+/**
+ * Field declaration within a tag-role schema. Mirrors vault's tag-
+ * identity field shape closely enough that the Phase 2.1+ auto-
+ * provisioner can map declarations to upsert calls without translation.
+ */
+export type TagSchemaFieldDeclaration = {
+  type: RequiredSchemaFieldType;
+  required?: boolean;
+  description?: string;
+};
+
+/**
+ * Tag-role schema declaration — what an app says it needs vault to have
+ * defined to function. Phase 2.0 (this revision): validate the shape
+ * only. Phase 2.1+ will auto-provision missing tag definitions in vault
+ * via `VaultClient.updateTag` at install time; that wiring is captured
+ * separately and depends on this declaration landing first.
+ */
+export type TagSchemaDeclaration = {
+  /** Tag name (e.g. `"capture"`). */
+  name: string;
+  /** Operator-facing description; surfaced in the admin SPA. */
+  description?: string;
+  /** Per-field declarations. Keys are field names; values are type + optionality. */
+  fields?: Record<string, TagSchemaFieldDeclaration>;
+};
+
+/**
+ * Top-level `required_schema` shape. Apps declare schema requirements
+ * inside this envelope so future extensions (links, indexes, etc.)
+ * don't pollute the top-level meta.json namespace.
+ *
+ * Patterns#57 — "Surfaces declare required vault schema." Each app
+ * should be able to declare its needed tag schemas in meta.json so
+ * they auto-provision. This Phase 2.0 lands the SCHEMA declaration
+ * (validate + surface); auto-provisioning is Phase 2.1+.
+ */
+export type RequiredSchemaDeclaration = {
+  tags?: TagSchemaDeclaration[];
+};
+
+/**
  * Validated, in-memory shape of a UI's meta.json. Optional fields are filled
  * with their schema defaults at parse time, so consumers can read them
  * unconditionally.
@@ -63,6 +114,14 @@ export type UiMeta = {
   pwa_service_worker?: string;
   /** If `true`, hub does NOT enforce a session gate at `/app/<name>/*`. Defaults to `false`. */
   public: boolean;
+  /**
+   * Optional declaration of vault schema this app needs to function.
+   * Phase 2.0 lands the shape (validate + surface in admin SPA); the
+   * auto-provisioning that would create missing tag-identity rows in
+   * vault at install time is Phase 2.1+. See `RequiredSchemaDeclaration`.
+   * Per patterns#57 ("Surfaces declare required vault schema").
+   */
+  required_schema?: RequiredSchemaDeclaration;
 };
 
 /**
@@ -234,6 +293,10 @@ export function parseMeta(raw: unknown): UiMeta {
     }
   }
 
+  // required_schema — optional object; patterns#57 (Phase 2.0 lands shape,
+  // Phase 2.1+ auto-provisions).
+  const required_schema = parseRequiredSchema(o.required_schema, errors);
+
   if (errors.length > 0) {
     throw new InvalidMetaError("meta.json", errors);
   }
@@ -250,7 +313,135 @@ export function parseMeta(raw: unknown): UiMeta {
     pwa,
     pwa_service_worker,
     public: publicField,
+    ...(required_schema ? { required_schema } : {}),
   };
+}
+
+/**
+ * Parse + validate the `required_schema` envelope. Returns `undefined`
+ * when the key is absent (it's optional); appends to the shared `errors`
+ * list and returns `undefined` on any shape problem (rejecting the
+ * meta.json as a whole when the top-level `parseMeta` loop sees errors).
+ *
+ * Validation rules:
+ *   - top-level must be an object (not array, not null)
+ *   - `tags` must be an array if present
+ *   - each tag entry must be an object with a required `name` string
+ *   - `description` optional; must be string when present
+ *   - `fields` optional; must be an object whose values are
+ *     `{ type: <one of REQUIRED_SCHEMA_FIELD_TYPES>, required?: bool, description?: string }`
+ */
+function parseRequiredSchema(
+  raw: unknown,
+  errors: Array<{ path: string; message: string }>,
+): RequiredSchemaDeclaration | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push({ path: "required_schema", message: "must be an object" });
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  const out: RequiredSchemaDeclaration = {};
+
+  if (o.tags !== undefined) {
+    if (!Array.isArray(o.tags)) {
+      errors.push({ path: "required_schema.tags", message: "must be an array" });
+    } else {
+      const tags: TagSchemaDeclaration[] = [];
+      let bad = false;
+      for (let i = 0; i < o.tags.length; i++) {
+        const entry = o.tags[i];
+        const pathPrefix = `required_schema.tags[${i}]`;
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          errors.push({ path: pathPrefix, message: "must be an object" });
+          bad = true;
+          continue;
+        }
+        const t = entry as Record<string, unknown>;
+
+        if (typeof t.name !== "string" || t.name.length === 0) {
+          errors.push({ path: `${pathPrefix}.name`, message: "is required (non-empty string)" });
+          bad = true;
+          continue;
+        }
+        const tag: TagSchemaDeclaration = { name: t.name };
+
+        if (t.description !== undefined) {
+          if (typeof t.description !== "string") {
+            errors.push({ path: `${pathPrefix}.description`, message: "must be a string" });
+            bad = true;
+            continue;
+          }
+          tag.description = t.description;
+        }
+
+        if (t.fields !== undefined) {
+          if (!t.fields || typeof t.fields !== "object" || Array.isArray(t.fields)) {
+            errors.push({ path: `${pathPrefix}.fields`, message: "must be an object" });
+            bad = true;
+            continue;
+          }
+          const fields: Record<string, TagSchemaFieldDeclaration> = {};
+          let fieldsBad = false;
+          for (const [fieldName, fieldRaw] of Object.entries(
+            t.fields as Record<string, unknown>,
+          )) {
+            const fieldPath = `${pathPrefix}.fields.${fieldName}`;
+            if (!fieldRaw || typeof fieldRaw !== "object" || Array.isArray(fieldRaw)) {
+              errors.push({ path: fieldPath, message: "must be an object" });
+              fieldsBad = true;
+              continue;
+            }
+            const f = fieldRaw as Record<string, unknown>;
+            const t2 = f.type;
+            if (
+              typeof t2 !== "string" ||
+              !(REQUIRED_SCHEMA_FIELD_TYPES as readonly string[]).includes(t2)
+            ) {
+              errors.push({
+                path: `${fieldPath}.type`,
+                message: `must be one of ${REQUIRED_SCHEMA_FIELD_TYPES.join(", ")}`,
+              });
+              fieldsBad = true;
+              continue;
+            }
+            const decl: TagSchemaFieldDeclaration = { type: t2 as RequiredSchemaFieldType };
+            if (f.required !== undefined) {
+              if (typeof f.required !== "boolean") {
+                errors.push({ path: `${fieldPath}.required`, message: "must be a boolean" });
+                fieldsBad = true;
+                continue;
+              }
+              decl.required = f.required;
+            }
+            if (f.description !== undefined) {
+              if (typeof f.description !== "string") {
+                errors.push({ path: `${fieldPath}.description`, message: "must be a string" });
+                fieldsBad = true;
+                continue;
+              }
+              decl.description = f.description;
+            }
+            fields[fieldName] = decl;
+          }
+          if (!fieldsBad) tag.fields = fields;
+          else {
+            bad = true;
+            continue;
+          }
+        }
+
+        tags.push(tag);
+      }
+      if (!bad) out.tags = tags;
+    }
+  }
+
+  // Even with empty/no `tags`, an explicit empty `required_schema: {}` is
+  // a deliberate operator declaration ("no schema needed"). Surface it
+  // unchanged so the admin SPA can distinguish "didn't declare" from
+  // "declared empty."
+  return out;
 }
 
 /**
@@ -317,6 +508,57 @@ export function metaSchemaJson(): Record<string, unknown> {
         type: "boolean",
         default: false,
         description: "If true, hub does not enforce a session gate at /app/<name>/*.",
+      },
+      required_schema: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "Optional declaration of vault schema this app needs to function. Phase 2.0 validates shape; Phase 2.1+ auto-provisions missing tag-identity rows. Per patterns#57.",
+        properties: {
+          tags: {
+            type: "array",
+            description: "Tag-role declarations the app expects vault to have.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name"],
+              properties: {
+                name: {
+                  type: "string",
+                  description: "Tag name (e.g. 'capture').",
+                },
+                description: {
+                  type: "string",
+                  description: "Operator-facing description; surfaced in the admin SPA.",
+                },
+                fields: {
+                  type: "object",
+                  description: "Per-field declarations keyed by field name.",
+                  additionalProperties: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["type"],
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: [...REQUIRED_SCHEMA_FIELD_TYPES],
+                        description: "Field type (matches vault's tag-identity field shape).",
+                      },
+                      required: {
+                        type: "boolean",
+                        description: "Whether the field is required on tag instances.",
+                      },
+                      description: {
+                        type: "string",
+                        description: "Field-level description; surfaced in the admin SPA.",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
   };
