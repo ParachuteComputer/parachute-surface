@@ -14,6 +14,7 @@
 
 import pkg from "../package.json" with { type: "json" };
 
+import { buildUisExtraFieldForBoot } from "./admin-routes.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
@@ -26,6 +27,18 @@ export * from "./meta-schema.ts";
 export * from "./cache-headers.ts";
 export * from "./ui-registry.ts";
 export * from "./services-manifest.ts";
+export * from "./auth.ts";
+export * from "./operator-token.ts";
+export * from "./dcr.ts";
+export * from "./npm-fetch.ts";
+export {
+  routeAdmin,
+  buildUisExtraFieldForBoot,
+  type AdminHandlerOpts,
+  type AdminMutableState,
+  type AddRequestBody,
+  type SerializedUi,
+} from "./admin-routes.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
 export { startHttpServer } from "./http-server.ts";
@@ -62,6 +75,17 @@ export type ServeOptions = {
    * without binding a real port.
    */
   serveFn?: typeof Bun.serve;
+  /**
+   * Override the absolute path to the built admin SPA bundle (tests). Defaults
+   * to `<package-root>/dist/admin/`.
+   */
+  adminDir?: string;
+  /** Inject fetch for DCR calls (tests). */
+  fetchFn?: import("./dcr.ts").FetchFn;
+  /** Override the operator-token resolver (tests). */
+  operatorTokenOverride?: () => string | undefined;
+  /** Override the npm-fetch spawner (tests). */
+  npmSpawnFn?: import("./npm-fetch.ts").NpmSpawnFn;
 };
 
 export type ServeHandle = {
@@ -123,6 +147,16 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     logger,
     parachuteDir: opts.parachuteDir,
     serveFn: opts.serveFn,
+    adminDir: opts.adminDir,
+    adminOpts: {
+      uisDir: opts.uisDir,
+      manifestPath: opts.manifestPath,
+      fetchFn: opts.fetchFn,
+      operatorTokenOverride: opts.operatorTokenOverride,
+      npmSpawnFn: opts.npmSpawnFn,
+      logger,
+      skipSelfRegisterRefresh: opts.skipSelfRegister,
+    },
   });
 
   logger.log(
@@ -143,6 +177,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       boundPort: portWritten,
       installDir: resolveProjectRoot(),
       manifestPath: opts.manifestPath,
+      extraFields: { uis: buildUisExtraFieldForBoot(state.registeredUis) },
       logger,
     });
   }
@@ -187,26 +222,6 @@ export function runOnce(opts: ServeOptions = {}): {
     logger.log(`[app]   skip    ${s.dirName} — ${s.status}: ${s.reason}`);
   }
   return { config, state };
-}
-
-/** Phase 1.2 surface — register a new UI under `$PARACHUTE_HOME/app/uis/<name>/`. */
-export function addUi(): Promise<never> {
-  throw new Error("addUi: not yet implemented (Phase 1.2)");
-}
-
-/** Phase 1.2 surface — remove a UI + revoke its OAuth client_id with hub. */
-export function removeUi(): Promise<never> {
-  throw new Error("removeUi: not yet implemented (Phase 1.2)");
-}
-
-/** Phase 1.2 surface — list installed UIs with status, mount path, OAuth client_id. */
-export function listUis(): Promise<never> {
-  throw new Error("listUis: not yet implemented (Phase 1.2)");
-}
-
-/** Phase 1.2 surface — refresh a UI's bundle in-place, no daemon restart. */
-export function reloadUi(): Promise<never> {
-  throw new Error("reloadUi: not yet implemented (Phase 1.2)");
 }
 
 /** Phase 1.3 surface — toggle dev mode for a UI with live reload. */
