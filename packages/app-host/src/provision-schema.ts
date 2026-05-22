@@ -45,8 +45,8 @@
  *     vault they want set up.
  */
 
-import { VaultClient } from "@openparachute/app-client/vault-client";
 import type { TagUpsertPayload } from "@openparachute/app-client";
+import { VaultClient } from "@openparachute/app-client/vault-client";
 
 import type { FetchFn } from "./dcr.ts";
 import type { RegisteredUi } from "./ui-registry.ts";

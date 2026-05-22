@@ -152,3 +152,70 @@ describe("resolveConfigPath / resolveUisDir", () => {
     expect(resolveUisDir(env)).toBe("/home/test/.parachute/app/uis");
   });
 });
+
+describe("Phase 2.1 config — bootstrap_default_apps + auto_provision_required_schema", () => {
+  test("defaults: bootstrap enabled with notes-ui, auto_provision true", () => {
+    expect(DEFAULTS.bootstrap_default_apps.enabled).toBe(true);
+    expect(DEFAULTS.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+    expect(DEFAULTS.auto_provision_required_schema).toBe(true);
+  });
+
+  test("loaded missing file returns the bootstrap defaults", () => {
+    const cfg = loadConfig({ configPath, logger: silentLogger });
+    expect(cfg.bootstrap_default_apps).toEqual({
+      enabled: true,
+      apps: ["@openparachute/notes-ui"],
+    });
+    expect(cfg.auto_provision_required_schema).toBe(true);
+  });
+
+  test("explicit bootstrap config round-trips", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        bootstrap_default_apps: {
+          enabled: false,
+          apps: ["@example/alpha-ui", "@example/beta-ui"],
+        },
+        auto_provision_required_schema: false,
+      }),
+    );
+    const cfg = loadConfig({ configPath, logger: silentLogger });
+    expect(cfg.bootstrap_default_apps.enabled).toBe(false);
+    expect(cfg.bootstrap_default_apps.apps).toEqual(["@example/alpha-ui", "@example/beta-ui"]);
+    expect(cfg.auto_provision_required_schema).toBe(false);
+  });
+
+  test("partial bootstrap config preserves the unset half", () => {
+    // enabled only — apps stays at default
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ bootstrap_default_apps: { enabled: false } }));
+    const cfg = loadConfig({ configPath, logger: silentLogger });
+    expect(cfg.bootstrap_default_apps.enabled).toBe(false);
+    expect(cfg.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+  });
+
+  test("bootstrap_default_apps wrong type → ConfigError", () => {
+    expect(() => validateConfig({ bootstrap_default_apps: "yes" })).toThrow(ConfigError);
+    expect(() => validateConfig({ bootstrap_default_apps: { enabled: "yes" } })).toThrow(
+      ConfigError,
+    );
+    expect(() => validateConfig({ bootstrap_default_apps: { apps: "notes" } })).toThrow(
+      ConfigError,
+    );
+    expect(() => validateConfig({ bootstrap_default_apps: { apps: [""] } })).toThrow(ConfigError);
+    expect(() => validateConfig({ bootstrap_default_apps: { apps: [123] } })).toThrow(ConfigError);
+  });
+
+  test("auto_provision_required_schema wrong type → ConfigError", () => {
+    expect(() => validateConfig({ auto_provision_required_schema: "yes" })).toThrow(ConfigError);
+  });
+
+  test("loadConfig clones nested bootstrap defaults (mutation-safe)", () => {
+    const cfg = loadConfig({ configPath, logger: silentLogger });
+    cfg.bootstrap_default_apps.apps.push("rogue");
+    const cfg2 = loadConfig({ configPath, logger: silentLogger });
+    expect(cfg2.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+  });
+});

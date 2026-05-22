@@ -55,7 +55,8 @@ function makeOpts(
   addImpl?: BootstrapOpts["add"],
 ): BootstrapOpts {
   const add: BootstrapOpts["add"] =
-    addImpl ?? (async (spec) => ({ name: spec.split("/").pop()!.replace(/\W/g, ""), path: "/app/x" }));
+    addImpl ??
+    (async (spec) => ({ name: spec.split("/").pop()!.replace(/\W/g, ""), path: "/app/x" }));
   return {
     config: makeConfig(),
     uisDir,

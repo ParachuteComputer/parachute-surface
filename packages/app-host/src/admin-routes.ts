@@ -52,10 +52,7 @@ import {
 import { InvalidMetaError, NAME_PATTERN, PATH_PATTERN, parseMeta } from "./meta-schema.ts";
 import { NpmFetchError, copyDir, fetchNpmPackage, parseNpmSpec } from "./npm-fetch.ts";
 import { readOperatorToken } from "./operator-token.ts";
-import {
-  type ProvisionSchemaResult,
-  provisionSchemaForUi,
-} from "./provision-schema.ts";
+import { type ProvisionSchemaResult, provisionSchemaForUi } from "./provision-schema.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { type RegisteredUi, type SkippedUi, scanUis } from "./ui-registry.ts";
 
@@ -575,6 +572,11 @@ export async function addUiInternal(
           pwa: parsedMeta.pwa,
           pwa_service_worker: parsedMeta.pwa_service_worker,
           public: parsedMeta.public,
+          // Phase 2.0 — preserve required_schema so the scan in `scanUis()`
+          // can rehydrate it from disk + the Phase 2.1 provisioner can
+          // re-trigger off it. Without this projection, re-running
+          // `parachute-app reload <name>` would lose the declaration.
+          required_schema: parsedMeta.required_schema,
         },
         null,
         2,
@@ -829,10 +831,7 @@ async function handleProvisionSchema(
 
   const ui = opts.state.registeredUis.find((u) => u.meta.name === name);
   if (!ui) {
-    return Response.json(
-      { error: "not_found", message: `no UI named "${name}"` },
-      { status: 404 },
-    );
+    return Response.json({ error: "not_found", message: `no UI named "${name}"` }, { status: 404 });
   }
 
   const summary = await provisionSchemaForUi({

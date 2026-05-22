@@ -28,7 +28,7 @@
 import { readdirSync, statSync } from "node:fs";
 
 import type { AppConfig } from "./config.ts";
-import { fetchNpmPackage, type NpmSpawnFn } from "./npm-fetch.ts";
+import type { NpmSpawnFn, fetchNpmPackage } from "./npm-fetch.ts";
 
 /**
  * Minimal `add` surface bootstrap needs. The full admin handler does
