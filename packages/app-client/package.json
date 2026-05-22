@@ -39,6 +39,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test src/",
     "typecheck": "tsc --noEmit"

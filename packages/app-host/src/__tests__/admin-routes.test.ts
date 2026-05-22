@@ -706,6 +706,99 @@ describe("POST /app/<name>/reload", () => {
     expect(body.ui).toBeNull();
     expect(body.skipped).toBeDefined();
   });
+
+  // Regression — Phase 2.0 → 2.1: the meta.json projection written by
+  // `POST /app/add` originally dropped `required_schema`, which meant a
+  // subsequent `POST /app/<name>/reload` (which re-reads from disk) lost
+  // the declaration. Fixed in `admin-routes.ts` by carrying
+  // `required_schema` through the projection (see Phase 2.0 comment in
+  // `handleAdd`). This test pins the round-trip: add → reload → still
+  // present.
+  test("reload preserves required_schema after a write/read round-trip", async () => {
+    const src = seedLocalSource("schema-src", {
+      "index.html": "<html>schema</html>",
+      "meta.json": JSON.stringify({
+        name: "schema-app",
+        displayName: "Schema App",
+        path: "/app/schema-app",
+        required_schema: {
+          tags: [
+            {
+              name: "capture",
+              description: "Quick captures",
+              fields: {
+                source: { type: "string", required: true },
+                createdAt: { type: "date" },
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const state = makeState();
+
+    // POST /app/add — writes the projected meta.json to disk + re-scans.
+    const addRes = await dispatch(
+      new Request("http://localhost/app/add", {
+        method: "POST",
+        body: JSON.stringify({
+          source: src,
+          name: "schema-app",
+          path: "/app/schema-app",
+        }),
+      }),
+      state,
+      { enforceScopeFn: allowAdmin },
+    );
+    expect(addRes.status).toBe(201);
+    const addBody = (await addRes.json()) as {
+      ui: { name: string; required_schema?: { tags?: Array<{ name: string }> } };
+    };
+    expect(addBody.ui.required_schema?.tags?.[0]?.name).toBe("capture");
+
+    // Sanity: the projected meta.json on disk preserved required_schema.
+    const written = JSON.parse(
+      fs.readFileSync(path.join(uisDir, "schema-app", "meta.json"), "utf8"),
+    );
+    expect(written.required_schema?.tags?.[0]?.name).toBe("capture");
+    expect(written.required_schema?.tags?.[0]?.fields?.source).toEqual({
+      type: "string",
+      required: true,
+    });
+
+    // POST /app/<name>/reload — re-reads from disk via scanUis.
+    const reloadRes = await dispatch(
+      new Request("http://localhost/app/schema-app/reload", { method: "POST" }),
+      state,
+      { enforceScopeFn: allowAdmin },
+    );
+    expect(reloadRes.status).toBe(200);
+    const reloadBody = (await reloadRes.json()) as {
+      ok: boolean;
+      ui: {
+        name: string;
+        required_schema?: {
+          tags?: Array<{
+            name: string;
+            description?: string;
+            fields?: Record<string, { type: string; required?: boolean }>;
+          }>;
+        };
+      } | null;
+    };
+    expect(reloadBody.ok).toBe(true);
+    expect(reloadBody.ui).not.toBeNull();
+    // The whole envelope must survive — name, description, and fields.
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.name).toBe("capture");
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.description).toBe("Quick captures");
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.fields?.source).toEqual({
+      type: "string",
+      required: true,
+    });
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.fields?.createdAt).toEqual({
+      type: "date",
+    });
+  });
 });
 
 describe("routeAdmin returns handled:false for unknown routes", () => {
