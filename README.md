@@ -2,7 +2,7 @@
 
 Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.
 
-**Status: Phase 1.0 scaffolding — not yet functional.** The module-protocol skeleton, stub bin, and library surface ship; no UI hosting, no admin endpoints, no OAuth DCR yet. Those land in Phase 1.1+.
+**Status: Phase 1.1 — core UI hosting is live.** App scans `~/.parachute/app/uis/` for declared UIs, validates each `meta.json`, mounts each bundle at its declared path under `/app/`, and serves with smart cache headers + SPA-routing fallback. Admin endpoints + OAuth DCR land in Phase 1.2; dev mode in Phase 1.3.
 
 ## Design
 
@@ -12,11 +12,11 @@ App is a small Bun HTTP service that supervises a directory of pre-built static 
 
 ## Phasing
 
-- **Phase 1.0** (rc.1 — **this release**): module-protocol skeleton, stub bin, library surface. Nothing functional yet.
-- **Phase 1.1**: real `serve` daemon, UI directory scanning, mount + SPA-fallback serving, `/app/healthz`.
-- **Phase 1.2**: `add` / `remove` / `list` / `reload` CLI verbs, OAuth DCR registration against hub, `.parachute/config[/schema]` admin endpoints.
+- **Phase 1.0** (rc.1): module-protocol skeleton, stub bin, library surface.
+- **Phase 1.1** (rc.2 — **this release**): real `serve` daemon, UI directory scanning, mount + SPA-fallback serving, smart cache headers, PWA opt-in, `/app/healthz`, self-registration.
+- **Phase 1.2**: `add` / `remove` / `list` / `reload` CLI verbs, OAuth DCR registration against hub, `POST /app/add` + admin SPA at `/app/admin/`.
 - **Phase 1.3**: `dev` mode with live reload for UI authors.
-- **Phase 2+**: Notes migration to first canonical app, PWA mode (service worker), per-UI metadata polish. See design doc.
+- **Phase 2+**: Notes migration to first canonical app, file-watcher discovery, npm-fetch shorthand, build-from-git. See design doc.
 
 ## CLI (planned)
 

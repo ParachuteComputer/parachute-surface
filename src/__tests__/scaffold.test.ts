@@ -1,16 +1,23 @@
 /**
- * Phase 1.0 scaffold sanity check — the library entry imports cleanly
- * and the exported `VERSION` matches `package.json`. Every later phase
- * adds real test files alongside this one.
+ * Library-entry sanity check — the public exports import cleanly, `VERSION`
+ * matches `package.json`, and the documented constants are in place.
  */
 
 import { describe, expect, it } from "bun:test";
 
 import pkg from "../../package.json" with { type: "json" };
-import { VERSION } from "../index.ts";
+import { DEFAULT_MOUNT, DEFAULT_PORT, VERSION } from "../index.ts";
 
-describe("parachute-app scaffold", () => {
+describe("parachute-app library entry", () => {
   it("exports VERSION matching package.json", () => {
     expect(VERSION).toBe(pkg.version);
+  });
+
+  it("exports canonical port 1946", () => {
+    expect(DEFAULT_PORT).toBe(1946);
+  });
+
+  it("exports canonical mount path /app", () => {
+    expect(DEFAULT_MOUNT).toBe("/app");
   });
 });
