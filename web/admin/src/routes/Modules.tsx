@@ -24,6 +24,19 @@ import {
   triggerReload,
 } from "../lib/api.ts";
 
+/**
+ * Render a watcher's absolute path in compressed form — keeps the
+ * "watching <dir>" sub-text from blowing up the dev-column width. We
+ * show the last two segments, prefixed with `…/` for clarity, and the
+ * full path is on the wrapping element's `title` for hover.
+ */
+function shortenPath(p: string): string {
+  if (!p) return p;
+  const parts = p.split("/").filter(Boolean);
+  if (parts.length <= 2) return p;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
 export function Modules() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [devMap, setDevMap] = useState<Map<string, DevModeStatus>>(new Map());
@@ -227,6 +240,28 @@ export function Modules() {
                           <>
                             <br />
                             <small>{dev.subscribers} tab(s)</small>
+                          </>
+                        )}
+                        {dev?.watcher?.watching && (
+                          <>
+                            <br />
+                            <small className="muted" title={dev.watcher.watchDir}>
+                              watching {shortenPath(dev.watcher.watchDir)}
+                              {dev.watcher.buildCmd && (
+                                <>
+                                  <br />
+                                  build: <code>{dev.watcher.buildCmd}</code>
+                                </>
+                              )}
+                            </small>
+                          </>
+                        )}
+                        {dev?.watcher && !dev.watcher.watching && (
+                          <>
+                            <br />
+                            <small className="muted">
+                              watcher off{dev.watcher.warning ? `: ${dev.watcher.warning}` : ""}
+                            </small>
                           </>
                         )}
                       </>

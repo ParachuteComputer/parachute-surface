@@ -60,8 +60,12 @@ Environment:
   production cache headers. While on, every response from the UI is
   no-cache, no-store, must-revalidate (overrides the immutable default
   for hashed assets); index.html gets a small EventSource shim that
-  reloads the tab on a \`--trigger\` event. Phase 2 will wire an
-  automatic file-watcher in place of the manual trigger.
+  reloads the tab on a \`--trigger\` event. Phase 3.0+: when the UI is
+  in dev mode, app watches the UI's source dir (meta.dev_watch_dir,
+  defaults to the UI's root dir minus dist/ + node_modules/) and auto-
+  broadcasts a reload on change. If meta.dev_build_cmd is set, app
+  runs that build first; failing builds log + skip the reload. The
+  manual --trigger still works as a fallback.
 
 Design:
   https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-apps-design.md
@@ -335,7 +339,13 @@ async function runDev(rest: string[]): Promise<void> {
     const { status, body } = await callDaemon("GET", "/app/dev/list");
     if (status >= 200 && status < 300) {
       const r = body as {
-        uis?: Array<{ name: string; enabled: boolean; enabledAt: number; subscribers: number }>;
+        uis?: Array<{
+          name: string;
+          enabled: boolean;
+          enabledAt: number;
+          subscribers: number;
+          watcher?: { watching: boolean; watchDir?: string; buildCmd?: string | null };
+        }>;
       };
       const uis = r.uis ?? [];
       if (uis.length === 0) {
@@ -346,6 +356,12 @@ async function runDev(rest: string[]): Promise<void> {
           console.log(
             `  ${u.name}  enabled=${u.enabled}  since=${since}  subscribers=${u.subscribers}`,
           );
+          if (u.watcher?.watching) {
+            const buildBadge = u.watcher.buildCmd
+              ? ` build=\`${u.watcher.buildCmd}\``
+              : " (no build cmd)";
+            console.log(`            watching=${u.watcher.watchDir}${buildBadge}`);
+          }
         }
       }
       return;
@@ -403,9 +419,28 @@ async function runDev(rest: string[]): Promise<void> {
   // Default sub-verb: enable dev mode.
   const { status, body } = await callDaemon("POST", `/app/${encodeURIComponent(name)}/dev/enable`);
   if (status >= 200 && status < 300) {
+    const r = body as {
+      watcher?:
+        | { watching: true; watchDir: string; debounceMs: number; buildCmd?: string | null }
+        | { watching: false; warning?: string };
+    };
     console.log(`Dev mode ON for ${name}`);
-    console.log("  Edit, build, then run:");
-    console.log(`  parachute-app dev ${name} --trigger`);
+    if (r.watcher?.watching) {
+      console.log(`  Watching: ${r.watcher.watchDir} (debounce=${r.watcher.debounceMs}ms)`);
+      if (r.watcher.buildCmd) {
+        console.log(`  Build cmd: \`${r.watcher.buildCmd}\` — runs on file change`);
+        console.log("  Edit a source file; the build runs, then the tab reloads.");
+      } else {
+        console.log("  Edit + build manually; the tab reloads when the watcher fires.");
+        console.log("  (Set meta.dev_build_cmd to skip the manual build step.)");
+      }
+    } else {
+      console.log(
+        `  File watcher unavailable${r.watcher?.warning ? `: ${r.watcher.warning}` : ""}`,
+      );
+      console.log("  Edit, build, then run:");
+      console.log(`  parachute-app dev ${name} --trigger`);
+    }
     console.log(`  parachute-app dev ${name} --off   # when done`);
     return;
   }
