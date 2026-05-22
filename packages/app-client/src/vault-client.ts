@@ -44,7 +44,9 @@ import type {
   NoteAttachment,
   ReachabilitySignal,
   StorageUploadResult,
+  TagRecord,
   TagSummary,
+  TagUpsertPayload,
   UpdateNotePayload,
   UploadProgress,
   VaultInfo,
@@ -451,6 +453,53 @@ export class VaultClient {
 
   async listTags(): Promise<TagSummary[]> {
     return this.request<TagSummary[]>("/api/tags");
+  }
+
+  /**
+   * Fetch a single tag-identity record. Returns `null` when the tag
+   * doesn't exist. Used by `updateTag`'s idempotency check + by apps
+   * that want to read the current schema before patching it.
+   *
+   * Vault returns 404 on missing-tag for single-tag reads; the canonical
+   * `VaultClient` translation is a thrown `VaultNotFoundError`. We
+   * catch that here and resolve `null` because callers provisioning
+   * schema treat "not found" as "needs creating," not as an error.
+   */
+  async getTag(name: string): Promise<TagRecord | null> {
+    try {
+      return await this.request<TagRecord>(`/api/tags/${encodeURIComponent(name)}`);
+    } catch (e) {
+      if (e instanceof VaultNotFoundError) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * Upsert a tag-identity row via `PUT /api/tags/:name`. Vault's
+   * semantics:
+   *   - Omitted keys preserve prior values (description, fields,
+   *     relationships, parent_names).
+   *   - Explicit `null` clears the key.
+   *   - `fields` is merge-on-write: vault preserves prior field keys
+   *     and only overwrites the ones declared in this payload.
+   *
+   * **Idempotent** — re-running with the same payload against a vault
+   * that already has the tag is a no-op at the row level (vault
+   * re-writes the same JSON).
+   *
+   * Used by parachute-app's Phase 2.1 auto-provisioner: when a UI's
+   * `meta.json` declares `required_schema.tags`, app calls this for
+   * each tag at install time so the operator doesn't have to seed the
+   * schema by hand.
+   */
+  async updateTag(
+    name: string,
+    payload: TagUpsertPayload,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<TagRecord> {
+    const init: RequestInit = { method: "PUT", body: JSON.stringify(payload) };
+    if (opts.signal) init.signal = opts.signal;
+    return this.request<TagRecord>(`/api/tags/${encodeURIComponent(name)}`, init);
   }
 
   // ---------- attachments ----------

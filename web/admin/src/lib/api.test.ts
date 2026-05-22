@@ -13,6 +13,7 @@ import {
   getOperatorToken,
   listDevMode,
   listUis,
+  provisionSchema,
   reloadUi,
   removeUi,
   setOperatorToken,
@@ -188,6 +189,70 @@ describe("dev-mode helpers", () => {
     expect(captured?.url).toBe("/app/notes/dev/trigger");
     expect(captured?.method).toBe("POST");
     expect(res.notified).toBe(3);
+  });
+});
+
+describe("provisionSchema (Phase 2.1)", () => {
+  test("POST /app/<name>/provision-schema with auth", async () => {
+    setOperatorToken("op-token");
+    let captured: { url: string; method: string; auth?: string } | undefined;
+    globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+      captured = {
+        url,
+        method: init?.method ?? "GET",
+        auth: (init?.headers as Record<string, string>)?.authorization,
+      };
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            name: "notes",
+            provisioned: ["capture"],
+            errors: [],
+            vaultUrl: "http://hub/vault/default",
+          }),
+          { status: 200 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    const res = await provisionSchema("notes");
+    expect(captured?.url).toBe("/app/notes/provision-schema");
+    expect(captured?.method).toBe("POST");
+    expect(captured?.auth).toBe("Bearer op-token");
+    expect(res.provisioned).toEqual(["capture"]);
+  });
+
+  test("URL-encodes the UI name", async () => {
+    let capturedUrl: string | undefined;
+    globalThis.fetch = vi.fn((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true, name: "w x", provisioned: [], errors: [] }), {
+          status: 200,
+        }),
+      );
+    }) as unknown as typeof fetch;
+    await provisionSchema("w x");
+    expect(capturedUrl).toBe("/app/w%20x/provision-schema");
+  });
+
+  test("surfaces skipReason from the server response", async () => {
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            name: "notes",
+            provisioned: [],
+            errors: [],
+            skipReason: "no required_schema",
+          }),
+          { status: 200 },
+        ),
+      ),
+    ) as unknown as typeof fetch;
+    const res = await provisionSchema("notes");
+    expect(res.skipReason).toBe("no required_schema");
   });
 });
 

@@ -52,6 +52,7 @@ import {
 import { InvalidMetaError, NAME_PATTERN, PATH_PATTERN, parseMeta } from "./meta-schema.ts";
 import { NpmFetchError, copyDir, fetchNpmPackage, parseNpmSpec } from "./npm-fetch.ts";
 import { readOperatorToken } from "./operator-token.ts";
+import { type ProvisionSchemaResult, provisionSchemaForUi } from "./provision-schema.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { type RegisteredUi, type SkippedUi, scanUis } from "./ui-registry.ts";
 
@@ -137,6 +138,12 @@ export function routeAdmin(req: Request, opts: AdminHandlerOpts): RouteOutcome {
   const reloadMatch = pathname.match(/^\/app\/([a-z][a-z0-9-]*)\/reload$/);
   if (reloadMatch && method === "POST") {
     return { handled: true, response: handleReload(req, reloadMatch[1]!, opts) };
+  }
+
+  // POST /app/<name>/provision-schema — Phase 2.1 manual re-trigger.
+  const provisionMatch = pathname.match(/^\/app\/([a-z][a-z0-9-]*)\/provision-schema$/);
+  if (provisionMatch && method === "POST") {
+    return { handled: true, response: handleProvisionSchema(req, provisionMatch[1]!, opts) };
   }
 
   // DELETE /app/<name>
@@ -296,11 +303,47 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
     return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
   }
 
+  const outcome = await addUiInternal(body, opts);
+  return outcome.response;
+}
+
+/**
+ * Result envelope from `addUiInternal`. `response` is always set so the
+ * HTTP handler can return it directly. On success, `added` carries the
+ * post-scan `RegisteredUi` so callers (bootstrap, the schema-
+ * provisioner) can chain follow-up work without re-reading state.
+ */
+export type AddUiInternalResult = {
+  response: Response;
+  /** The newly-registered UI, when the add succeeded. */
+  added?: RegisteredUi;
+  /** The OAuth record stamped on disk, when DCR ran + succeeded. */
+  oauthRecord?: OauthClientRecord;
+};
+
+/**
+ * Core add-a-UI flow — extracted from `handleAdd` so it's callable
+ * outside the HTTP path (bootstrap, schema-provisioner). The HTTP
+ * handler parses the body + delegates here; bootstrap constructs the
+ * body in-process. The auth gate stays in `handleAdd` — internal
+ * callers are already trusted (they're inside the daemon process).
+ *
+ * Returns an `AddUiInternalResult` whose `.response` mirrors what the
+ * HTTP endpoint returns; tests + bootstrap can read the parsed JSON to
+ * branch on success/failure without unmarshalling a Response a second
+ * time.
+ */
+export async function addUiInternal(
+  body: AddRequestBody,
+  opts: AdminHandlerOpts,
+): Promise<AddUiInternalResult> {
   if (typeof body.source !== "string" || body.source.length === 0) {
-    return Response.json(
-      { error: "bad_request", message: "`source` is required (string)" },
-      { status: 400 },
-    );
+    return {
+      response: Response.json(
+        { error: "bad_request", message: "`source` is required (string)" },
+        { status: 400 },
+      ),
+    };
   }
 
   // Identify whether `source` is a local path or an npm spec. Path takes
@@ -310,13 +353,15 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
   const npmSpec = sourceIsExistingPath ? undefined : parseNpmSpec(body.source);
 
   if (!sourceIsExistingPath && !npmSpec) {
-    return Response.json(
-      {
-        error: "bad_source",
-        message: `\"${body.source}\" is neither an existing local path nor a valid npm package specifier`,
-      },
-      { status: 400 },
-    );
+    return {
+      response: Response.json(
+        {
+          error: "bad_source",
+          message: `\"${body.source}\" is neither an existing local path nor a valid npm package specifier`,
+        },
+        { status: 400 },
+      ),
+    };
   }
 
   // Stage the source — either copy from the local path or fetch from npm.
@@ -338,13 +383,15 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
       } else if (existsSync(nestedIndex)) {
         stagedDistDir = path.join(sourceAbs, "dist");
       } else {
-        return Response.json(
-          {
-            error: "bad_source",
-            message: `local path ${sourceAbs} has neither index.html nor dist/index.html`,
-          },
-          { status: 400 },
-        );
+        return {
+          response: Response.json(
+            {
+              error: "bad_source",
+              message: `local path ${sourceAbs} has neither index.html nor dist/index.html`,
+            },
+            { status: 400 },
+          ),
+        };
       }
       // Optional meta.json sibling: prefer `<source>/meta.json`, fall back
       // to `<source>/../meta.json` if source pointed at the dist itself.
@@ -376,15 +423,17 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
                 : e.code === "network_error"
                   ? 502
                   : 422;
-          return Response.json(
-            {
-              error: e.code,
-              message: e.message,
-              stderr: e.stderr,
-              retry_hint: e.retryHint,
-            },
-            { status },
-          );
+          return {
+            response: Response.json(
+              {
+                error: e.code,
+                message: e.message,
+                stderr: e.stderr,
+                retry_hint: e.retryHint,
+              },
+              { status },
+            ),
+          };
         }
         throw e;
       }
@@ -425,10 +474,12 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
       parsedMeta = parseMeta(merged);
     } catch (e) {
       if (e instanceof InvalidMetaError) {
-        return Response.json(
-          { error: "invalid_meta", message: e.message, details: e.details },
-          { status: 400 },
-        );
+        return {
+          response: Response.json(
+            { error: "invalid_meta", message: e.message, details: e.details },
+            { status: 400 },
+          ),
+        };
       }
       throw e;
     }
@@ -436,41 +487,49 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
     // Name + path constraint extra (parseMeta covers regex, but we sanity
     // check that the name fits NAME_PATTERN explicitly here for clarity).
     if (!NAME_PATTERN.test(parsedMeta.name)) {
-      return Response.json(
-        {
-          error: "invalid_meta",
-          message: `name "${parsedMeta.name}" violates ${NAME_PATTERN.source}`,
-        },
-        { status: 400 },
-      );
+      return {
+        response: Response.json(
+          {
+            error: "invalid_meta",
+            message: `name "${parsedMeta.name}" violates ${NAME_PATTERN.source}`,
+          },
+          { status: 400 },
+        ),
+      };
     }
     if (!PATH_PATTERN.test(parsedMeta.path)) {
-      return Response.json(
-        {
-          error: "invalid_meta",
-          message: `path "${parsedMeta.path}" violates ${PATH_PATTERN.source}`,
-        },
-        { status: 400 },
-      );
+      return {
+        response: Response.json(
+          {
+            error: "invalid_meta",
+            message: `path "${parsedMeta.path}" violates ${PATH_PATTERN.source}`,
+          },
+          { status: 400 },
+        ),
+      };
     }
     if (parsedMeta.path === "/app/admin") {
-      return Response.json(
-        { error: "reserved_path", message: "`/app/admin` is reserved for the admin SPA" },
-        { status: 409 },
-      );
+      return {
+        response: Response.json(
+          { error: "reserved_path", message: "`/app/admin` is reserved for the admin SPA" },
+          { status: 409 },
+        ),
+      };
     }
 
     const uisDir = opts.uisDir ?? resolveUisDir();
     const targetDir = path.join(uisDir, parsedMeta.name);
 
     if (existsSync(targetDir) && !body.force) {
-      return Response.json(
-        {
-          error: "name_exists",
-          message: `UI named "${parsedMeta.name}" is already installed at ${targetDir}; pass force=true to replace`,
-        },
-        { status: 409 },
-      );
+      return {
+        response: Response.json(
+          {
+            error: "name_exists",
+            message: `UI named "${parsedMeta.name}" is already installed at ${targetDir}; pass force=true to replace`,
+          },
+          { status: 409 },
+        ),
+      };
     }
 
     // Mount-path collision check against the in-memory state (skipped UIs
@@ -479,13 +538,15 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
       (u) => u.meta.path === parsedMeta.path && u.meta.name !== parsedMeta.name,
     );
     if (collision) {
-      return Response.json(
-        {
-          error: "path_taken",
-          message: `mount path ${parsedMeta.path} is already claimed by "${collision.meta.name}"`,
-        },
-        { status: 409 },
-      );
+      return {
+        response: Response.json(
+          {
+            error: "path_taken",
+            message: `mount path ${parsedMeta.path} is already claimed by "${collision.meta.name}"`,
+          },
+          { status: 409 },
+        ),
+      };
     }
 
     // Commit to disk: clear targetDir (force path), copy dist, write meta.
@@ -511,6 +572,11 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
           pwa: parsedMeta.pwa,
           pwa_service_worker: parsedMeta.pwa_service_worker,
           public: parsedMeta.public,
+          // Phase 2.0 — preserve required_schema so the scan in `scanUis()`
+          // can rehydrate it from disk + the Phase 2.1 provisioner can
+          // re-trigger off it. Without this projection, re-running
+          // `parachute-app reload <name>` would lose the declaration.
+          required_schema: parsedMeta.required_schema,
         },
         null,
         2,
@@ -586,16 +652,43 @@ async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response
     }
 
     const added = opts.state.registeredUis.find((u) => u.meta.name === parsedMeta.name);
-    return Response.json(
-      {
-        ok: true,
-        ui: added ? serializeUi(added) : null,
-        oauth_client_id: oauthRecord?.client_id,
-        oauth_status: oauthRecord?.status,
-        warning: dcrWarning,
-      },
-      { status: 201 },
-    );
+
+    // Phase 2.1 — auto-provision required_schema. Best-effort; failures
+    // surface as a `provision_schema` warning slot on the response but
+    // never unwind the install.
+    let provisionSummary: ProvisionSchemaResult | undefined;
+    if (added && opts.state.config.auto_provision_required_schema && added.meta.required_schema) {
+      try {
+        provisionSummary = await provisionSchemaForUi({
+          ui: added,
+          hubUrl: opts.state.config.hub_url,
+          operatorTokenResolver:
+            opts.operatorTokenOverride ?? (() => readOperatorToken({ logger: opts.logger })),
+          fetchFn: opts.fetchFn,
+          logger: opts.logger,
+        });
+      } catch (e) {
+        opts.logger?.warn(
+          `[app-admin] schema auto-provision failed for ${parsedMeta.name}: ${(e as Error).message}`,
+        );
+      }
+    }
+
+    return {
+      response: Response.json(
+        {
+          ok: true,
+          ui: added ? serializeUi(added) : null,
+          oauth_client_id: oauthRecord?.client_id,
+          oauth_status: oauthRecord?.status,
+          warning: dcrWarning,
+          provision_schema: provisionSummary,
+        },
+        { status: 201 },
+      ),
+      ...(added ? { added } : {}),
+      ...(oauthRecord ? { oauthRecord } : {}),
+    };
   } finally {
     if (cleanupNpm) cleanupNpm();
   }
@@ -712,6 +805,50 @@ async function handleReload(req: Request, name: string, opts: AdminHandlerOpts):
   return Response.json({
     ok: true,
     ui: serializeUi(ui),
+  });
+}
+
+// --- POST /app/<name>/provision-schema (Phase 2.1) -----------------------
+
+/**
+ * Manual re-trigger for the auto-provisioning that runs on `add`. Use
+ * cases:
+ *   - Auto-provision failed at add time (vault down, no operator token);
+ *     operator fixes the underlying issue + re-runs.
+ *   - Operator changed the meta.json's `required_schema` post-install
+ *     (added a new tag) and wants the new declarations seeded.
+ *   - Multi-vault apps where the operator wants to push schema to a
+ *     specific vault rather than the `vault_default` (override planned;
+ *     Phase 2.2).
+ */
+async function handleProvisionSchema(
+  req: Request,
+  name: string,
+  opts: AdminHandlerOpts,
+): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  const ui = opts.state.registeredUis.find((u) => u.meta.name === name);
+  if (!ui) {
+    return Response.json({ error: "not_found", message: `no UI named "${name}"` }, { status: 404 });
+  }
+
+  const summary = await provisionSchemaForUi({
+    ui,
+    hubUrl: opts.state.config.hub_url,
+    operatorTokenResolver:
+      opts.operatorTokenOverride ?? (() => readOperatorToken({ logger: opts.logger })),
+    fetchFn: opts.fetchFn,
+    logger: opts.logger,
+  });
+
+  // 200 either way — best-effort. The body carries the per-tag status so
+  // the caller can render success/skip/error in the admin SPA.
+  return Response.json({
+    ok: summary.errors.length === 0,
+    name,
+    ...summary,
   });
 }
 

@@ -32,6 +32,30 @@
       "type": "boolean",
       "default": true,
       "description": "Whether `parachute-app dev <name>` is permitted."
+    },
+    "bootstrap_default_apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": { "enabled": true, "apps": ["@openparachute/notes-ui"] },
+      "description": "On first boot (when uis/ is empty), apps auto-installs these npm packages so operators get something working out of the box. Set enabled=false to skip; set apps=[] to disable without flipping the toggle.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, bootstrap default apps on first boot when uis/ is empty."
+        },
+        "apps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["@openparachute/notes-ui"],
+          "description": "npm package specifiers to install as default apps on first boot."
+        }
+      }
+    },
+    "auto_provision_required_schema": {
+      "type": "boolean",
+      "default": true,
+      "description": "When a UI's meta.json declares required_schema, auto-provision its tags in vault on add. Best-effort: errors log + warn but don't fail the install. See patterns#57."
     }
   },
   "x-scopes": ["app:read", "app:admin"]

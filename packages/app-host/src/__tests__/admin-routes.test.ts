@@ -63,6 +63,8 @@ function makeState(overrides: Partial<AppState["config"]> = {}): AppState {
       disabled: false,
       default_scope_required: ["vault:*:read"],
       dev_mode_allowed: true,
+      bootstrap_default_apps: { enabled: false, apps: [] },
+      auto_provision_required_schema: false,
       ...overrides,
     },
     registeredUis: scan.registered,
@@ -704,6 +706,99 @@ describe("POST /app/<name>/reload", () => {
     expect(body.ui).toBeNull();
     expect(body.skipped).toBeDefined();
   });
+
+  // Regression — Phase 2.0 → 2.1: the meta.json projection written by
+  // `POST /app/add` originally dropped `required_schema`, which meant a
+  // subsequent `POST /app/<name>/reload` (which re-reads from disk) lost
+  // the declaration. Fixed in `admin-routes.ts` by carrying
+  // `required_schema` through the projection (see Phase 2.0 comment in
+  // `handleAdd`). This test pins the round-trip: add → reload → still
+  // present.
+  test("reload preserves required_schema after a write/read round-trip", async () => {
+    const src = seedLocalSource("schema-src", {
+      "index.html": "<html>schema</html>",
+      "meta.json": JSON.stringify({
+        name: "schema-app",
+        displayName: "Schema App",
+        path: "/app/schema-app",
+        required_schema: {
+          tags: [
+            {
+              name: "capture",
+              description: "Quick captures",
+              fields: {
+                source: { type: "string", required: true },
+                createdAt: { type: "date" },
+              },
+            },
+          ],
+        },
+      }),
+    });
+    const state = makeState();
+
+    // POST /app/add — writes the projected meta.json to disk + re-scans.
+    const addRes = await dispatch(
+      new Request("http://localhost/app/add", {
+        method: "POST",
+        body: JSON.stringify({
+          source: src,
+          name: "schema-app",
+          path: "/app/schema-app",
+        }),
+      }),
+      state,
+      { enforceScopeFn: allowAdmin },
+    );
+    expect(addRes.status).toBe(201);
+    const addBody = (await addRes.json()) as {
+      ui: { name: string; required_schema?: { tags?: Array<{ name: string }> } };
+    };
+    expect(addBody.ui.required_schema?.tags?.[0]?.name).toBe("capture");
+
+    // Sanity: the projected meta.json on disk preserved required_schema.
+    const written = JSON.parse(
+      fs.readFileSync(path.join(uisDir, "schema-app", "meta.json"), "utf8"),
+    );
+    expect(written.required_schema?.tags?.[0]?.name).toBe("capture");
+    expect(written.required_schema?.tags?.[0]?.fields?.source).toEqual({
+      type: "string",
+      required: true,
+    });
+
+    // POST /app/<name>/reload — re-reads from disk via scanUis.
+    const reloadRes = await dispatch(
+      new Request("http://localhost/app/schema-app/reload", { method: "POST" }),
+      state,
+      { enforceScopeFn: allowAdmin },
+    );
+    expect(reloadRes.status).toBe(200);
+    const reloadBody = (await reloadRes.json()) as {
+      ok: boolean;
+      ui: {
+        name: string;
+        required_schema?: {
+          tags?: Array<{
+            name: string;
+            description?: string;
+            fields?: Record<string, { type: string; required?: boolean }>;
+          }>;
+        };
+      } | null;
+    };
+    expect(reloadBody.ok).toBe(true);
+    expect(reloadBody.ui).not.toBeNull();
+    // The whole envelope must survive — name, description, and fields.
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.name).toBe("capture");
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.description).toBe("Quick captures");
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.fields?.source).toEqual({
+      type: "string",
+      required: true,
+    });
+    expect(reloadBody.ui?.required_schema?.tags?.[0]?.fields?.createdAt).toEqual({
+      type: "date",
+    });
+  });
 });
 
 describe("routeAdmin returns handled:false for unknown routes", () => {
@@ -715,5 +810,298 @@ describe("routeAdmin returns handled:false for unknown routes", () => {
       logger: silentLogger,
     });
     expect(result.handled).toBe(false);
+  });
+});
+
+describe("POST /app/<name>/provision-schema (Phase 2.1)", () => {
+  test("401 without bearer (real auth path)", async () => {
+    seedUi("notes", "/app/notes", { "index.html": "<html></html>" });
+    const state = makeState();
+    const res = await dispatch(
+      new Request("http://localhost/app/notes/provision-schema", { method: "POST" }),
+      state,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  test("404 when UI doesn't exist", async () => {
+    const state = makeState();
+    const res = await dispatch(
+      new Request("http://localhost/app/nope/provision-schema", { method: "POST" }),
+      state,
+      { enforceScopeFn: allowAdmin },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("UI with required_schema + vault_default → provisions tags", async () => {
+    // Seed a UI whose meta.json declares required_schema.
+    const name = "notes";
+    const dir = path.join(uisDir, name);
+    const distDir = path.join(dir, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({
+        name,
+        displayName: "Notes",
+        path: "/app/notes",
+        vault_default: "default",
+        required_schema: {
+          tags: [{ name: "capture", description: "Quick captures" }],
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const state = makeState();
+
+    const fetchCalls: Array<{ url: string; method: string }> = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      fetchCalls.push({ url, method: init?.method ?? "GET" });
+      return new Response(JSON.stringify({ name: "capture" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/app/notes/provision-schema", { method: "POST" }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      name: string;
+      provisioned: string[];
+      errors: Array<{ tag: string; error: string }>;
+      vaultUrl?: string;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.name).toBe("notes");
+    expect(body.provisioned).toEqual(["capture"]);
+    expect(body.errors).toEqual([]);
+    expect(body.vaultUrl).toBe("http://127.0.0.1:1939/vault/default");
+    expect(fetchCalls.length).toBe(1);
+    expect(fetchCalls[0]!.method).toBe("PUT");
+    expect(fetchCalls[0]!.url).toContain("/api/tags/capture");
+  });
+
+  test("UI without required_schema → 200 with skipReason", async () => {
+    seedUi("plain", "/app/plain", { "index.html": "<html></html>" });
+    const state = makeState();
+    const res = await dispatch(
+      new Request("http://localhost/app/plain/provision-schema", { method: "POST" }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; skipReason?: string };
+    expect(body.ok).toBe(true);
+    expect(body.skipReason).toContain("no required_schema");
+  });
+
+  test("provision endpoint is idempotent (running twice → same shape)", async () => {
+    const name = "notes";
+    const dir = path.join(uisDir, name);
+    const distDir = path.join(dir, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({
+        name,
+        displayName: "Notes",
+        path: "/app/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
+    );
+    fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const state = makeState();
+
+    let callCount = 0;
+    const fetchFn = (async () => {
+      callCount++;
+      return new Response(JSON.stringify({ name: "capture" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    for (let i = 0; i < 2; i++) {
+      const res = await dispatch(
+        new Request("http://localhost/app/notes/provision-schema", { method: "POST" }),
+        state,
+        {
+          enforceScopeFn: allowAdmin,
+          operatorTokenOverride: () => "op-tok",
+          fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+        },
+      );
+      expect(res.status).toBe(200);
+    }
+    expect(callCount).toBe(2);
+  });
+});
+
+describe("POST /app/add — Phase 2.1 auto-provision wiring", () => {
+  test("required_schema + vault_default + auto_provision_required_schema:true → provisions on add", async () => {
+    // Seed a local source whose meta.json declares required_schema.
+    const sourceRoot = path.join(tmpDir, "src", "notes-src");
+    const sourceDist = path.join(sourceRoot, "dist");
+    fs.mkdirSync(sourceDist, { recursive: true });
+    fs.writeFileSync(path.join(sourceDist, "index.html"), "<html></html>");
+    fs.writeFileSync(
+      path.join(sourceRoot, "meta.json"),
+      JSON.stringify({
+        name: "notes",
+        displayName: "Notes",
+        path: "/app/notes",
+        vault_default: "default",
+        required_schema: {
+          tags: [
+            {
+              name: "capture",
+              description: "Quick captures",
+              fields: { source: { type: "string", required: true } },
+            },
+          ],
+        },
+      }),
+    );
+
+    const state = makeState({ auto_provision_required_schema: true });
+
+    const fetchCalls: Array<{ url: string; method: string }> = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      fetchCalls.push({ url, method: init?.method ?? "GET" });
+      return new Response(JSON.stringify({ name: "capture" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/app/add", {
+        method: "POST",
+        body: JSON.stringify({ source: sourceRoot }),
+      }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      ui: { name: string } | null;
+      provision_schema?: {
+        provisioned: string[];
+        errors: Array<{ tag: string; error: string }>;
+      };
+    };
+    expect(body.ui?.name).toBe("notes");
+    expect(body.provision_schema?.provisioned).toEqual(["capture"]);
+    expect(body.provision_schema?.errors).toEqual([]);
+    // PUT to vault was attempted.
+    expect(fetchCalls.some((c) => c.method === "PUT" && c.url.includes("/api/tags/capture"))).toBe(
+      true,
+    );
+  });
+
+  test("auto_provision_required_schema: false → no provisioning on add (default in tests)", async () => {
+    const sourceRoot = path.join(tmpDir, "src", "notes-src");
+    const sourceDist = path.join(sourceRoot, "dist");
+    fs.mkdirSync(sourceDist, { recursive: true });
+    fs.writeFileSync(path.join(sourceDist, "index.html"), "<html></html>");
+    fs.writeFileSync(
+      path.join(sourceRoot, "meta.json"),
+      JSON.stringify({
+        name: "notes",
+        displayName: "Notes",
+        path: "/app/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
+    );
+
+    // makeState() default is auto_provision_required_schema:false (per test
+    // config). Verify no vault calls happen.
+    const state = makeState();
+    let fetchCalls = 0;
+    const fetchFn = (async () => {
+      fetchCalls++;
+      return new Response("not used", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/app/add", {
+        method: "POST",
+        body: JSON.stringify({ source: sourceRoot }),
+      }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(201);
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("auto-provision: vault PUT failure → install succeeds, errors recorded", async () => {
+    const sourceRoot = path.join(tmpDir, "src", "notes-src");
+    const sourceDist = path.join(sourceRoot, "dist");
+    fs.mkdirSync(sourceDist, { recursive: true });
+    fs.writeFileSync(path.join(sourceDist, "index.html"), "<html></html>");
+    fs.writeFileSync(
+      path.join(sourceRoot, "meta.json"),
+      JSON.stringify({
+        name: "notes",
+        displayName: "Notes",
+        path: "/app/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
+    );
+    const state = makeState({ auto_provision_required_schema: true });
+    // vault returns 403 — provisioning fails per-tag.
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ error_type: "insufficient_scope", message: "need admin" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/app/add", {
+        method: "POST",
+        body: JSON.stringify({ source: sourceRoot }),
+      }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    // Add succeeds — provisioning is best-effort.
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      ui: { name: string } | null;
+      provision_schema?: { provisioned: string[]; errors: Array<{ tag: string; error: string }> };
+    };
+    expect(body.ui?.name).toBe("notes");
+    expect(body.provision_schema?.provisioned).toEqual([]);
+    expect(body.provision_schema?.errors.length).toBe(1);
+    expect(body.provision_schema?.errors[0]!.tag).toBe("capture");
   });
 });

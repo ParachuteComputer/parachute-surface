@@ -2,6 +2,13 @@
   "name": "parachute-app",
   "displayName": "App",
   "tagline": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
-  "version": "0.1.0-rc.4",
-  "capabilities": ["ui-host", "oauth-client-registration", "admin-spa", "dev-mode-sse"]
+  "version": "0.2.0-rc.2",
+  "capabilities": [
+    "ui-host",
+    "oauth-client-registration",
+    "admin-spa",
+    "dev-mode-sse",
+    "bootstrap-default-apps",
+    "auto-provision-schema"
+  ]
 }

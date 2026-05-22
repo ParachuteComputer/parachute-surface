@@ -28,6 +28,8 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     disabled: false,
     default_scope_required: ["vault:*:read"],
     dev_mode_allowed: true,
+    bootstrap_default_apps: { enabled: false, apps: [] },
+    auto_provision_required_schema: false,
     ...overrides,
   };
 }

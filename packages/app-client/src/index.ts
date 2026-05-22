@@ -67,6 +67,9 @@ export type {
   NoteLink,
   NoteAttachment,
   TagSummary,
+  TagFieldSchema,
+  TagRecord,
+  TagUpsertPayload,
   UpdateNotePayload,
   CreateNotePayload,
   StorageUploadResult,
@@ -113,4 +116,4 @@ export type {
  * Library semver — kept in sync with `package.json` so consumers can
  * surface "app-client 0.1.0" diagnostics in a banner.
  */
-export const APP_CLIENT_VERSION = "0.1.0-rc.1";
+export const APP_CLIENT_VERSION = "0.1.0-rc.2";
