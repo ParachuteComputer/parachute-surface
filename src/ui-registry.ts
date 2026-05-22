@@ -69,7 +69,7 @@ export type ScanOpts = {
  * to claim it is rejected at scan time. Kept as a const so Phase 1.2's
  * `add` flow can share the same check.
  */
-export const RESERVED_PATHS: ReadonlySet<string> = new Set(["/app/admin"]);
+export const RESERVED_PATHS: ReadonlySet<string> = new Set(["/app/admin", "/app/dev"]);
 
 /**
  * Scan `uisDir` for declared UIs. Best-effort: a malformed UI is skipped +

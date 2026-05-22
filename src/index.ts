@@ -16,6 +16,7 @@ import pkg from "../package.json" with { type: "json" };
 
 import { buildUisExtraFieldForBoot } from "./admin-routes.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
+import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { scanUis } from "./ui-registry.ts";
@@ -31,6 +32,8 @@ export * from "./auth.ts";
 export * from "./operator-token.ts";
 export * from "./dcr.ts";
 export * from "./npm-fetch.ts";
+export * from "./dev-mode.ts";
+export * from "./dev-injection.ts";
 export {
   routeAdmin,
   buildUisExtraFieldForBoot,
@@ -39,6 +42,7 @@ export {
   type AddRequestBody,
   type SerializedUi,
 } from "./admin-routes.ts";
+export { routeDev, type DevRoutesOpts } from "./dev-routes.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
 export { startHttpServer } from "./http-server.ts";
@@ -224,9 +228,21 @@ export function runOnce(opts: ServeOptions = {}): {
   return { config, state };
 }
 
-/** Phase 1.3 surface — toggle dev mode for a UI with live reload. */
-export function setDevMode(): Promise<never> {
-  throw new Error("setDevMode: not yet implemented (Phase 1.3)");
+/**
+ * Phase 1.3 surface — toggle dev mode for a UI with live reload.
+ *
+ * The dev-mode API now ships via `./dev-mode.ts`. Callers that want
+ * fine-grained control import `enableDevMode` / `disableDevMode` /
+ * `broadcastReload` directly. This wrapper stays as the canonical
+ * library-level façade for the simple "flip a UI into dev mode" case
+ * and keeps the surface stable for downstream consumers.
+ */
+export function setDevMode(
+  name: string,
+  enable: boolean,
+): { name: string; enabled: boolean; enabledAt: number } {
+  const state = enable ? enableDevMode(name) : disableDevMode(name);
+  return { name, enabled: state.enabled, enabledAt: state.enabledAt };
 }
 
 /** Expose canonical resolvers for the bin. */

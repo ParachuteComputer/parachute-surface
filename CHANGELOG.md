@@ -1,6 +1,110 @@
 # Changelog
 
-## [0.1.0-rc.3] - 2026-05-22
+## [0.1.0-rc.4] - 2026-05-22
+
+feat(app): Phase 1.3 — dev mode with SSE live-reload (closes Phase 1).
+
+Phase 1.3 closes Phase 1 of parachute-app and resolves the recurring
+"edit code, build, browser shows old" frustration tracked in
+[parachute-notes#151](https://github.com/ParachuteComputer/parachute-notes/issues/151)
+at the platform level. Adds operator-triggered dev mode: `parachute-app
+dev <name>` flips a UI into a no-cache mode + injects an EventSource
+shim into `index.html` that reloads the tab when the operator runs
+`parachute-app dev <name> --trigger` after a rebuild. Reference:
+[design doc section 18](https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-apps-design.md#18-caching--reload-strategy).
+
+### Added
+
+- `src/dev-mode.ts` — process-local, in-memory dev-mode state. One Map
+  for `name → { enabled, enabledAt, watchDir?, buildCmd? }`, one Map
+  for `name → Set<DevReloadSubscriber>`. Exports `enableDevMode`,
+  `disableDevMode`, `isDevMode`, `listDevMode`, `getDevMode`,
+  `addSubscriber`, `removeSubscriber`, `broadcastReload`,
+  `subscriberCount`, `closeAllSubscribers`, `resetDevMode`. Idempotent
+  enable preserves `enabledAt`; disable closes every connected SSE
+  stream so the next request resumes production cache headers cleanly.
+- `src/dev-injection.ts` — HTML script-injection (string scan, no
+  cheerio dep). Inserts `<script id="parachute-app-dev-reload">` just
+  before `</head>`, with fallbacks (`before-script` → `after-body` →
+  `append`) for unusual document structures. Idempotent via the marker
+  id — re-rendering the same document doesn't duplicate the tag. The
+  script body opens an EventSource against `/app/<name>/_dev/reload`
+  and `window.location.reload()`s on `reload` events (200ms debounce).
+- `src/dev-routes.ts` — Phase 1.3 HTTP endpoints:
+  - `GET /app/<name>/_dev/reload` (UNAUTHENTICATED) — SSE stream;
+    404 when the UI isn't in dev mode. Emits a `: connected` keepalive
+    on accept; broadcasts `event: reload\ndata: {"timestamp": ...}` on
+    trigger. Disconnects clean up via the stream's `cancel` hook.
+  - `POST /app/<name>/dev/enable` (`app:admin`) — flip on. Honors
+    `config.dev_mode_allowed: false` with 409.
+  - `POST /app/<name>/dev/disable` (`app:admin`) — flip off + close
+    every subscriber.
+  - `POST /app/<name>/dev/trigger` (`app:admin`) — broadcast `reload`;
+    409 when dev mode is off. Returns `{ notified: <count> }`.
+  - `GET /app/<name>/dev` (`app:read`) — per-UI status.
+  - `GET /app/dev/list` (`app:read`) — UIs currently in dev mode.
+- `src/cache-headers.ts` — `cacheHeadersFor` takes a `devMode` boolean.
+  When true, every response is `no-cache, no-store, must-revalidate` —
+  overrides immutable on hashed assets AND `no-cache` on the PWA SW.
+- `src/http-server.ts` — wires dev-routes ahead of admin routes; per-
+  request `isDevMode(meta.name)` check feeds both the cache headers
+  and the index.html injection. `serveFileWithHeaders` accepts a
+  `devMode` parameter; when true + filename is `index.html`, it parses
+  the body via `injectDevReloadScript` before responding. HEAD reports
+  the injected byte length.
+- `src/index.ts` — re-exports the dev-mode + dev-injection surface,
+  exposes `routeDev` + `DevRoutesOpts`, replaces the Phase 1.3 stub
+  `setDevMode` with a real wrapper.
+- `bin/parachute-app.ts` — replaces the Phase 1.3 stub with four
+  sub-verbs:
+  - `parachute-app dev <name>` — enable (idempotent)
+  - `parachute-app dev <name> --off` — disable
+  - `parachute-app dev <name> --trigger` — broadcast reload
+  - `parachute-app dev list` — show UIs currently in dev mode
+  Help text reflects the full Phase 1.3 verb set.
+- `web/admin/src/lib/api.ts` — typed helpers: `enableDevMode`,
+  `disableDevMode`, `triggerReload`, `getDevModeStatus`, `listDevMode`.
+- `web/admin/src/routes/Modules.tsx` — per-row "Dev" badge + "Enable
+  dev" / "Disable dev" / "Trigger reload" buttons. Refreshes the
+  dev-status map alongside the UI list.
+- Tests:
+  - `src/__tests__/dev-mode.test.ts` (15 tests) — state, subscribers,
+    broadcast reaping.
+  - `src/__tests__/dev-injection.test.ts` (10 tests) — happy path +
+    idempotence + all three fallback branches + escape defense.
+  - `src/__tests__/dev-routes.test.ts` (14 tests) — every endpoint +
+    auth gates + SSE subscribe / broadcast / cancel.
+  - `src/__tests__/dev-integration.test.ts` (10 tests) — full
+    end-to-end via Bun.serve including script injection, no-cache
+    override, SSE broadcast, dev-list, HEAD content-length.
+  - `src/__tests__/cache-headers.test.ts` — extra coverage for the
+    `devMode` parameter.
+  - `src/__tests__/cli.test.ts` — refreshed for the new `dev` verbs.
+  - `web/admin/src/routes/Modules.test.tsx` — updated to mock the
+    `/app/dev/list` companion fetch + assert the new dev controls.
+
+### Changed
+
+- Bumped to `0.1.0-rc.4`. `.parachute/info` capabilities now include
+  `dev-mode-sse`.
+- HTTP server routing: dev-routes dispatcher fires ahead of admin-routes
+  so the per-UI `_dev/reload` path doesn't race with the admin matcher.
+- `cacheHeadersFor` signature gains a third `devMode = false` parameter
+  (backwards-compatible — existing meta-less callers continue to work).
+- Admin SPA's Modules table grew a "Dev" column; existing layout
+  preserved.
+
+### Verified
+
+- `bun test src/` → 270 pass / 0 fail (was 213).
+- `cd web/admin && bun run test` → 31 pass / 0 fail (was 21).
+- `bun run typecheck` → clean (root + web/admin).
+- `bunx biome check .` → clean.
+- `bun run build` → `dist/admin/` populated.
+- `bin/parachute-app.ts --version` → 0.1.0-rc.4.
+- `bin/parachute-app.ts --help` → shows the four `dev` sub-verbs.
+
+## [0.1.0-rc.3] - 2026-05-21
 
 feat(app): Phase 1.2 — admin endpoints + DCR + npm-fetch + Vite+React admin SPA.
 

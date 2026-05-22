@@ -148,6 +148,43 @@ export function getUiInfo(name: string): Promise<UiInfoResponse> {
   return call("GET", `/app/${encodeURIComponent(name)}/info`);
 }
 
+// --- Phase 1.3: dev mode ------------------------------------------------
+
+export type DevModeStatus = {
+  name: string;
+  enabled: boolean;
+  enabledAt: number;
+  subscribers: number;
+};
+
+export type DevListResponse = {
+  uis: DevModeStatus[];
+};
+
+export function listDevMode(): Promise<DevListResponse> {
+  return call("GET", "/app/dev/list");
+}
+
+export function getDevModeStatus(name: string): Promise<DevModeStatus> {
+  return call("GET", `/app/${encodeURIComponent(name)}/dev`);
+}
+
+export function enableDevMode(name: string): Promise<{ ok: boolean } & DevModeStatus> {
+  return call("POST", `/app/${encodeURIComponent(name)}/dev/enable`);
+}
+
+export function disableDevMode(
+  name: string,
+): Promise<{ ok: boolean; name: string; enabled: false; was_on: boolean }> {
+  return call("POST", `/app/${encodeURIComponent(name)}/dev/disable`);
+}
+
+export function triggerReload(
+  name: string,
+): Promise<{ ok: boolean; name: string; notified: number }> {
+  return call("POST", `/app/${encodeURIComponent(name)}/dev/trigger`);
+}
+
 /** Format an ApiError for inline display. */
 export function formatError(e: unknown): string {
   if (!e || typeof e !== "object") return String(e);

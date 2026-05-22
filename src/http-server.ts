@@ -37,6 +37,9 @@ import * as path from "node:path";
 import { type AdminHandlerOpts, routeAdmin } from "./admin-routes.ts";
 import { cacheHeadersFor } from "./cache-headers.ts";
 import { type AppConfig, loadConfig } from "./config.ts";
+import { injectDevReloadScript } from "./dev-injection.ts";
+import { isDevMode } from "./dev-mode.ts";
+import { type DevRoutesOpts, routeDev } from "./dev-routes.ts";
 import type { UiMeta } from "./meta-schema.ts";
 import { type RegisteredUi, scanUis } from "./ui-registry.ts";
 
@@ -85,6 +88,10 @@ export type HttpServerOpts = {
    * server exposes them so callers don't have to thread them in by hand.
    */
   adminOpts?: Omit<AdminHandlerOpts, "state">;
+  /**
+   * Phase 1.3 dev-route opts (test seam for enforceScope override).
+   */
+  devOpts?: Omit<DevRoutesOpts, "state">;
 };
 
 /**
@@ -100,11 +107,12 @@ export function startHttpServer(opts: HttpServerOpts): ReturnType<typeof Bun.ser
 
   const adminDir = opts.adminDir ?? defaultAdminDir();
   const adminOpts = opts.adminOpts ?? {};
+  const devOpts = opts.devOpts ?? {};
   return serve({
     port,
     hostname,
     fetch: (req) =>
-      handle(req, opts.state, { startedAt, parachuteDir, logger, adminDir, adminOpts }),
+      handle(req, opts.state, { startedAt, parachuteDir, logger, adminDir, adminOpts, devOpts }),
   });
 }
 
@@ -114,6 +122,7 @@ type HandleCtx = {
   logger: Pick<Console, "log" | "warn" | "error">;
   adminDir: string;
   adminOpts: Omit<AdminHandlerOpts, "state">;
+  devOpts: Omit<DevRoutesOpts, "state">;
 };
 
 function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promise<Response> {
@@ -164,6 +173,14 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
     (pathname === "/app/admin" || pathname === "/app/admin/" || pathname.startsWith("/app/admin/"))
   ) {
     return serveAdminAsset(req, ctx.adminDir, pathname);
+  }
+
+  // Phase 1.3 dev-mode routes: SSE reload stream + trigger endpoint.
+  // Matched ahead of admin so the per-UI `/_dev/reload` SSE path doesn't
+  // race with the admin regex (different prefix shapes — defense in depth).
+  const dev = routeDev(req, { state, ...ctx.devOpts });
+  if (dev.handled) {
+    return dev.response;
   }
 
   // Phase 1.2 admin endpoints (POST /app/add, DELETE /app/<name>, etc.).
@@ -227,10 +244,13 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
   const mount = ui.meta.path;
   const distDir = ui.distDir;
   const indexHtmlPath = path.join(distDir, "index.html");
+  // Per-request dev-mode check — flipping `parachute-app dev <name>` takes
+  // effect on the very next request without restarting the server.
+  const devMode = isDevMode(ui.meta.name);
 
   // Root document: /app/foo or /app/foo/
   if (pathname === mount || pathname === `${mount}/`) {
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta);
+    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
   }
 
   // Strip the mount prefix; rel is the path within dist/.
@@ -238,13 +258,13 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
   // Defense in depth: reject any explicit traversal segments before resolve.
   if (rel.includes("\0") || rel.split("/").some((seg) => seg === "..")) {
     // Fall through to SPA fallback — the bundle's router handles unknown routes.
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta);
+    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
   }
 
   const resolved = path.resolve(distDir, rel);
   // Containment check — the resolved path must live under distDir.
   if (resolved !== distDir && !resolved.startsWith(`${distDir}${path.sep}`)) {
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta);
+    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
   }
 
   if (existsSync(resolved)) {
@@ -252,7 +272,7 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
       const st = statSync(resolved);
       if (st.isFile()) {
         const basename = path.basename(resolved);
-        return serveFileWithHeaders(req, resolved, basename, ui.meta);
+        return serveFileWithHeaders(req, resolved, basename, ui.meta, devMode);
       }
     } catch {
       // Race with file deletion — fall through to SPA fallback.
@@ -261,7 +281,7 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
 
   // SPA fallback: serve index.html with no-cache headers so the router runs
   // on a fresh document.
-  return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta);
+  return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
 }
 
 /**
@@ -281,6 +301,7 @@ function serveFileWithHeaders(
   filePath: string,
   filenameForHeaders: string,
   meta: UiMeta,
+  devMode = false,
 ): Response {
   let body: Buffer;
   try {
@@ -290,18 +311,41 @@ function serveFileWithHeaders(
     console.warn(`[app] serve: file vanished mid-request: ${filePath} (${(e as Error).message})`);
     return new Response("Not Found", { status: 404 });
   }
+
+  // Dev-mode reload-script injection: when dev mode is on AND we're serving
+  // the index.html document, parse + inject the EventSource shim. Idempotent
+  // — re-serving without a rebuild won't duplicate the tag.
+  let payload: Buffer | string = body;
+  if (devMode && filenameForHeaders === "index.html") {
+    const endpoint = `${meta.path}/_dev/reload`;
+    try {
+      const html = body.toString("utf8");
+      const { html: injected, fallback } = injectDevReloadScript(html, endpoint);
+      if (fallback) {
+        console.warn(
+          `[app] dev: injected reload script via ${fallback} fallback for ${meta.name} (no </head> in index.html)`,
+        );
+      }
+      payload = injected;
+    } catch (e) {
+      // Should never throw — string ops only. Fall back to the raw bytes.
+      console.warn(`[app] dev: inject failed for ${meta.name}: ${(e as Error).message}`);
+    }
+  }
+
+  const bodyLen = typeof payload === "string" ? Buffer.byteLength(payload) : payload.length;
   const headers: Record<string, string> = {
     "content-type": contentTypeFor(filenameForHeaders),
-    ...cacheHeadersFor(filenameForHeaders, meta),
+    ...cacheHeadersFor(filenameForHeaders, meta, devMode),
   };
   if (req.method === "HEAD") {
     // HEAD: include Content-Length but no body.
-    headers["content-length"] = String(body.length);
+    headers["content-length"] = String(bodyLen);
     return new Response(null, { status: 200, headers });
   }
-  // Bun's Response accepts Buffer / Uint8Array / ArrayBuffer interchangeably;
-  // pass the Buffer directly.
-  return new Response(body, { status: 200, headers });
+  // Bun's Response accepts string / Buffer / Uint8Array / ArrayBuffer
+  // interchangeably; pass whichever shape we have.
+  return new Response(payload, { status: 200, headers });
 }
 
 /**
