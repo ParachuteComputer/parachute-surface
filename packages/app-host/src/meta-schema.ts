@@ -122,6 +122,33 @@ export type UiMeta = {
    * Per patterns#57 ("Surfaces declare required vault schema").
    */
   required_schema?: RequiredSchemaDeclaration;
+  /**
+   * Phase 3.0 — dev-mode file watcher source dir, expressed as a path
+   * relative to the UI's root directory (`<uis>/<dirName>/`). The watcher
+   * (recursive) fires `onChange` on any descendant change. Default when
+   * absent: the UI's root dir minus `dist/` and `node_modules/` (handled
+   * by the watcher's filter). Set this to e.g. `"../gitcoin-brain-ui/src"`
+   * when the UI's source tree lives outside the installed bundle and the
+   * operator is iterating from a checkout.
+   */
+  dev_watch_dir?: string;
+  /**
+   * Phase 3.0 — shell command to run on file change before broadcasting a
+   * reload. Spawned via `sh -c <cmd>` with the UI's root dir as cwd. Empty
+   * / absent → no build step; the watcher emits a reload directly. The
+   * command should produce a fresh `dist/` (or whatever the bundle's
+   * served files are) — app rebroadcasts on success and skips reload on
+   * non-zero exit. Build output is captured to logs.
+   */
+  dev_build_cmd?: string;
+  /**
+   * Phase 3.0 — debounce window (ms) for batched file-change events.
+   * Default 250ms. Build tools that touch many files in quick succession
+   * (esbuild, Vite, tsc --watch) produce one reload per quiet-window
+   * instead of one per file. Lower bound enforced at 50ms — anything
+   * smaller risks reload-thrashing during a multi-file build.
+   */
+  dev_debounce_ms?: number;
 };
 
 /**
@@ -297,6 +324,50 @@ export function parseMeta(raw: unknown): UiMeta {
   // Phase 2.1+ auto-provisions).
   const required_schema = parseRequiredSchema(o.required_schema, errors);
 
+  // dev_watch_dir — optional string; Phase 3.0.
+  let dev_watch_dir: string | undefined;
+  if (o.dev_watch_dir !== undefined) {
+    if (typeof o.dev_watch_dir !== "string" || o.dev_watch_dir.length === 0) {
+      errors.push({
+        path: "dev_watch_dir",
+        message: "must be a non-empty string (path relative to UI root)",
+      });
+    } else {
+      dev_watch_dir = o.dev_watch_dir;
+    }
+  }
+
+  // dev_build_cmd — optional string; Phase 3.0. Spawned via `sh -c`.
+  let dev_build_cmd: string | undefined;
+  if (o.dev_build_cmd !== undefined) {
+    if (typeof o.dev_build_cmd !== "string" || o.dev_build_cmd.length === 0) {
+      errors.push({
+        path: "dev_build_cmd",
+        message: "must be a non-empty string (shell command to run on file change)",
+      });
+    } else {
+      dev_build_cmd = o.dev_build_cmd;
+    }
+  }
+
+  // dev_debounce_ms — optional integer ≥ 50; Phase 3.0.
+  let dev_debounce_ms: number | undefined;
+  if (o.dev_debounce_ms !== undefined) {
+    if (
+      typeof o.dev_debounce_ms !== "number" ||
+      !Number.isFinite(o.dev_debounce_ms) ||
+      !Number.isInteger(o.dev_debounce_ms) ||
+      o.dev_debounce_ms < 50
+    ) {
+      errors.push({
+        path: "dev_debounce_ms",
+        message: "must be an integer ≥ 50 (milliseconds)",
+      });
+    } else {
+      dev_debounce_ms = o.dev_debounce_ms;
+    }
+  }
+
   if (errors.length > 0) {
     throw new InvalidMetaError("meta.json", errors);
   }
@@ -314,6 +385,9 @@ export function parseMeta(raw: unknown): UiMeta {
     pwa_service_worker,
     public: publicField,
     ...(required_schema ? { required_schema } : {}),
+    ...(dev_watch_dir !== undefined ? { dev_watch_dir } : {}),
+    ...(dev_build_cmd !== undefined ? { dev_build_cmd } : {}),
+    ...(dev_debounce_ms !== undefined ? { dev_debounce_ms } : {}),
   };
 }
 
@@ -506,6 +580,22 @@ export function metaSchemaJson(): Record<string, unknown> {
         type: "boolean",
         default: false,
         description: "If true, hub does not enforce a session gate at /app/<name>/*.",
+      },
+      dev_watch_dir: {
+        type: "string",
+        description:
+          "Phase 3.0 — directory (relative to UI root) the dev-mode file watcher monitors. Default: the UI's root directory minus dist/ and node_modules/.",
+      },
+      dev_build_cmd: {
+        type: "string",
+        description:
+          "Phase 3.0 — shell command run on file change in dev mode (via `sh -c`); cwd is the UI's root directory. Absent → no build step; the watcher emits a reload directly.",
+      },
+      dev_debounce_ms: {
+        type: "integer",
+        minimum: 50,
+        description:
+          "Phase 3.0 — debounce window (ms) for batched file-change events. Default 250.",
       },
       required_schema: {
         type: "object",

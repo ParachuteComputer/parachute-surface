@@ -268,6 +268,9 @@ describe("metaSchemaJson", () => {
     const props = schema.properties as Record<string, unknown>;
     expect(Object.keys(props).sort()).toEqual(
       [
+        "dev_build_cmd",
+        "dev_debounce_ms",
+        "dev_watch_dir",
         "displayName",
         "iconUrl",
         "name",
@@ -284,6 +287,15 @@ describe("metaSchemaJson", () => {
     );
   });
 
+  test("Phase 3.0 dev fields appear in the schema", () => {
+    const schema = metaSchemaJson();
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    expect(props.dev_watch_dir?.type).toBe("string");
+    expect(props.dev_build_cmd?.type).toBe("string");
+    expect(props.dev_debounce_ms?.type).toBe("integer");
+    expect(props.dev_debounce_ms?.minimum).toBe(50);
+  });
+
   test("required_schema property describes the tag-role shape", () => {
     const schema = metaSchemaJson();
     const props = schema.properties as Record<string, Record<string, unknown>>;
@@ -292,6 +304,62 @@ describe("metaSchemaJson", () => {
     expect(rs.additionalProperties).toBe(false);
     const rsProps = rs.properties as Record<string, Record<string, unknown>>;
     expect(rsProps.tags?.type).toBe("array");
+  });
+});
+
+describe("parseMeta — Phase 3.0 dev-mode fields", () => {
+  test("accepts dev_watch_dir + dev_build_cmd + dev_debounce_ms", () => {
+    const m = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+      dev_watch_dir: "../src",
+      dev_build_cmd: "bun run build",
+      dev_debounce_ms: 500,
+    });
+    expect(m.dev_watch_dir).toBe("../src");
+    expect(m.dev_build_cmd).toBe("bun run build");
+    expect(m.dev_debounce_ms).toBe(500);
+  });
+
+  test("omitted dev fields leave the props undefined", () => {
+    const m = parseMeta({ name: "x", displayName: "X", path: "/app/x" });
+    expect(m.dev_watch_dir).toBeUndefined();
+    expect(m.dev_build_cmd).toBeUndefined();
+    expect(m.dev_debounce_ms).toBeUndefined();
+  });
+
+  test("rejects non-string dev_watch_dir", () => {
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: 1 as unknown }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects empty-string dev_watch_dir", () => {
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_watch_dir: "" }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects non-string dev_build_cmd", () => {
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_build_cmd: true as unknown }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects dev_debounce_ms below the 50ms floor", () => {
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_debounce_ms: 10 }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("rejects non-integer dev_debounce_ms", () => {
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_debounce_ms: 250.5 }),
+    ).toThrow(InvalidMetaError);
+    expect(() =>
+      parseMeta({ name: "x", displayName: "X", path: "/app/x", dev_debounce_ms: "250" as unknown }),
+    ).toThrow(InvalidMetaError);
   });
 });
 
