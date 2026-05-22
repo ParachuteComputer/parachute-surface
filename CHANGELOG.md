@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0-rc.4] - 2026-05-21
+## [0.1.0-rc.4] - 2026-05-22
 
 feat(app): Phase 1.3 — dev mode with SSE live-reload (closes Phase 1).
 
@@ -104,7 +104,7 @@ shim into `index.html` that reloads the tab when the operator runs
 - `bin/parachute-app.ts --version` → 0.1.0-rc.4.
 - `bin/parachute-app.ts --help` → shows the four `dev` sub-verbs.
 
-## [0.1.0-rc.3] - 2026-05-22
+## [0.1.0-rc.3] - 2026-05-21
 
 feat(app): Phase 1.2 — admin endpoints + DCR + npm-fetch + Vite+React admin SPA.
 
