@@ -9,6 +9,34 @@
 
 export const TOKEN_STORAGE_KEY = "parachute_operator_token";
 
+/**
+ * Allowed types in a tag-role `field` declaration. Mirrors
+ * `REQUIRED_SCHEMA_FIELD_TYPES` in app-host/src/meta-schema.ts —
+ * keep in sync if vault grows new field types.
+ */
+export type RequiredSchemaFieldType = "string" | "number" | "boolean" | "date";
+
+export type TagSchemaFieldDeclaration = {
+  type: RequiredSchemaFieldType;
+  required?: boolean;
+  description?: string;
+};
+
+export type TagSchemaDeclaration = {
+  name: string;
+  description?: string;
+  fields?: Record<string, TagSchemaFieldDeclaration>;
+};
+
+/**
+ * Optional vault-schema declaration the app needs to function (patterns#57).
+ * Phase 2.0: display-only in the admin SPA. Phase 2.1+ auto-provisions
+ * missing tag-identity rows at install time.
+ */
+export type RequiredSchemaDeclaration = {
+  tags?: TagSchemaDeclaration[];
+};
+
 export type UiSummary = {
   name: string;
   dirName: string;
@@ -23,6 +51,7 @@ export type UiSummary = {
   status: "active";
   oauthClientId?: string;
   oauthStatus?: string;
+  required_schema?: RequiredSchemaDeclaration;
 };
 
 export type SkippedUi = {

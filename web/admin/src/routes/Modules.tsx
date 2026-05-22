@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { SchemaRequirements } from "../components/SchemaRequirements.tsx";
 import {
   type DevModeStatus,
   type ListResponse,
@@ -212,6 +213,9 @@ export function Modules() {
                         </li>
                       ))}
                     </ul>
+                    {u.required_schema && (
+                      <SchemaRequirements schema={u.required_schema} compact={true} />
+                    )}
                   </td>
                   <td className="modules__dev">
                     {devOn ? (

@@ -188,6 +188,10 @@ function serializeUi(u: RegisteredUi): SerializedUi {
     status: "active" as const,
     oauthClientId: oauth?.client_id,
     oauthStatus: oauth?.status,
+    // Surface required_schema (patterns#57) so the admin SPA can render
+    // a "Schema requirements" expandable section per row. Phase 2.0 is
+    // display-only; auto-provisioning lands in Phase 2.1+.
+    required_schema: u.meta.required_schema,
   };
 }
 
@@ -205,6 +209,12 @@ export type SerializedUi = {
   status: "active";
   oauthClientId?: string;
   oauthStatus?: string;
+  /**
+   * Optional declaration of vault schema this app needs to function.
+   * Mirrors the UiMeta field of the same name (see `meta-schema.ts`).
+   * Phase 2.0: display-only in admin SPA; Phase 2.1+ auto-provisions.
+   */
+  required_schema?: import("./meta-schema.ts").RequiredSchemaDeclaration;
 };
 
 // --- /app/<name>/info ----------------------------------------------------

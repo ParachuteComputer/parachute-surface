@@ -368,6 +368,61 @@ describe("Modules", () => {
     });
   });
 
+  test("renders SchemaRequirements summary when required_schema declared", async () => {
+    withFetchMock(
+      buildFetch({
+        uis: [
+          {
+            name: "notes",
+            dirName: "notes",
+            displayName: "Notes",
+            path: "/app/notes",
+            scopes_required: [],
+            pwa: false,
+            public: false,
+            status: "active",
+            required_schema: {
+              tags: [
+                {
+                  name: "capture",
+                  description: "Quick captures",
+                  fields: {
+                    source: { type: "string", required: true },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    renderWithRouter();
+    // Summary line surfaces in the row's Scopes column
+    expect(await screen.findByText(/1 tag, 1 field/)).toBeInTheDocument();
+  });
+
+  test("no SchemaRequirements summary when required_schema absent", async () => {
+    withFetchMock(
+      buildFetch({
+        uis: [
+          {
+            name: "alpha",
+            dirName: "alpha",
+            displayName: "Alpha",
+            path: "/app/alpha",
+            scopes_required: [],
+            pwa: false,
+            public: false,
+            status: "active",
+          },
+        ],
+      }),
+    );
+    renderWithRouter();
+    await screen.findByText("Alpha");
+    expect(screen.queryByText(/Schema requirements/)).toBeNull();
+  });
+
   test("Disable dev button POSTs /dev/disable", async () => {
     const callLog: Array<{ url: string; method: string }> = [];
     const fakeFetch = vi.fn((url: string, init?: RequestInit) => {
