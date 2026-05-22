@@ -1,50 +1,32 @@
 {
-  "name": "@openparachute/app",
-  "version": "0.1.0-rc.4",
-  "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
-  "module": "src/index.ts",
-  "type": "module",
-  "private": false,
+  "name": "@openparachute/app-monorepo",
+  "version": "0.2.0-rc.1",
+  "private": true,
+  "description": "Workspace root for parachute-app — host module (@openparachute/app) + shared client library (@openparachute/app-client).",
   "license": "AGPL-3.0",
-  "bin": {
-    "parachute-app": "bin/parachute-app.ts"
-  },
-  "files": [
-    "src/**/*.ts",
-    "!src/**/*.test.ts",
-    "bin/**/*.ts",
-    "dist/admin/**",
-    ".parachute/module.json",
-    ".parachute/info",
-    ".parachute/config/schema",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "web/admin"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
-    "start": "bun run bin/parachute-app.ts serve",
-    "build": "cd web/admin && bun install --frozen-lockfile && bun run build",
-    "build:admin": "cd web/admin && bun run build",
-    "test": "bun test src/",
-    "test:admin": "cd web/admin && bun run test",
-    "test:all": "bun test src/ && cd web/admin && bun run test",
-    "typecheck": "tsc --noEmit",
+    "build": "bun run --filter '@openparachute/app-client' build && bun run --filter '@openparachute/app' build",
+    "build:app-host": "bun run --filter '@openparachute/app' build",
+    "build:app-client": "bun run --filter '@openparachute/app-client' build",
+    "build:admin": "bun run --filter '@openparachute/app-admin-ui' build",
+    "test": "bun test packages/app-host/src/ packages/app-client/src/",
+    "test:host": "bun test packages/app-host/src/",
+    "test:client": "bun test packages/app-client/src/",
+    "test:admin": "bun run --filter '@openparachute/app-admin-ui' test",
+    "test:all": "bun test packages/app-host/src/ packages/app-client/src/ && cd web/admin && bun run test",
+    "typecheck": "cd packages/app-host && tsc --noEmit && cd ../app-client && tsc --noEmit",
     "typecheck:admin": "cd web/admin && bun run typecheck",
-    "typecheck:all": "tsc --noEmit && cd web/admin && bun run typecheck",
+    "typecheck:all": "bun run typecheck && bun run typecheck:admin",
     "lint": "biome check ."
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
     "typescript": "^5"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "@openparachute/scope-guard": "^0.3.0"
   }
 }

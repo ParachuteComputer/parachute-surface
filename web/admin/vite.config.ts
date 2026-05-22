@@ -8,9 +8,12 @@ import { defineConfig } from "vite";
  * resolve under `/app/admin/assets/...` in production; standalone dev (no
  * daemon) override via `VITE_BASE_PATH=/`.
  *
- * Build target: `../../dist/admin/` — sits inside the npm package's root
- * `dist/` so `package.json#files` picks it up as `dist/admin/**`. The daemon's
- * `defaultAdminDir()` resolves to `<package-root>/dist/admin/`.
+ * Build target: `../../packages/app-host/dist/admin/` — sits inside the
+ * `@openparachute/app` package's root `dist/` so `package.json#files`
+ * picks it up as `dist/admin/**`. The daemon's `defaultAdminDir()`
+ * resolves to `<app-host-package-root>/dist/admin/`. (Pre-monorepo
+ * this lived at `../../dist/admin/`; the path moved with the host code
+ * into `packages/app-host/` during Phase 2.0.)
  */
 const basePath = normalizeBase(process.env.VITE_BASE_PATH ?? "/app/admin/");
 
@@ -24,7 +27,7 @@ export default defineConfig({
   base: basePath,
   plugins: [react()],
   build: {
-    outDir: "../../dist/admin",
+    outDir: "../../packages/app-host/dist/admin",
     emptyOutDir: true,
   },
   server: {
