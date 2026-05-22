@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/app-monorepo",
-  "version": "0.2.0-rc.3",
+  "version": "0.2.0-rc.4",
   "private": true,
   "description": "Workspace root for parachute-app — host module (@openparachute/app) + shared client library (@openparachute/app-client).",
   "license": "AGPL-3.0",
