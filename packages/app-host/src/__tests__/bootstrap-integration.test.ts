@@ -115,7 +115,8 @@ describe("serve ↔ bootstrap integration", () => {
       // The bootstrap promise resolves after the add completes.
       const result = await h.bootstrap;
       expect(result).toBeDefined();
-      expect(result!.bootstrapped).toEqual(["@openparachute/notes-ui"]);
+      // Default spec pins @rc per pre-1.0 governance (see config.ts docstring).
+      expect(result!.bootstrapped).toEqual(["@openparachute/notes-ui@rc"]);
       expect(result!.failed).toEqual([]);
       // The UI is on disk + in-state.
       expect(fs.existsSync(path.join(uisDir, "notes", "dist", "index.html"))).toBe(true);
@@ -252,7 +253,7 @@ describe("serve ↔ bootstrap integration", () => {
       const result = await h.bootstrap;
       expect(result!.bootstrapped).toEqual([]);
       expect(result!.failed.length).toBe(1);
-      expect(result!.failed[0]!.pkg).toBe("@openparachute/notes-ui");
+      expect(result!.failed[0]!.pkg).toBe("@openparachute/notes-ui@rc");
       // Daemon still healthy + serving healthz.
       const url = `http://127.0.0.1:${h.server.port}`;
       const r = await fetch(`${url}/app/healthz`);

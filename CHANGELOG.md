@@ -9,6 +9,22 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.7] - 2026-05-23
+
+### Fixed
+
+- Bootstrap default now pins `@openparachute/notes-ui@rc` instead of
+  bare `@openparachute/notes-ui` (pre-1.0 governance:
+  `parachute-patterns/patterns/governance.md` rule 2 keeps `@latest`
+  floating behind the rc chain). Resolves the rc.4-without-meta.json
+  regression that hit operators on first install — the bootstrap
+  loop's bare-spec resolved to the older rc, npm-fetch fell over on
+  the missing meta.json, and the daemon's first-boot Notes install
+  failed with `bootstrap: failed to install @openparachute/notes-ui`.
+  Pinning `@rc` follows the rc chain (currently rc.5+, with the
+  meta.json fix from
+  [notes#158](https://github.com/ParachuteComputer/parachute-notes/issues/158)).
+
 ## [app 0.2.0-rc.6] - 2026-05-22
 
 fix(app): restore `kind: "frontend"` in module.json (hub validator

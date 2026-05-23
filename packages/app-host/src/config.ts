@@ -34,8 +34,15 @@ export type AppConfig = {
    * First-boot bootstrap. When `uis/` is empty on `serve` startup, apps
    * auto-installs each entry in `apps` via the same npm-fetch pipeline
    * `parachute-app add` uses. Defaults to `{enabled: true, apps:
-   * ["@openparachute/notes-ui"]}` — the friend-deploy story is "spin up
-   * a hub, get Notes for free."
+   * ["@openparachute/notes-ui@rc"]}` — the friend-deploy story is "spin
+   * up a hub, get Notes for free."
+   *
+   * The default spec pins the `@rc` dist-tag because pre-1.0 governance
+   * keeps `@latest` floating behind the rc chain (see
+   * `parachute-patterns/patterns/governance.md`). Without the pin, a
+   * fresh install resolves whatever happens to sit at `@latest` — which
+   * pre-1.0 may be an older rc missing newer schema. Once any module
+   * reaches stable, this default flips back to bare (= `@latest`).
    *
    * Operators who want a different default (or no default) can flip
    * `enabled: false` or set `apps: []`. Per design doc Section 16:
@@ -93,7 +100,7 @@ export const DEFAULTS: AppConfig = {
   dev_mode_allowed: true,
   bootstrap_default_apps: {
     enabled: true,
-    apps: ["@openparachute/notes-ui"],
+    apps: ["@openparachute/notes-ui@rc"],
   },
   auto_provision_required_schema: true,
 };
