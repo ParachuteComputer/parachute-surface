@@ -9,6 +9,23 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.6] - 2026-05-22
+
+fix(app): restore `kind: "frontend"` in module.json (hub validator
+requires it; the kind-removal awaits [hub#301](https://github.com/ParachuteComputer/parachute-hub/issues/301)
+Phase A).
+
+`.parachute/module.json` shipped at 0.2.0-rc.5 without a `kind` field
+per the "kind doesn't matter" decision, but hub's manifest validator
+in `parachute-hub/src/module-manifest.ts` still requires the field
+(`"kind" must be "api" | "frontend" | "tool"`). `parachute start app`
+rejects the install at boot — bootstrap never runs, `/app/notes` 404s.
+
+Until hub#301 Phase A lands (relaxes `kind` to optional, defaults
+missing to `"api"`), every app release must carry an explicit `kind`.
+App serves UI bundles so `"frontend"` is the accurate value of the
+three the validator permits.
+
 ## [app 0.2.0-rc.4] - 2026-05-22
 
 fix(app): resolve workspace deps in published manifest (`workspace:*`

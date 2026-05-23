@@ -3,6 +3,7 @@
   "manifestName": "parachute-app",
   "displayName": "App",
   "tagline": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "kind": "frontend",
   "port": 1946,
   "paths": ["/app", "/.parachute"],
   "stripPrefix": false,

@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/app",
-  "version": "0.2.0-rc.5",
+  "version": "0.2.0-rc.6",
   "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
