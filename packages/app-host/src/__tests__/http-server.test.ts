@@ -291,19 +291,168 @@ describe("HTTP — UI mount paths", () => {
     }
   });
 
-  test("path traversal attempt → SPA fallback (defense in depth)", async () => {
+  test("path traversal attempt with asset extension → 404 (defense in depth)", async () => {
+    // Asset-shaped traversal attempts must NOT fall through to the SPA shell —
+    // returning HTML for a `.txt` (or `.js`, `.json`, etc.) request would make
+    // the browser try to parse the SPA HTML as text/JS, masking the real
+    // failure. With the asset-vs-navigation split, traversal attempts whose
+    // suffix looks like an asset return 404.
     const ui = makeUi("notes", "/app/notes", { "index.html": "safe" });
     // Write a sensitive file in the parent
     fs.writeFileSync(path.join(tmpDir, "secret.txt"), "very secret");
     const srv = startServer(makeState([ui]));
     try {
       const r = await fetch(`${srv.url}/app/notes/..%2Fsecret.txt`);
+      expect(r.status).toBe(404);
+      // Body is the generic "Not Found" — definitely not the secret.
+      const body = await r.text();
+      expect(body).toBe("Not Found");
+      expect(body).not.toContain("very secret");
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("path traversal attempt with no extension → SPA fallback (still defended)", async () => {
+    // A traversal attempt whose suffix is a route-shape (no extension) still
+    // falls through to the SPA shell — the index.html is served, NOT the
+    // traversal target. The defense-in-depth check fires before path.resolve
+    // ever sees the segments.
+    const ui = makeUi("notes", "/app/notes", { "index.html": "safe" });
+    fs.writeFileSync(path.join(tmpDir, "secret"), "very secret");
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/..%2Fsecret`);
       expect(r.status).toBe(200);
-      // We get index.html, not the secret.
+      // SPA shell, not the secret.
       expect(await r.text()).toBe("safe");
     } finally {
       srv.stop();
     }
+  });
+
+  describe("asset-vs-navigation miss policy", () => {
+    // The SPA-fallback rule masks missing-asset failures: a request for a
+    // missing `.js` chunk that's answered with HTML triggers a confusing
+    // "Expected JavaScript-or-Wasm module, got 'text/html'" in the browser.
+    // Missing assets must return 404; only navigation requests (no extension,
+    // or .html) fall through to the SPA shell.
+
+    test("missing .js asset returns 404 (not SPA shell)", async () => {
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/missing-chunk.js`);
+        expect(r.status).toBe(404);
+        const body = await r.text();
+        expect(body).toBe("Not Found");
+        // The SPA-shell body must NOT leak through — that's the whole bug.
+        expect(body).not.toContain("SPA SHELL");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing .webmanifest returns 404 (not SPA shell)", async () => {
+      // The motivating real-world symptom: a missing PWA manifest answered
+      // with HTML triggers "Manifest: Line: 1, column: 1, Syntax error."
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/manifest.webmanifest`);
+        expect(r.status).toBe(404);
+        expect(await r.text()).toBe("Not Found");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing .mjs asset returns 404 (not SPA shell)", async () => {
+      // Native ES module chunks. Some Vite configs emit .mjs; the policy must
+      // cover them identically to .js.
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/assets/chunk.mjs`);
+        expect(r.status).toBe(404);
+        expect(await r.text()).toBe("Not Found");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing .css asset returns 404 (not SPA shell)", async () => {
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/styles/missing.css`);
+        expect(r.status).toBe(404);
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing path with no extension serves SPA shell (client-side route)", async () => {
+      // Navigation requests must still hit the SPA shell so the client-side
+      // router can decide what to render — this is the SPA-fallback behavior
+      // we want to preserve.
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/some/route/without/extension`);
+        expect(r.status).toBe(200);
+        expect(r.headers.get("content-type")).toContain("text/html");
+        expect(await r.text()).toBe("SPA SHELL");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing path with .html extension serves SPA shell", async () => {
+      // .html is explicitly treated as a navigation request, not an asset —
+      // routers that use `.html` suffixes for their routes still get the SPA
+      // shell served.
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/route.html`);
+        expect(r.status).toBe(200);
+        expect(r.headers.get("content-type")).toContain("text/html");
+        expect(await r.text()).toBe("SPA SHELL");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("missing bare segment (e.g. /app/notes/notes) serves SPA shell", async () => {
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/notes`);
+        expect(r.status).toBe(200);
+        expect(await r.text()).toBe("SPA SHELL");
+      } finally {
+        srv.stop();
+      }
+    });
+
+    test("present .js asset still serves correctly (regression guard)", async () => {
+      // Existing asset-served-when-present path must not regress — the fix
+      // only changes the miss branch.
+      const ui = makeUi("notes", "/app/notes", {
+        "index.html": "SPA SHELL",
+        "real.js": "console.log('hi')",
+      });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/real.js`);
+        expect(r.status).toBe(200);
+        expect(r.headers.get("content-type")).toContain("javascript");
+        expect(await r.text()).toBe("console.log('hi')");
+      } finally {
+        srv.stop();
+      }
+    });
   });
 
   test("two UIs at different mounts", async () => {

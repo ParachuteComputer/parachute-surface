@@ -225,20 +225,74 @@ function matchUi(pathname: string, uis: ReadonlyArray<RegisteredUi>): Registered
 }
 
 /**
+ * File extensions that identify a request as an asset (vs a client-side
+ * navigation). Asset requests that miss return 404; navigation requests
+ * (no extension, or `.html`) fall through to the SPA shell so the
+ * client-side router can handle the path.
+ *
+ * Why this matters: if the SPA shell is served in response to an asset
+ * miss (a missing JS chunk, a missing `manifest.webmanifest`), the
+ * browser tries to parse HTML as JS / JSON / a PWA manifest and the
+ * resulting error ("Expected JavaScript-or-Wasm module, got
+ * 'text/html'", "Manifest: Line: 1, column: 1, Syntax error") masks
+ * the real cause — a missing or misnamed asset.
+ */
+const STATIC_ASSET_EXTENSIONS = new Set([
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".css",
+  ".json",
+  ".webmanifest",
+  ".map",
+  ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".ico",
+  ".avif",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".mp3",
+  ".mp4",
+  ".webm",
+  ".wasm",
+  ".txt",
+  ".gz",
+  ".br",
+]);
+
+function looksLikeAssetRequest(rel: string): boolean {
+  const ext = path.extname(rel).toLowerCase();
+  return STATIC_ASSET_EXTENSIONS.has(ext);
+}
+
+/**
  * Serve an asset for a registered UI. The flow:
  *
  *   1. If `pathname === meta.path` or `pathname === meta.path + "/"`, serve
  *      `dist/index.html` (the root document).
  *   2. Otherwise compute the relative path after `meta.path/`. If the file
  *      exists under `dist/`, serve it with content-type + cache headers.
- *   3. If it doesn't exist (SPA-routing case), serve `dist/index.html` with
- *      the no-cache headers — the client-side router decides what to render.
+ *   3. If it doesn't exist:
+ *      - If the request looks like an asset (extension like `.js`, `.css`,
+ *        `.webmanifest`), return 404 — never serve HTML in response to an
+ *        asset request, or the browser parses the SPA shell as JS/JSON.
+ *      - Otherwise (no extension / `.html` — a client-side route), serve
+ *        `dist/index.html` with no-cache headers and let the bundle's
+ *        router decide what to render.
  *
  * Path traversal: `path.resolve(distDir, rel)` is checked against `distDir`
  * via a containment test (`resolved.startsWith(distDir + path.sep)`). Any
  * attempt to escape (`../etc/passwd`) gets a 404. Bun's URL parser
  * already collapses `..` segments but the explicit check is the load-bearing
- * line — defense in depth.
+ * line — defense in depth. A traversal attempt with an asset-shaped suffix
+ * (e.g. `../etc/passwd.js`) is 404'd too — defense in depth for the
+ * "HTML returned for a JS request" foot-gun above.
  */
 function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Response {
   const mount = ui.meta.path;
@@ -257,6 +311,9 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
   const rel = pathname.slice(mount.length + 1); // +1 to drop the leading '/'
   // Defense in depth: reject any explicit traversal segments before resolve.
   if (rel.includes("\0") || rel.split("/").some((seg) => seg === "..")) {
+    if (looksLikeAssetRequest(rel)) {
+      return new Response("Not Found", { status: 404 });
+    }
     // Fall through to SPA fallback — the bundle's router handles unknown routes.
     return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
   }
@@ -264,6 +321,9 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
   const resolved = path.resolve(distDir, rel);
   // Containment check — the resolved path must live under distDir.
   if (resolved !== distDir && !resolved.startsWith(`${distDir}${path.sep}`)) {
+    if (looksLikeAssetRequest(rel)) {
+      return new Response("Not Found", { status: 404 });
+    }
     return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
   }
 
@@ -275,12 +335,15 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
         return serveFileWithHeaders(req, resolved, basename, ui.meta, devMode);
       }
     } catch {
-      // Race with file deletion — fall through to SPA fallback.
+      // Race with file deletion — fall through to SPA-fallback-or-404 below.
     }
   }
 
-  // SPA fallback: serve index.html with no-cache headers so the router runs
-  // on a fresh document.
+  // Miss. Asset-shaped requests get 404; navigation requests get the SPA
+  // shell so the client-side router runs.
+  if (looksLikeAssetRequest(rel)) {
+    return new Response("Not Found", { status: 404 });
+  }
   return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
 }
 
