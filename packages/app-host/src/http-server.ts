@@ -35,12 +35,14 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import { type AdminHandlerOpts, routeAdmin } from "./admin-routes.ts";
+import { getHubOrigin } from "./auth.ts";
 import { cacheHeadersFor } from "./cache-headers.ts";
 import { type AppConfig, loadConfig } from "./config.ts";
 import { injectDevReloadScript } from "./dev-injection.ts";
 import { isDevMode } from "./dev-mode.ts";
 import { type DevRoutesOpts, routeDev } from "./dev-routes.ts";
 import type { UiMeta } from "./meta-schema.ts";
+import { injectTenancyContract } from "./tenancy-injection.ts";
 import { type RegisteredUi, scanUis } from "./ui-registry.ts";
 
 export type AppState = {
@@ -196,7 +198,12 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
   if (method === "GET" || method === "HEAD") {
     const ui = matchUi(pathname, state.registeredUis);
     if (ui) {
-      return serveUiAsset(req, ui, pathname);
+      // Resolve the hub origin per-request so a config flip
+      // (admin-SPA-toggled `hub_url` or env override) takes effect on the
+      // very next index.html serve. Read by `injectTenancyContract` below
+      // via `serveFileWithHeaders`'s `hubOrigin` parameter.
+      const hubOrigin = getHubOrigin(state.config.hub_url);
+      return serveUiAsset(req, ui, pathname, hubOrigin, ctx.logger);
     }
   }
 
@@ -294,7 +301,13 @@ function looksLikeAssetRequest(rel: string): boolean {
  * (e.g. `../etc/passwd.js`) is 404'd too — defense in depth for the
  * "HTML returned for a JS request" foot-gun above.
  */
-function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Response {
+function serveUiAsset(
+  req: Request,
+  ui: RegisteredUi,
+  pathname: string,
+  hubOrigin: string,
+  logger: Pick<Console, "log" | "warn" | "error">,
+): Response {
   const mount = ui.meta.path;
   const distDir = ui.distDir;
   const indexHtmlPath = path.join(distDir, "index.html");
@@ -304,7 +317,15 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
 
   // Root document: /app/foo or /app/foo/
   if (pathname === mount || pathname === `${mount}/`) {
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
+    return serveFileWithHeaders(
+      req,
+      indexHtmlPath,
+      "index.html",
+      ui.meta,
+      devMode,
+      hubOrigin,
+      logger,
+    );
   }
 
   // Strip the mount prefix; rel is the path within dist/.
@@ -315,7 +336,15 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
       return new Response("Not Found", { status: 404 });
     }
     // Fall through to SPA fallback — the bundle's router handles unknown routes.
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
+    return serveFileWithHeaders(
+      req,
+      indexHtmlPath,
+      "index.html",
+      ui.meta,
+      devMode,
+      hubOrigin,
+      logger,
+    );
   }
 
   const resolved = path.resolve(distDir, rel);
@@ -324,7 +353,15 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
     if (looksLikeAssetRequest(rel)) {
       return new Response("Not Found", { status: 404 });
     }
-    return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
+    return serveFileWithHeaders(
+      req,
+      indexHtmlPath,
+      "index.html",
+      ui.meta,
+      devMode,
+      hubOrigin,
+      logger,
+    );
   }
 
   if (existsSync(resolved)) {
@@ -332,7 +369,7 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
       const st = statSync(resolved);
       if (st.isFile()) {
         const basename = path.basename(resolved);
-        return serveFileWithHeaders(req, resolved, basename, ui.meta, devMode);
+        return serveFileWithHeaders(req, resolved, basename, ui.meta, devMode, hubOrigin, logger);
       }
     } catch {
       // Race with file deletion — fall through to SPA-fallback-or-404 below.
@@ -344,7 +381,15 @@ function serveUiAsset(req: Request, ui: RegisteredUi, pathname: string): Respons
   if (looksLikeAssetRequest(rel)) {
     return new Response("Not Found", { status: 404 });
   }
-  return serveFileWithHeaders(req, indexHtmlPath, "index.html", ui.meta, devMode);
+  return serveFileWithHeaders(
+    req,
+    indexHtmlPath,
+    "index.html",
+    ui.meta,
+    devMode,
+    hubOrigin,
+    logger,
+  );
 }
 
 /**
@@ -365,35 +410,71 @@ function serveFileWithHeaders(
   filenameForHeaders: string,
   meta: UiMeta,
   devMode = false,
+  hubOrigin?: string,
+  logger: Pick<Console, "log" | "warn" | "error"> = console,
 ): Response {
   let body: Buffer;
   try {
     body = readFileSync(filePath);
   } catch (e) {
     // Log the actual path server-side for debugging — never returns to the client.
-    console.warn(`[app] serve: file vanished mid-request: ${filePath} (${(e as Error).message})`);
+    logger.warn(`[app] serve: file vanished mid-request: ${filePath} (${(e as Error).message})`);
     return new Response("Not Found", { status: 404 });
   }
 
-  // Dev-mode reload-script injection: when dev mode is on AND we're serving
-  // the index.html document, parse + inject the EventSource shim. Idempotent
-  // — re-serving without a rebuild won't duplicate the tag.
+  // When we're serving the index.html document, run two layered HTML
+  // post-processors:
+  //
+  //   1. Runtime tenancy contract — inject `<base href>` + meta tags so the
+  //      bundle (and `@openparachute/app-client`) can resolve its mount,
+  //      hub origin, etc. without baking them in at build time. Always-on:
+  //      `injectTenancyContract` skips itself if the source already
+  //      declared the tags (idempotent).
+  //   2. Dev-mode reload script — when dev mode is enabled for this UI,
+  //      inject the EventSource shim. Tenancy runs first so dev's
+  //      `</head>` insertion never collides with our `<head>` insertion.
+  //
+  // Both passes are string-scan based; neither parses HTML. The contract
+  // for both is the same: idempotent + non-destructive on malformed
+  // documents (no `<head>` → warn + serve raw).
   let payload: Buffer | string = body;
-  if (devMode && filenameForHeaders === "index.html") {
-    const endpoint = `${meta.path}/_dev/reload`;
-    try {
-      const html = body.toString("utf8");
-      const { html: injected, fallback } = injectDevReloadScript(html, endpoint);
-      if (fallback) {
-        console.warn(
-          `[app] dev: injected reload script via ${fallback} fallback for ${meta.name} (no </head> in index.html)`,
-        );
+  if (filenameForHeaders === "index.html") {
+    let html = body.toString("utf8");
+
+    // Pass 1: runtime tenancy contract (always-on when hubOrigin is supplied).
+    if (hubOrigin) {
+      try {
+        const result = injectTenancyContract(html, meta.path, hubOrigin);
+        if (result.skipped === "no-head") {
+          logger.warn(
+            `[app] inject-tenancy: no <head> in index.html for ${meta.name}; serving unmodified`,
+          );
+        }
+        html = result.html;
+      } catch (e) {
+        // Should never throw — string ops only. Fall back to the raw bytes
+        // (string-form, so the dev-mode pass below still runs).
+        logger.warn(`[app] inject-tenancy: failed for ${meta.name}: ${(e as Error).message}`);
       }
-      payload = injected;
-    } catch (e) {
-      // Should never throw — string ops only. Fall back to the raw bytes.
-      console.warn(`[app] dev: inject failed for ${meta.name}: ${(e as Error).message}`);
     }
+
+    // Pass 2: dev-mode reload script (only when dev mode is on).
+    if (devMode) {
+      const endpoint = `${meta.path}/_dev/reload`;
+      try {
+        const { html: injected, fallback } = injectDevReloadScript(html, endpoint);
+        if (fallback) {
+          logger.warn(
+            `[app] dev: injected reload script via ${fallback} fallback for ${meta.name} (no </head> in index.html)`,
+          );
+        }
+        html = injected;
+      } catch (e) {
+        logger.warn(`[app] dev: inject failed for ${meta.name}: ${(e as Error).message}`);
+      }
+    }
+
+    payload = html;
   }
 
   const bodyLen = typeof payload === "string" ? Buffer.byteLength(payload) : payload.length;
@@ -506,6 +587,11 @@ function defaultAdminDir(): string {
  * before `bun run build`), we return a friendly placeholder so operators
  * see "admin SPA not built" instead of a bare 404. Production npm installs
  * ship the bundle so this branch is the dev affordance.
+ *
+ * Note: this path intentionally does NOT inject the runtime tenancy
+ * contract (`<base href>` + `<meta name="parachute-mount">` etc.). The
+ * admin SPA is app's own surface — it's not a hosted tenant. Tenancy
+ * injection runs only in `serveUiAsset` for the `/app/<name>/*` mounts.
  */
 function serveAdminAsset(req: Request, adminDir: string, pathname: string): Response {
   const indexHtmlPath = path.join(adminDir, "index.html");

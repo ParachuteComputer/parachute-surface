@@ -9,6 +9,34 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.8] - 2026-05-23
+
+### Added
+
+- Inject runtime tenancy contract (`<base href>` + `<meta name="parachute-mount">` + `<meta name="parachute-hub">`) into served index.html for hosted UIs. Implements the host side of the runtime-tenancy-contract pattern (closes [parachute-app#21](https://github.com/ParachuteComputer/parachute-app/issues/21)). The `<base href>` resolves the trailing-slash gotcha — `/app/<name>` (no slash) now works because relative asset URLs resolve correctly. The meta tags are read by `@openparachute/app-client`'s helpers (forthcoming, [parachute-app#22](https://github.com/ParachuteComputer/parachute-app/issues/22)).
+- `src/tenancy-injection.ts` — string-scan injector with regex-based idempotency marker (`<meta name="parachute-mount">`). Insertion point is immediately after `<head>` so the injected `<base href>` wins over any later `<base>` per HTML's first-base-wins rule. No-`<head>` documents serve unmodified with a warning log.
+- `src/__tests__/tenancy-injection.test.ts` (18 tests) — happy path, idempotency (incl. single-quoted attributes), no-`<head>` skip, HTML attribute escaping for `&` / `<` / `>` / `"`, custom mount slugs, https hub origins.
+- 8 integration tests in `src/__tests__/http-server.test.ts` under "HTTP — runtime tenancy contract injection" — root document, no-trailing-slash, custom slug, SPA-fallback path, idempotency, no-`<head>` passthrough, `PARACHUTE_HUB_ORIGIN` env override, non-index-asset regression guard.
+
+### Changed
+
+- `serveFileWithHeaders` now accepts `hubOrigin?: string` and a logger override. When the served filename is `index.html`, it runs the tenancy-contract pass (always-on when `hubOrigin` is supplied) followed by the dev-mode reload-script pass (when dev mode is on). Both passes are idempotent string-scans.
+- `serveUiAsset` resolves the hub origin per-request via the existing `getHubOrigin(state.config.hub_url)` from `auth.ts` — `PARACHUTE_HUB_ORIGIN` env var takes precedence, then `config.hub_url`, then `http://127.0.0.1:1939` loopback fallback. Reuses the same resolution path the JWT validator already uses; no new config field or env var introduced.
+
+### Deferred (out of scope for parachute-app#21)
+
+- `<meta name="parachute-vault">` — vault-binding-via-session needs a separate design pass.
+- `<meta name="parachute-tenant-id">` — derivable on the consumer side from `parachute-mount`.
+- `<meta name="parachute-vault-origin">` — forward-looking for cross-origin vault.
+
+### Verified
+
+| Suite | Before | After |
+|---|---|---|
+| `bun test packages/app-host/src/` | 367 / 0 | 393 / 0 |
+
+Typecheck clean. Biome clean.
+
 ## [app 0.2.0-rc.7] - 2026-05-23
 
 fix(app): SPA-fallback only for navigation requests — file-extension
