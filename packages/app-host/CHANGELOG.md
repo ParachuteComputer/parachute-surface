@@ -11,25 +11,29 @@ The admin SPA at `web/admin/` ships inside the host package as
 
 ## [app 0.2.0-rc.6] - 2026-05-22
 
-fix(app): restore `kind: "frontend"` in module.json (hub validator
-requires it; the kind-removal awaits [hub#301](https://github.com/ParachuteComputer/parachute-hub/issues/301)
-Phase A).
+fix(app): correct `kind` to `"api"` — app is a backend that proxies,
+not a static-served frontend (folds the in-flight rc.6 per
+[app#14](https://github.com/ParachuteComputer/parachute-app/issues/14)).
 
-`.parachute/module.json` shipped at 0.2.0-rc.5 without a `kind` field
-per the "kind doesn't matter" decision, but hub's manifest validator
-in `parachute-hub/src/module-manifest.ts` still requires the field:
+The initial rc.6 in-flight version carried `"kind": "frontend"` to
+unblock the hub validator (which at rc.13 still required the field).
+That was the wrong value semantically. App is a **backend** that
+serves UI bundles via its own HTTP server — hub's `/app/*` proxy
+forwards to app on `:1946`, then app's HTTP layer serves the admin
+SPA + `notes-ui` + any installed sub-units. Hub does NOT static-serve
+from app's `dist/`; the `"frontend"` framing was inaccurate and
+risked future tooling that branches on `kind === "frontend"` (already
+in `parachute-hub/src/commands/upgrade.ts:376` — which runs
+`bun run build` for kind-frontend modules) treating app as a
+static-bundle module and breaking the runtime HTTP layer.
 
-```
-app: invalid module.json — .../parachute-app/.parachute/module.json:
-"kind" must be "api" | "frontend" | "tool"
-```
-
-`parachute start app` rejects the install at boot, the bootstrap path
-never runs, and no `notes-ui` is installed — `/app/notes` 404s. Until
-hub#301 Phase A lands (relaxes `kind` to optional, defaults missing
-to `"api"`), every app release must carry an explicit `kind`. App
-serves UI bundles so `"frontend"` is the accurate value of the three
-the validator permits.
+`"api"` is the accurate value: app's role is the backend-proxy lane,
+same as vault / scribe / runner. With hub#327 landing alongside this
+PR — the validator no longer inspects `kind` at all — future app
+releases can drop the field entirely. For now keeping it explicit
+works under both the old validator (rc.13 strict-require) and the
+new (rc.14+ no-validate); safest immediate fix that doesn't gate on
+hub-rc.14 propagation.
 
 ## [app 0.2.0-rc.5] - 2026-05-22
 
