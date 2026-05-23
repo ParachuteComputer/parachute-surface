@@ -367,6 +367,20 @@ describe("HTTP — UI mount paths", () => {
       }
     });
 
+    test("missing .mjs asset returns 404 (not SPA shell)", async () => {
+      // Native ES module chunks. Some Vite configs emit .mjs; the policy must
+      // cover them identically to .js.
+      const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/assets/chunk.mjs`);
+        expect(r.status).toBe(404);
+        expect(await r.text()).toBe("Not Found");
+      } finally {
+        srv.stop();
+      }
+    });
+
     test("missing .css asset returns 404 (not SPA shell)", async () => {
       const ui = makeUi("notes", "/app/notes", { "index.html": "SPA SHELL" });
       const srv = startServer(makeState([ui]));

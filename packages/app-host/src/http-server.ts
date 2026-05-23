@@ -262,6 +262,8 @@ const STATIC_ASSET_EXTENSIONS = new Set([
   ".webm",
   ".wasm",
   ".txt",
+  ".gz",
+  ".br",
 ]);
 
 function looksLikeAssetRequest(rel: string): boolean {
