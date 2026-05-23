@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.1.0-rc.4] - 2026-05-23
+
+### Added
+
+- `getMountBase()`, `getTenantId()`, `getHubOrigin()`, `getVaultUrl()`
+  — runtime tenancy helpers for apps. Reads the meta tags injected by
+  parachute-app's host (producer side: `@openparachute/app` rc.8, the
+  parachute-app#21 ship). Closes
+  [parachute-app#22](https://github.com/ParachuteComputer/parachute-app/issues/22).
+  The canonical consumer pattern for apps that need to know their
+  mount path, hub origin, or bound vault — apps depend on
+  `@openparachute/app-client` and don't write meta-tag parsing code
+  themselves.
+
+  | Helper | Reads | Returns |
+  |---|---|---|
+  | `getMountBase()` | `parachute-mount` | mount path without trailing slash (`/app/notes`) or null |
+  | `getTenantId()` | `parachute-mount` | last segment of `/app/<slug>` (`notes`) or null |
+  | `getHubOrigin()` | `parachute-hub` | hub origin (`http://127.0.0.1:1939`) or null |
+  | `getVaultUrl()` | `parachute-vault` (+ optional `parachute-vault-origin`) | full vault URL or null |
+
+  Design choices:
+
+  - **All helpers return `null` on missing tags.** Callers decide the
+    default — apps migrating from notes-ui's regex detection fall
+    back to `/notes`; new apps may prefer to throw at app boot.
+  - **`getMountBase()` + `getTenantId()` both exposed** even though
+    one derives from the other — different call sites want
+    different shapes (React Router basename vs storage keys vs log
+    lines).
+  - **`getVaultUrl()` returns a fully-qualified URL when possible.**
+    Joins `window.location.origin` (same-origin, today) or
+    `parachute-vault-origin` (cross-origin, forward-compat for
+    cloud) with the vault path. Falls back to path-only when no
+    origin is resolvable (SSR).
+  - **No producer-side coupling.** This module reads meta tags and
+    nothing else; it does not import from `@openparachute/app` or
+    `app-host`. The contract is the tag shape, not a shared type.
+
+  Notes-ui's `packages/notes-ui/src/lib/base-url.ts` (the regex
+  consumer from [notes#159](https://github.com/ParachuteComputer/parachute-notes/pull/159))
+  migrates to `getMountBase()` in a follow-up PR; this PR just
+  ships the library helpers.
+
+  Exported from both the barrel (`@openparachute/app-client`) and a
+  new subpath (`@openparachute/app-client/mount`) for tree-shake
+  friendliness.
+
+### Verified
+
+- `bun test src/` → 119 pass / 0 fail across 7 test files (29 new
+  cases in `mount.test.ts`).
+- `bun run typecheck` clean.
+
 ## [0.1.0-rc.3] - 2026-05-22
 
 feat(app-client): lift `VaultClient.request` / `requestWithRetry` /
