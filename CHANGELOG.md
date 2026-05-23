@@ -9,6 +9,57 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.7] - 2026-05-23
+
+fix(app): SPA-fallback only for navigation requests — file-extension
+asset misses (`.js`, `.css`, `.webmanifest`, etc.) now correctly return
+404 instead of serving the SPA shell.
+
+### The bug
+
+`serveUiAsset` fell back to `dist/index.html` on every miss, including
+requests for assets. The browser then tried to parse the HTML shell as
+JS / a PWA manifest / etc., producing confusing errors that masked the
+real cause (a missing or misnamed asset):
+
+```
+manifest.webmanifest: Manifest: Line: 1, column: 1, Syntax error.
+<chunk>.js: Failed to load module script: Expected JavaScript-or-Wasm
+  module, got "text/html"
+```
+
+Operators on notes-ui installs hit this when the PWA manifest was
+missing or a code-split chunk failed to resolve.
+
+### Fix
+
+A file-extension heuristic now classifies each miss as either an asset
+request (known static extensions: `.js`, `.mjs`, `.cjs`, `.css`,
+`.json`, `.webmanifest`, `.map`, image / font / media types, `.wasm`,
+`.txt`) or a navigation request (no extension, or `.html`). Asset
+misses → 404 with body `"Not Found"`. Navigation misses → SPA shell
+with no-cache headers, unchanged. The check fires at every SPA-fallback
+point in `serveUiAsset` (the deletion-race fallback, the traversal-guard
+fallback, and the primary miss branch) for defense in depth — a
+traversal attempt with an asset-shaped suffix (`../etc/passwd.txt`) is
+now 404'd instead of returning HTML.
+
+The file-existence-→-serve happy path is unchanged; only the miss
+branch is affected.
+
+### Verified
+
+| Suite | Before | After |
+|---|---|---|
+| `bun test packages/app-host/src/` | 359 / 0 | 367 / 0 |
+
+Typecheck clean. The added tests cover: missing `.js` → 404, missing
+`.webmanifest` → 404, missing `.css` → 404, missing route with no
+extension → SPA shell, missing `.html` route → SPA shell, bare-segment
+route → SPA shell, present `.js` asset still served (regression
+guard), and the existing traversal test split into asset-shaped (now
+404) vs no-extension (still SPA fallback).
+
 ## [app 0.2.0-rc.6] - 2026-05-22
 
 fix(app): restore `kind: "frontend"` in module.json (hub validator
