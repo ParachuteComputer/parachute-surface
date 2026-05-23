@@ -70,6 +70,20 @@ export type TagSchemaDeclaration = {
   description?: string;
   /** Per-field declarations. Keys are field names; values are type + optionality. */
   fields?: Record<string, TagSchemaFieldDeclaration>;
+  /**
+   * Optional parent tag names for nested tag hierarchies. Each entry must
+   * itself be declared elsewhere in the same `required_schema.tags` array
+   * (or be a tag the vault already has). Phase 2.1+ auto-provisioner uses
+   * this to mint the parent-child relationship in vault via vault's
+   * `parent_names` column (see parachute-vault core/src/tag-hierarchy.ts).
+   *
+   * Example: `{ name: "capture/text", parent_names: ["capture"] }` —
+   * a query for `tag: "capture"` then auto-expands to notes tagged
+   * `capture/text` or `capture/voice`. Phase 2.0 validates the shape
+   * only; cross-reference validation ("does the parent exist?") is the
+   * auto-provisioner's job.
+   */
+  parent_names?: string[];
 };
 
 /**
@@ -458,6 +472,39 @@ function parseRequiredSchema(
           tag.description = t.description;
         }
 
+        if (t.parent_names !== undefined) {
+          if (!Array.isArray(t.parent_names)) {
+            errors.push({
+              path: `${pathPrefix}.parent_names`,
+              message: "must be an array of non-empty strings",
+            });
+            bad = true;
+            continue;
+          }
+          const parents: string[] = [];
+          let parentsBad = false;
+          for (let j = 0; j < t.parent_names.length; j++) {
+            const p = t.parent_names[j];
+            if (typeof p !== "string" || p.length === 0) {
+              errors.push({
+                path: `${pathPrefix}.parent_names[${j}]`,
+                message: "must be a non-empty string",
+              });
+              parentsBad = true;
+              break;
+            }
+            parents.push(p);
+          }
+          if (parentsBad) {
+            bad = true;
+            continue;
+          }
+          // Preserve `[]` distinct from `undefined` — explicit empty
+          // is a deliberate operator signal (no parents) and we let
+          // the admin SPA / auto-provisioner distinguish the two.
+          tag.parent_names = parents;
+        }
+
         if (t.fields !== undefined) {
           if (!t.fields || typeof t.fields !== "object" || Array.isArray(t.fields)) {
             errors.push({ path: `${pathPrefix}.fields`, message: "must be an object" });
@@ -627,6 +674,12 @@ export function metaSchemaJson(): Record<string, unknown> {
                 description: {
                   type: "string",
                   description: "Operator-facing description; surfaced in the admin SPA.",
+                },
+                parent_names: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Optional parent tag names for nested tag hierarchies (e.g. ['capture'] for tag 'capture/text'). Phase 2.1+ auto-provisioner uses this to mint the parent-child relationship in vault.",
                 },
                 fields: {
                   type: "object",

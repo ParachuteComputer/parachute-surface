@@ -9,6 +9,12 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.9] - 2026-05-23
+
+### Added
+
+- `TagSchemaDeclaration.parent_names: string[]` — apps' `required_schema.tags[]` can now declare parent tag relationships for hierarchical schemas (e.g. `capture/text` with `parent_names: ["capture"]`). Phase 2.0 just validates the shape; Phase 2.1+ auto-provisioner will use it to mint parent-child relationships in vault. Closes [parachute-app#19](https://github.com/ParachuteComputer/parachute-app/issues/19).
+
 ## [app 0.2.0-rc.8] - 2026-05-23
 
 ### Added
