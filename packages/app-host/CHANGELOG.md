@@ -9,6 +9,12 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.10] - 2026-05-23
+
+### Removed
+
+- Dropped `kind` field from `packages/app-host/.parachute/module.json`. Hub's validator made it optional in hub#327; this PR completes the cleanup per hub#301 Phase B. No behavior change — app was never branched-on by kind. Closes part of hub#330.
+
 ## [app 0.2.0-rc.9] - 2026-05-23
 
 ### Added
