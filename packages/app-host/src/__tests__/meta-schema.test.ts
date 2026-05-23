@@ -562,3 +562,178 @@ describe("parseMeta — required_schema (patterns#57)", () => {
     }
   });
 });
+
+describe("parseMeta — required_schema.tags[].parent_names (app#19)", () => {
+  // Phase 2.0 SHAPE: validator accepts/passes-through `parent_names` so apps'
+  // hierarchical tag declarations (e.g. `capture/text` -> parent `capture`)
+  // survive the parse. Cross-reference validation ("does this parent exist?")
+  // is the Phase 2.1+ auto-provisioner's job — out of scope here.
+
+  test("parent_names present → preserved in the parsed UiMeta", () => {
+    const meta = parseMeta({
+      name: "notes",
+      displayName: "Notes",
+      path: "/app/notes",
+      required_schema: {
+        tags: [
+          { name: "capture", description: "User-captured notes." },
+          { name: "capture/text", parent_names: ["capture"], description: "Text capture." },
+          { name: "capture/voice", parent_names: ["capture"], description: "Voice capture." },
+        ],
+      },
+    });
+    expect(meta.required_schema?.tags?.[0]?.parent_names).toBeUndefined();
+    expect(meta.required_schema?.tags?.[1]?.parent_names).toEqual(["capture"]);
+    expect(meta.required_schema?.tags?.[2]?.parent_names).toEqual(["capture"]);
+  });
+
+  test("parent_names absent → field stays undefined (no default to empty)", () => {
+    const meta = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+      required_schema: { tags: [{ name: "c" }] },
+    });
+    expect(meta.required_schema?.tags?.[0]?.parent_names).toBeUndefined();
+    // Sanity: `in` check too — explicit absence, not just falsy.
+    expect("parent_names" in (meta.required_schema!.tags![0] as object)).toBe(false);
+  });
+
+  test("parent_names explicit empty array → accepted, preserved", () => {
+    // Explicit `[]` is a deliberate operator signal ("no parents") and
+    // we preserve the distinction from `undefined` so the admin SPA /
+    // auto-provisioner can tell them apart.
+    const meta = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+      required_schema: { tags: [{ name: "c", parent_names: [] }] },
+    });
+    expect(meta.required_schema?.tags?.[0]?.parent_names).toEqual([]);
+  });
+
+  test("parent_names with multiple parents → all preserved in order", () => {
+    const meta = parseMeta({
+      name: "x",
+      displayName: "X",
+      path: "/app/x",
+      required_schema: {
+        tags: [{ name: "a/b/c", parent_names: ["a", "a/b"] }],
+      },
+    });
+    expect(meta.required_schema?.tags?.[0]?.parent_names).toEqual(["a", "a/b"]);
+  });
+
+  test("parent_names with non-string entry → rejected", () => {
+    try {
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", parent_names: ["capture", 42] }],
+        },
+      });
+      throw new Error("expected throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidMetaError);
+      const err = e as InvalidMetaError;
+      const paths = err.details.map((d) => d.path);
+      expect(paths.some((p) => p.includes("required_schema.tags[0].parent_names[1]"))).toBe(true);
+    }
+  });
+
+  test("parent_names with null entry → rejected", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", parent_names: [null] }],
+        },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("parent_names with empty-string entry → rejected", () => {
+    try {
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", parent_names: [""] }],
+        },
+      });
+      throw new Error("expected throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidMetaError);
+      const err = e as InvalidMetaError;
+      const paths = err.details.map((d) => d.path);
+      expect(paths.some((p) => p.includes("required_schema.tags[0].parent_names[0]"))).toBe(true);
+    }
+  });
+
+  test("parent_names that is not an array → rejected", () => {
+    expect(() =>
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/app/x",
+        required_schema: {
+          tags: [{ name: "c", parent_names: "capture" }],
+        },
+      }),
+    ).toThrow(InvalidMetaError);
+  });
+
+  test("notes' canonical case: capture/text with parent_names ['capture'] parses cleanly", () => {
+    // Mirrors NOTES_REQUIRED_SCHEMA in parachute-notes/packages/notes-ui/src/lib/vault/schema.ts.
+    // The motivating use case for app#19 — notes' real hierarchy declares
+    // capture, capture/text -> [capture], capture/voice -> [capture].
+    const meta = parseMeta({
+      name: "notes",
+      displayName: "Notes",
+      path: "/app/notes",
+      required_schema: {
+        tags: [
+          {
+            name: "capture",
+            description: "Notes captured directly by the user (text or voice).",
+          },
+          {
+            name: "capture/text",
+            parent_names: ["capture"],
+            description: "Text capture.",
+          },
+          {
+            name: "capture/voice",
+            parent_names: ["capture"],
+            description: "Voice capture.",
+          },
+        ],
+      },
+    });
+    const tags = meta.required_schema?.tags ?? [];
+    expect(tags.length).toBe(3);
+    expect(tags[0]?.name).toBe("capture");
+    expect(tags[0]?.parent_names).toBeUndefined();
+    expect(tags[1]?.name).toBe("capture/text");
+    expect(tags[1]?.parent_names).toEqual(["capture"]);
+    expect(tags[2]?.name).toBe("capture/voice");
+    expect(tags[2]?.parent_names).toEqual(["capture"]);
+  });
+
+  test("metaSchemaJson() surfaces parent_names on the tag item shape", () => {
+    const schema = metaSchemaJson();
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    const tags = (props.required_schema!.properties as Record<string, Record<string, unknown>>)
+      .tags!;
+    const item = tags.items as Record<string, unknown>;
+    const itemProps = item.properties as Record<string, Record<string, unknown>>;
+    expect(itemProps.parent_names?.type).toBe("array");
+    const items = itemProps.parent_names?.items as Record<string, unknown>;
+    expect(items.type).toBe("string");
+  });
+});
