@@ -9,6 +9,21 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.5] - 2026-05-22
+
+fix(app): self-register uses `manifestName` as services.json row key
+(matches hub install path; closes duplicate-port bug).
+
+Hub installs modules under `manifest.manifestName` (`"parachute-app"`),
+but the boot-time self-registration was writing under the short name
+`"app"`. The two writes left services.json with two rows on the same
+port, which trips hub's duplicate-port detector on re-read
+(`duplicate port 1946 — claimed by both "parachute-app" and "app"`).
+
+The row key is now sourced from `.parachute/module.json#manifestName`,
+so the install path and the runtime path converge to one row. Mirrors
+the fix landed in parachute-runner.
+
 ## [app 0.2.0-rc.1] + [app-client 0.1.0-rc.1] - 2026-05-21
 
 feat(app): Phase 2.0 — extract `@openparachute/app-client` shared

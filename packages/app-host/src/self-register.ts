@@ -31,10 +31,39 @@
  * When per-UI `uis` map lands (design doc section 12), the caller assembles
  * the `uis` field and passes it through via `extraFields`.
  */
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import pkg from "../package.json" with { type: "json" };
 import { type ServiceEntry, readServiceEntry, upsertService } from "./services-manifest.ts";
+
+/**
+ * The canonical services.json row key for the app module — sourced from
+ * `.parachute/module.json#manifestName`. Hub looks up modules in
+ * services.json by `manifestName` (vault + scribe use this convention), so
+ * self-registering under the short name "app" would create a duplicate row
+ * alongside the hub-installed `parachute-app` row and trip hub's
+ * duplicate-port detector on re-read. See parachute-patterns or the
+ * `manifestName` field on .parachute/module.json files. */
+const ROW_NAME = resolveManifestName();
+
+function resolveManifestName(): string {
+  // Read once at module load — `.parachute/module.json` ships in the
+  // package and doesn't change at runtime.
+  try {
+    const manifestPath = path.resolve(import.meta.dir, "..", ".parachute", "module.json");
+    const raw = JSON.parse(readFileSync(manifestPath, "utf8")) as { manifestName?: unknown };
+    if (typeof raw.manifestName === "string" && raw.manifestName.length > 0) {
+      return raw.manifestName;
+    }
+  } catch {
+    // Fall through to the conservative fallback. The module.json is part
+    // of the published package, so this branch is effectively unreachable
+    // in production — it exists so tests that mount a stub package layout
+    // don't hard-crash on import.
+  }
+  return "parachute-app";
+}
 
 export type SelfRegisterOpts = {
   /**
@@ -68,7 +97,7 @@ export type SelfRegisterResult = {
   ok: boolean;
   /** The path we wrote to (or attempted to write to). */
   manifestPath: string;
-  /** True when services.json already had a row for `app` before we wrote. */
+  /** True when services.json already had a row for `parachute-app` before we wrote. */
   hadExistingEntry: boolean;
   /** The port we ended up stamping (existing-entry port or boundPort). */
   portWritten: number;
@@ -92,7 +121,7 @@ export function selfRegister(opts: SelfRegisterOpts): SelfRegisterResult {
 
   let existing: ServiceEntry | undefined;
   try {
-    existing = readServiceEntry("app", manifestPath);
+    existing = readServiceEntry(ROW_NAME, manifestPath);
   } catch (e) {
     const err = e as Error;
     logger.warn(`[app] skipped self-register: ${err.message}`);
@@ -107,7 +136,7 @@ export function selfRegister(opts: SelfRegisterOpts): SelfRegisterResult {
 
   const portToWrite = existing?.port ?? opts.boundPort;
   const entry: ServiceEntry = {
-    name: "app",
+    name: ROW_NAME,
     port: portToWrite,
     paths: ["/app", "/.parachute"],
     health: "/app/healthz",
