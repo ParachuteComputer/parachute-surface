@@ -100,6 +100,13 @@ export {
 // Vault-id helpers — canonical URL → storage key, URL normalization.
 export { vaultIdFromUrl, normalizeVaultUrl } from "./vault-id.js";
 
+// Runtime tenancy contract helpers — read the meta tags parachute-app's
+// host injects into every served `index.html`. Apps get typed accessors
+// for mount path, tenant id, hub origin, and bound vault URL instead of
+// regex-parsing the DOM themselves. See
+// `parachute-patterns/patterns/runtime-tenancy-contract.md`.
+export { getMountBase, getTenantId, getHubOrigin, getVaultUrl } from "./mount.js";
+
 // Common OAuth + storage types.
 export type {
   TokenScope,
@@ -116,4 +123,4 @@ export type {
  * Library semver — kept in sync with `package.json` so consumers can
  * surface "app-client 0.1.0" diagnostics in a banner.
  */
-export const APP_CLIENT_VERSION = "0.1.0-rc.2";
+export const APP_CLIENT_VERSION = "0.1.0-rc.4";
