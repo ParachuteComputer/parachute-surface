@@ -470,6 +470,167 @@ describe("HTTP — UI mount paths", () => {
   });
 });
 
+describe("HTTP — runtime tenancy contract injection", () => {
+  // Verifies parachute-app implements the producer side of
+  // `parachute-patterns/patterns/runtime-tenancy-contract.md`:
+  // every `index.html` served on behalf of a hosted UI gets <base href> +
+  // <meta name="parachute-mount"> + <meta name="parachute-hub"> injected.
+
+  const HEAD_HTML = "<!doctype html><html><head><title>x</title></head><body>SPA</body></html>";
+
+  test("root document GET /app/notes/ — tags injected", async () => {
+    const ui = makeUi("notes", "/app/notes", { "index.html": HEAD_HTML });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      expect(body).toContain('<base href="/app/notes/">');
+      expect(body).toContain('<meta name="parachute-mount" content="/app/notes">');
+      expect(body).toContain('<meta name="parachute-hub" content="http://127.0.0.1:1939">');
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("GET /app/notes (no trailing slash) — tags also injected", async () => {
+    // The no-trailing-slash path is Aaron's concrete reproducer for the bug
+    // this fixes: without <base href>, Vite-built relative URLs resolve
+    // against `/app/` and break.
+    const ui = makeUi("notes", "/app/notes", { "index.html": HEAD_HTML });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      expect(body).toContain('<base href="/app/notes/">');
+      expect(body).toContain('<meta name="parachute-mount" content="/app/notes">');
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("custom mount slug — <base href> + parachute-mount reflect it", async () => {
+    // Operators can `parachute-app add @openparachute/notes-ui --name my-notes`
+    // to mount a UI at /app/my-notes. The bundle is identical; only the host's
+    // injected metadata reveals the chosen mount.
+    const ui = makeUi("my-notes", "/app/my-notes", { "index.html": HEAD_HTML });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/my-notes/`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      expect(body).toContain('<base href="/app/my-notes/">');
+      expect(body).toContain('<meta name="parachute-mount" content="/app/my-notes">');
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("SPA-fallback path /app/notes/some/route — also injects", async () => {
+    // The SPA-fallback path serves index.html for any unknown navigation
+    // request under the mount. The injection must run there too, otherwise
+    // operators who hit a deep link as their first request lose the contract.
+    const ui = makeUi("notes", "/app/notes", { "index.html": HEAD_HTML });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/some/spa/route`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      expect(body).toContain('<base href="/app/notes/">');
+      expect(body).toContain('<meta name="parachute-mount" content="/app/notes">');
+      expect(body).toContain('<meta name="parachute-hub" content="http://127.0.0.1:1939">');
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("idempotent — bundle that already declares parachute-mount is served unchanged", async () => {
+    // Defense-in-depth: a future bundle that ships its own meta tag must not
+    // get a double-injection.
+    const pre = `<!doctype html><html><head>
+      <meta name="parachute-mount" content="/app/notes">
+      <title>bundle-owned</title>
+    </head><body>OK</body></html>`;
+    const ui = makeUi("notes", "/app/notes", { "index.html": pre });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      // Exactly one occurrence of the meta tag (bundle's), no duplicate.
+      const matches = body.match(/<meta\s+name=["']parachute-mount["']/gi) ?? [];
+      expect(matches.length).toBe(1);
+      // Original body still served verbatim.
+      expect(body).toBe(pre);
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("malformed (no <head>) index.html — served unmodified", async () => {
+    // A bundle with no <head> in its index.html still serves. Operator gets a
+    // warning in the logs (silenced in this test); the body comes through raw.
+    const malformed = "<!doctype html><html><body>only body</body></html>";
+    const ui = makeUi("notes", "/app/notes", { "index.html": malformed });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/`);
+      expect(r.status).toBe(200);
+      const body = await r.text();
+      expect(body).toBe(malformed);
+      expect(body).not.toContain("parachute-mount");
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("PARACHUTE_HUB_ORIGIN env var overrides config.hub_url", async () => {
+    // `getHubOrigin()` reads PARACHUTE_HUB_ORIGIN first, then state.config.hub_url.
+    // Set the env var, expect the injected meta tag to reflect it.
+    const prev = process.env.PARACHUTE_HUB_ORIGIN;
+    process.env.PARACHUTE_HUB_ORIGIN = "https://parachute.example.com";
+    try {
+      const ui = makeUi("notes", "/app/notes", { "index.html": HEAD_HTML });
+      const srv = startServer(makeState([ui]));
+      try {
+        const r = await fetch(`${srv.url}/app/notes/`);
+        expect(r.status).toBe(200);
+        const body = await r.text();
+        expect(body).toContain(
+          '<meta name="parachute-hub" content="https://parachute.example.com">',
+        );
+      } finally {
+        srv.stop();
+      }
+    } finally {
+      if (prev === undefined) {
+        process.env.PARACHUTE_HUB_ORIGIN = undefined;
+      } else {
+        process.env.PARACHUTE_HUB_ORIGIN = prev;
+      }
+    }
+  });
+
+  test("non-index assets are NOT touched (regression guard)", async () => {
+    // Injection is gated on `filenameForHeaders === "index.html"`. A JS bundle
+    // that happens to contain `<head>` substrings must come through bit-exact.
+    const js = "/* <head>not html</head> */\nconsole.log('hi');\n";
+    const ui = makeUi("notes", "/app/notes", {
+      "index.html": HEAD_HTML,
+      "app.js": js,
+    });
+    const srv = startServer(makeState([ui]));
+    try {
+      const r = await fetch(`${srv.url}/app/notes/app.js`);
+      expect(r.status).toBe(200);
+      expect(await r.text()).toBe(js);
+    } finally {
+      srv.stop();
+    }
+  });
+});
+
 describe("HTTP — 404 + 405", () => {
   test("404 outside any mount", async () => {
     const srv = startServer(makeState([]));
