@@ -83,6 +83,13 @@ describe("getMountBase", () => {
     expect(getMountBase({ doc })).toBeNull();
   });
 
+  test("returns null on bare '/' (not a valid mount)", () => {
+    // Bare "/" would silently mis-configure a React Router basename.
+    // The contract requires /app/<slug> or a legacy mount like /notes.
+    const doc = makeDoc({ "parachute-mount": "/" });
+    expect(getMountBase({ doc })).toBeNull();
+  });
+
   test("doc=null returns null", () => {
     expect(getMountBase({ doc: null })).toBeNull();
   });

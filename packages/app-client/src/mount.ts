@@ -109,10 +109,14 @@ export function getMountBase(opts?: { doc?: Document | null }): string | null {
   const value = readMetaContent(doc, "parachute-mount");
   if (!value) return null;
   if (!value.startsWith("/")) return null;
+  // Reject bare "/" — the contract requires `/app/<slug>` or a legacy
+  // mount like `/notes`. Bare "/" would silently mis-configure a React
+  // Router basename. Strict here matches the producer's PATH_PATTERN.
+  if (value === "/") return null;
   // Strip trailing slash. The contract says the injected value is
   // already slash-free, but be tolerant — a future host might inject
   // `/app/notes/` and we shouldn't make consumers handle both shapes.
-  return value === "/" ? "/" : value.replace(/\/$/, "");
+  return value.replace(/\/$/, "");
 }
 
 /**
