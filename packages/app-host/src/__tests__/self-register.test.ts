@@ -72,7 +72,11 @@ describe("selfRegister — first boot", () => {
     };
     expect(raw.services).toHaveLength(1);
     const entry = raw.services[0]!;
-    expect(entry.name).toBe("app");
+    // Row key is the manifestName from .parachute/module.json — hub looks
+    // modules up by manifestName, so registering under the short "app"
+    // here would race the hub-installed `parachute-app` row and trip the
+    // duplicate-port detector.
+    expect(entry.name).toBe("parachute-app");
     expect(entry.port).toBe(1946);
     expect(entry.paths).toEqual(["/app", "/.parachute"]);
     expect(entry.health).toBe("/app/healthz");
@@ -92,6 +96,41 @@ describe("selfRegister — first boot", () => {
     expect(logger.logs[0]).toContain("self-registered");
     expect(logger.warnings).toHaveLength(0);
   });
+
+  test("regression: row key matches the manifestName hub installs under (no duplicate `app` row)", () => {
+    // Hub's install path writes the services.json row under
+    // manifest.manifestName ("parachute-app"). If self-register writes
+    // under the short name "app", the file ends up with two rows on the
+    // same port — hub's re-read flags it as a duplicate-port collision.
+    // This test pins the row key to manifestName so the two paths
+    // converge to one row.
+    fs.writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        services: [
+          {
+            name: "parachute-app", // hub-installed row
+            port: 1946,
+            paths: ["/app"],
+            health: "/app/healthz",
+            version: "hub-stamped",
+          },
+        ],
+      }),
+    );
+    selfRegister({
+      boundPort: 1946,
+      installDir: "/post-install/checkout",
+      manifestPath,
+      logger,
+    });
+    const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      services: Array<{ name: string; port: number }>;
+    };
+    expect(raw.services).toHaveLength(1); // not 2
+    expect(raw.services[0]?.name).toBe("parachute-app");
+    expect(raw.services.find((s) => s.name === "app")).toBeUndefined();
+  });
 });
 
 describe("selfRegister — subsequent boot (existing entry)", () => {
@@ -101,7 +140,7 @@ describe("selfRegister — subsequent boot (existing entry)", () => {
       JSON.stringify({
         services: [
           {
-            name: "app",
+            name: "parachute-app",
             port: 1948, // operator-set
             paths: ["/app"],
             health: "/app/healthz",
@@ -135,7 +174,7 @@ describe("selfRegister — subsequent boot (existing entry)", () => {
       JSON.stringify({
         services: [
           {
-            name: "app",
+            name: "parachute-app",
             port: 1946,
             paths: ["/app"],
             health: "/app/healthz",

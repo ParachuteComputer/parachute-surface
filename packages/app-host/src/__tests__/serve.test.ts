@@ -103,7 +103,7 @@ describe("serve — live integration", () => {
       const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
         services: Array<Record<string, unknown>>;
       };
-      const entry = raw.services.find((s) => s.name === "app");
+      const entry = raw.services.find((s) => s.name === "parachute-app");
       expect(entry).toBeDefined();
       expect(entry!.port).toBe(h.server.port);
       expect(entry!.paths).toEqual(["/app", "/.parachute"]);
@@ -120,7 +120,7 @@ describe("serve — live integration", () => {
       JSON.stringify({
         services: [
           {
-            name: "app",
+            name: "parachute-app",
             port: 1948,
             paths: ["/app"],
             health: "/app/healthz",
@@ -140,7 +140,7 @@ describe("serve — live integration", () => {
       const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
         services: Array<Record<string, unknown>>;
       };
-      const entry = raw.services.find((s) => s.name === "app");
+      const entry = raw.services.find((s) => s.name === "parachute-app");
       // Operator-set port (1948) preserved, NOT the OS-picked test port.
       expect(entry!.port).toBe(1948);
     } finally {
