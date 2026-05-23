@@ -587,6 +587,11 @@ function defaultAdminDir(): string {
  * before `bun run build`), we return a friendly placeholder so operators
  * see "admin SPA not built" instead of a bare 404. Production npm installs
  * ship the bundle so this branch is the dev affordance.
+ *
+ * Note: this path intentionally does NOT inject the runtime tenancy
+ * contract (`<base href>` + `<meta name="parachute-mount">` etc.). The
+ * admin SPA is app's own surface — it's not a hosted tenant. Tenancy
+ * injection runs only in `serveUiAsset` for the `/app/<name>/*` mounts.
  */
 function serveAdminAsset(req: Request, adminDir: string, pathname: string): Response {
   const indexHtmlPath = path.join(adminDir, "index.html");

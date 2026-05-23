@@ -99,7 +99,26 @@ export function injectTenancyContract(
     return { html, injected: false, skipped: "already-present" };
   }
 
-  const headMatch = HEAD_OPEN_REGEX.exec(html);
+  // Find the first <head> that's NOT inside an HTML comment. Vite-built
+  // HTML never has `<!-- <head> -->` comments, but be defensive — a
+  // false match inside a comment would inject malformed HTML.
+  let searchFrom = 0;
+  let headMatch: RegExpExecArray | null = null;
+  while (true) {
+    HEAD_OPEN_REGEX.lastIndex = 0;
+    const candidate = HEAD_OPEN_REGEX.exec(html.slice(searchFrom));
+    if (!candidate) break;
+    const absoluteIndex = searchFrom + candidate.index;
+    if (!isInsideComment(html, absoluteIndex)) {
+      headMatch = candidate;
+      headMatch.index = absoluteIndex;
+      break;
+    }
+    // Skip past this comment and search again.
+    const commentClose = html.indexOf("-->", absoluteIndex);
+    if (commentClose === -1) break;
+    searchFrom = commentClose + 3;
+  }
   if (!headMatch) {
     return { html, injected: false, skipped: "no-head" };
   }
@@ -116,4 +135,15 @@ export function injectTenancyContract(
     html: `${html.slice(0, insertAt)}\n    ${block}${html.slice(insertAt)}`,
     injected: true,
   };
+}
+
+/**
+ * True if `pos` falls inside an unclosed HTML comment that opens before
+ * it. Used to skip `<head>` matches that are really `<!-- ... <head> ... -->`.
+ */
+function isInsideComment(html: string, pos: number): boolean {
+  const lastOpen = html.lastIndexOf("<!--", pos);
+  if (lastOpen === -1) return false;
+  const closeAfterOpen = html.indexOf("-->", lastOpen);
+  return closeAfterOpen !== -1 && closeAfterOpen > pos;
 }

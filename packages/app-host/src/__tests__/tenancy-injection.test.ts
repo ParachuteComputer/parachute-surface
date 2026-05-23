@@ -131,6 +131,29 @@ describe("injectTenancyContract — malformed input", () => {
     expect(r.injected).toBe(false);
     expect(r.skipped).toBe("no-head");
   });
+
+  test("`<head>` inside an HTML comment doesn't trigger injection at the wrong site", () => {
+    // Defensive: a comment containing `<head>` could have caused the regex
+    // to match inside the comment, injecting into the middle of a comment
+    // block. Verified that the comment-guard skips past it and finds the
+    // real `<head>` if present.
+    const htmlReal =
+      "<!doctype html>\n<!-- example: <head>not real</head> -->\n<html><head></head><body></body></html>";
+    const r = injectTenancyContract(htmlReal, "/app/notes", "http://h");
+    expect(r.injected).toBe(true);
+    // Injection should land in the REAL <head>, not inside the comment.
+    const commentEnd = r.html.indexOf("-->");
+    const baseHrefAt = r.html.indexOf('<base href="/app/notes/');
+    expect(baseHrefAt).toBeGreaterThan(commentEnd);
+  });
+
+  test("only `<head>` is inside a comment, no real one → skip", () => {
+    const html = "<html><!-- <head>fake</head> --><body></body></html>";
+    const r = injectTenancyContract(html, "/app/notes", "http://h");
+    expect(r.injected).toBe(false);
+    expect(r.skipped).toBe("no-head");
+    expect(r.html).toBe(html);
+  });
 });
 
 describe("injectTenancyContract — HTML escaping", () => {

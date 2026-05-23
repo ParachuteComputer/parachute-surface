@@ -605,7 +605,7 @@ describe("HTTP — runtime tenancy contract injection", () => {
       }
     } finally {
       if (prev === undefined) {
-        process.env.PARACHUTE_HUB_ORIGIN = undefined;
+        delete process.env.PARACHUTE_HUB_ORIGIN;
       } else {
         process.env.PARACHUTE_HUB_ORIGIN = prev;
       }
