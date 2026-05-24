@@ -20,9 +20,11 @@
 #      (packages/app-host/ for app, packages/app-client/ for app-client).
 #   2. Push a matching tag:
 #        # for app
-#        git tag v$(bun -e "console.log(require('./packages/app-host/package.json').version)") && git push --tags
+#        VERSION="v$(bun -e "console.log(require('./packages/app-host/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
 #        # for app-client
-#        git tag client-v$(bun -e "console.log(require('./packages/app-client/package.json').version)") && git push --tags
+#        VERSION="client-v$(bun -e "console.log(require('./packages/app-client/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
 #   3. CI runs tests once (workspace-wide), then publishes the package matching
 #      the tag prefix.
 #
