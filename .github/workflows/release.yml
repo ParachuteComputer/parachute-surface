@@ -73,10 +73,11 @@ jobs:
         # and web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks both app-host + app-client.
+        # Root script typechecks all three packages (app-host, app-client, notes-ui).
         run: bun run typecheck
       - name: tests
-        # Root script runs app-host + app-client suites.
+        # Root script runs all three suites: app-host (bun test), app-client
+        # (bun test), and notes-ui (vitest via `bun run --filter`).
         run: bun run test
 
   publish-app-npm:
