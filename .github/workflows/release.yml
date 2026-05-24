@@ -1,23 +1,25 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes TWO packages on different tag namespaces:
+# This workflow publishes THREE packages on different tag namespaces:
 #
-#   - @openparachute/app          ← tag prefix `v...`        (from packages/app-host)
-#   - @openparachute/app-client   ← tag prefix `client-v...` (from packages/app-client)
+#   - @openparachute/app          ← tag prefix `v...`          (from packages/app-host)
+#   - @openparachute/app-client   ← tag prefix `client-v...`   (from packages/app-client)
+#   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
 #
-# Both packages have npm Trusted Publisher rules pointing at this workflow
+# All packages have npm Trusted Publisher rules pointing at this workflow
 # file. Jobs gate on the tag prefix so only one package publishes per tag
 # push. Independent release cadences.
 #
 # Tag conventions (matches parachute-patterns governance rule 2):
 #   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.2.0-rc.10)
 #                                          (client-v0.1.0-rc.4)
+#                                          (notes-ui-v0.1.4-rc.1)
 #   - stable: v<X>.<Y>.<Z>                 (e.g. v0.2.0)
 #                                          (client-v0.1.0)
+#                                          (notes-ui-v0.1.4)
 #
 # Release flow:
-#   1. When ready to ship: bump version in the relevant package.json on main
-#      (packages/app-host/ for app, packages/app-client/ for app-client).
+#   1. When ready to ship: bump version in the relevant package.json on main.
 #   2. Push a matching tag:
 #        # for app
 #        VERSION="v$(bun -e "console.log(require('./packages/app-host/package.json').version)")"
@@ -25,12 +27,15 @@
 #        # for app-client
 #        VERSION="client-v$(bun -e "console.log(require('./packages/app-client/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
+#        # for notes-ui
+#        VERSION="notes-ui-v$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
 #   3. CI runs tests once (workspace-wide), then publishes the package matching
 #      the tag prefix.
 #
 # Operator setup (one-time) — see RELEASING.md:
-#   - npm Trusted Publisher rules: one per package (app, app-client).
-#     Both rules point at: org=ParachuteComputer, repo=parachute-app,
+#   - npm Trusted Publisher rules: one per package (app, app-client, notes-ui).
+#     All three rules point at: org=ParachuteComputer, repo=parachute-app,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -45,6 +50,9 @@ on:
       # App-client release tags
       - 'client-v[0-9]+.[0-9]+.[0-9]+'
       - 'client-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Notes-ui release tags
+      - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
+      - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   # Don't let two releases race on the same tag.
@@ -65,17 +73,18 @@ jobs:
         # and web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks both app-host + app-client.
+        # Root script typechecks all three packages (app-host, app-client, notes-ui).
         run: bun run typecheck
       - name: tests
-        # Root script runs app-host + app-client suites.
+        # Root script runs all three suites: app-host (bun test), app-client
+        # (bun test), and notes-ui (vitest via `bun run --filter`).
         run: bun run test
 
   publish-app-npm:
     name: publish @openparachute/app to npm
     needs: test
-    # App-only: skip on client tags.
-    if: ${{ !startsWith(github.ref_name, 'client-') }}
+    # App-only: skip on client- and notes-ui- tags.
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'notes-ui-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -176,4 +185,48 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/app-client with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
+  publish-notes-ui-npm:
+    name: publish @openparachute/notes-ui to npm
+    needs: test
+    # notes-ui-only: skip on app and client tags.
+    if: ${{ startsWith(github.ref_name, 'notes-ui-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root brings in notes-ui's deps.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against notes-ui's package.json; tag prefix is `notes-ui-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#notes-ui-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/notes-ui/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: publish
+        # notes-ui's package.json has `prepublishOnly: bun run build`, which
+        # runs `tsc -b && vite build` to produce `dist/` (the published artifact).
+        # `npm publish` triggers prepublishOnly, so the build happens just-in-time.
+        working-directory: packages/notes-ui
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/notes-ui with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
