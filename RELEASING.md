@@ -1,15 +1,18 @@
 # Releasing
 
-The `parachute-app` repo is a monorepo with two publishable packages, both shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
+The `parachute-app` repo is a monorepo with three publishable packages, all shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
 
 | Package | Path | Tag prefix |
 |---|---|---|
 | `@openparachute/app` | `packages/app-host/` | `v...` (e.g. `v0.2.0-rc.10`) |
 | `@openparachute/app-client` | `packages/app-client/` | `client-v...` (e.g. `client-v0.1.0-rc.4`) |
+| `@openparachute/notes-ui` | `packages/notes-ui/` | `notes-ui-v...` (e.g. `notes-ui-v0.1.4-rc.1`) |
 
 The workspace root (`@openparachute/app-monorepo`) is intentionally `private: true` and should NEVER publish. The admin SPA (`web/admin/` → `@openparachute/app-admin-ui`) is also `private: true` — it's bundled into app-host's `dist/`, not separately published.
 
-Both packages run on independent release cadences. Pushing `v0.2.0-rc.11` publishes app only; pushing `client-v0.1.0-rc.5` publishes app-client only.
+All three packages run on independent release cadences. Each tag pushes only the matching package.
+
+> **notes-ui migration history (2026-05-24)**: notes-ui moved here from `parachute-notes/packages/notes-ui` to consolidate "host module + reference apps" in one repo. parachute-notes is being archived (notes-daemon was already deprecated per its [DEPRECATED.md](https://github.com/ParachuteComputer/parachute-notes/blob/main/packages/notes-daemon/DEPRECATED.md)). See workspace `CLAUDE.md` for context.
 
 ## Tag conventions
 
@@ -21,8 +24,10 @@ Per [parachute-patterns governance rule 2](https://github.com/ParachuteComputer/
 | `vX.Y.Z` | `@openparachute/app` | `latest` |
 | `client-vX.Y.Z-rc.N` | `@openparachute/app-client` | `rc` |
 | `client-vX.Y.Z` | `@openparachute/app-client` | `latest` |
+| `notes-ui-vX.Y.Z-rc.N` | `@openparachute/notes-ui` | `rc` |
+| `notes-ui-vX.Y.Z` | `@openparachute/notes-ui` | `latest` |
 
-The workflow auto-detects rc vs stable from the `-rc.` substring; jobs gate by tag prefix via `startsWith(github.ref_name, 'client-')`.
+The workflow auto-detects rc vs stable from the `-rc.` substring; jobs gate by tag prefix via `startsWith(github.ref_name, '<prefix>-')`.
 
 ## Release flow
 
@@ -50,11 +55,23 @@ git tag "$VERSION"
 git push origin "$VERSION"
 ```
 
-The app publish job skips on these tags. app-client's `prepublishOnly` hook builds via `tsc` before packing.
+The other publish jobs skip on these tags. app-client's `prepublishOnly` hook builds via `tsc` before packing.
+
+### Releasing `@openparachute/notes-ui`
+
+```sh
+git fetch && git checkout main && git pull --ff-only
+# Bump packages/notes-ui/package.json, commit, push.
+VERSION="notes-ui-v$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")"
+git tag "$VERSION"
+git push origin "$VERSION"
+```
+
+The other publish jobs skip on these tags. notes-ui's `prepublishOnly` hook runs `tsc -b && vite build` to produce `dist/` before packing.
 
 ### Promoting an rc chain to stable
 
-Open a PR (or commit directly) that drops the `-rc.N` suffix from the relevant `package.json`, merge, then tag with the bare version (`vX.Y.Z` for app, `client-vX.Y.Z` for app-client). CI publishes with `dist-tag=latest`.
+Open a PR (or commit directly) that drops the `-rc.N` suffix from the relevant `package.json`, merge, then tag with the bare version (`vX.Y.Z` for app, `client-vX.Y.Z` for app-client, `notes-ui-vX.Y.Z` for notes-ui). CI publishes with `dist-tag=latest`.
 
 ### Doc-only PRs
 
@@ -73,7 +90,10 @@ Before the workflow can publish, this repo needs **npm Trusted Publisher rules �
    - Repository name: `parachute-app`
    - Workflow filename: `release.yml`
    - Environment name: (leave blank)
-2. Same for `@openparachute/app-client` — same workflow file, the publisher rule verifies workflow_ref not tag content. Both packages share `release.yml`.
+2. Same for `@openparachute/app-client` — same workflow file.
+3. Same for `@openparachute/notes-ui` — **this rule may currently be configured against `parachute-notes` from before the migration** (notes-ui's prior home). Update it to point at `parachute-app` per the values above. The publisher rule verifies `workflow_ref`, so a mismatched repo/workflow combo will fail with 403 on tag push.
+
+All three packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
 
 No `NPM_TOKEN` secret needed — the workflow uses OIDC.
 
