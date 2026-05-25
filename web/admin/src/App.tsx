@@ -15,8 +15,8 @@
  * SPA basename `/app/admin`.
  */
 import { Link, Route, Routes } from "react-router-dom";
-import { BrandMark } from "./components/BrandMark.tsx";
 import { TokenSetup } from "./TokenSetup.tsx";
+import { BrandMark } from "./components/BrandMark.tsx";
 import { Add } from "./routes/Add.tsx";
 import { Modules } from "./routes/Modules.tsx";
 import { UiInfo } from "./routes/UiInfo.tsx";
