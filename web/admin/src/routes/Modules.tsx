@@ -3,10 +3,15 @@
  *
  * Each row shows displayName, mount path, version, scopes, OAuth client
  * state, and dev-mode status (Phase 1.3). Per-row actions: Reload (re-scan
- * from disk), Remove (delete + revoke), and the dev-mode triad — Enable
+ * from disk), Uninstall (delete + revoke), and the dev-mode triad — Enable
  * dev / Disable dev / Trigger reload. The dev-status map is fetched in
  * parallel with the UI list and re-fetched on every refresh; a row shows
  * a "Dev" badge when the UI's name is in the active set.
+ *
+ * "Uninstall" matches the canonical verb vocabulary
+ * (parachute-patterns/patterns/design-system.md §5) for removing a module
+ * — the action revokes the OAuth client + deletes the files, exactly the
+ * same shape as `parachute uninstall <short>`.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -82,8 +87,10 @@ export function Modules() {
     }
   };
 
-  const onRemove = async (name: string) => {
-    if (!window.confirm(`Remove "${name}"? This deletes its files + revokes its OAuth client.`)) {
+  const onUninstall = async (name: string) => {
+    if (
+      !window.confirm(`Uninstall "${name}"? This deletes its files + revokes its OAuth client.`)
+    ) {
       return;
     }
     setBusy(`remove:${name}`);
@@ -148,7 +155,7 @@ export function Modules() {
       <div className="modules__header">
         <h2>Installed UIs</h2>
         <Link to="/add" className="btn btn-primary">
-          + Add UI
+          Add UI
         </Link>
       </div>
 
@@ -305,10 +312,11 @@ export function Modules() {
                     )}
                     <button
                       type="button"
-                      onClick={() => void onRemove(u.name)}
+                      className="destructive"
+                      onClick={() => void onUninstall(u.name)}
                       disabled={busy === `remove:${u.name}`}
                     >
-                      Remove
+                      Uninstall
                     </button>
                   </td>
                 </tr>

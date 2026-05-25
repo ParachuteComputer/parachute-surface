@@ -164,7 +164,7 @@ describe("Modules", () => {
     });
   });
 
-  test("Remove button triggers DELETE after confirm", async () => {
+  test("Uninstall button triggers DELETE after confirm", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const callLog: Array<{ url: string; method: string }> = [];
     const fakeFetch = vi.fn((url: string, init?: RequestInit) => {
@@ -200,8 +200,8 @@ describe("Modules", () => {
     });
     withFetchMock(fakeFetch as unknown as typeof fetch);
     renderWithRouter();
-    const removeBtn = await screen.findByRole("button", { name: /Remove/ });
-    await userEvent.click(removeBtn);
+    const uninstallBtn = await screen.findByRole("button", { name: /Uninstall/ });
+    await userEvent.click(uninstallBtn);
     expect(confirmSpy).toHaveBeenCalled();
     await waitFor(() => {
       const del = callLog.find((c) => c.method === "DELETE");
