@@ -1,7 +1,7 @@
 {
   "name": "@openparachute/app",
-  "version": "0.2.0-rc.11",
-  "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "version": "0.2.0-rc.12",
+  "description": "Host module for custom Parachute UIs \u2014 drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
   "exports": {
@@ -47,5 +47,10 @@
   "dependencies": {
     "@openparachute/app-client": "^0.1.0-rc.3",
     "@openparachute/scope-guard": "^0.4.0-rc.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-app.git",
+    "directory": "packages/app-host"
   }
 }
