@@ -1,7 +1,7 @@
 {
   "name": "@openparachute/app-client",
   "version": "0.1.0-rc.4",
-  "description": "Shared browser-side library for Parachute apps — OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id + runtime tenancy helpers.",
+  "description": "Shared browser-side library for Parachute apps \u2014 OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id + runtime tenancy helpers.",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -37,7 +37,12 @@
       "import": "./dist/mount.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -54,5 +59,10 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-app.git",
+    "directory": "packages/app-client"
   }
 }
