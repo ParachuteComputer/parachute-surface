@@ -9,6 +9,13 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.13] - 2026-05-25
+
+### Changed
+
+- **app-admin SPA reskinned to the canonical Parachute design system (workstream B of the UX audit; app#35).** Replaces the bespoke `#1e6bb8` blue palette with the canonical sage `--accent: #4a7c59`, warm cream body bg, browser-default body type (was `15px`), 6px button radii (was `3px`), sentence-case muted table headers (was uppercase), the canonical inlined SVG brand mark + "Parachute" Instrument Serif wordmark + `app` chip (was `parachute-app · admin` lowercase-hyphenated), and dark-mode tokens. `Remove` → `Uninstall` per the canonical verb vocabulary. Status-badge primitive declared for future use. Back-compat aliases preserved on `.brand-tag` / `.btn-primary` / banner classes so nothing else breaks. The audit had this as "the single largest visual outlier in the ecosystem"; this rc closes the gap.
+- **Migration checklist for the design-system propagation merged at parachute-patterns#95** (workstream A→J propagation tracking).
+
 ## [app 0.2.0-rc.7] - 2026-05-23
 
 fix(app): SPA-fallback only for navigation requests — file-extension
