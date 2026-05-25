@@ -210,6 +210,11 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   // are mounted (fresh install). Best-effort; failures log + continue so
   // a network blip or unpublished package doesn't prevent daemon
   // startup.
+  // `server.port` is `number | undefined` per Bun's types (it's undefined
+  // when the server uses unix sockets, which we don't here) — fall back to
+  // the operator's requested port. Both paths produce a `number`.
+  const portWritten = server.port ?? port;
+
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
     // Fire-and-forget — daemon doesn't block on bootstrap. The add path
@@ -234,6 +239,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       },
       manifestPath: opts.manifestPath,
       skipSelfRegister: opts.skipSelfRegister,
+      boundPort: portWritten,
       logger,
     }).catch((e) => {
       logger.warn(`[app] bootstrap failed unexpectedly: ${(e as Error).message}`);
@@ -242,10 +248,6 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   }
 
   if (!opts.skipSelfRegister) {
-    // `server.port` is `number | undefined` per Bun's types (it's undefined
-    // when the server uses unix sockets, which we don't here) — fall back to
-    // the operator's requested port. Both paths produce a `number`.
-    const portWritten = server.port ?? port;
     selfRegister({
       boundPort: portWritten,
       installDir: resolveProjectRoot(),
@@ -345,6 +347,18 @@ export async function runBootstrap(args: {
   logger?: Pick<Console, "log" | "warn" | "error">;
   /** Skip post-bootstrap selfRegister (tests). */
   skipSelfRegister?: boolean;
+  /**
+   * Port the app's HTTP server is bound to. The post-bootstrap selfRegister
+   * passes this to `selfRegister.boundPort` as the first-boot fallback.
+   * (selfRegister prefers `existing?.port` from services.json when set; this
+   * is only the fallback for the edge case where the row is missing.)
+   *
+   * Hardcoding 0 here previously caused a hub-rejected write when the
+   * existing row was somehow missing at bootstrap-completion time —
+   * port=0 fails hub's validateEntry. See parachute-app#33 for the
+   * specific Render-deploy repro.
+   */
+  boundPort: number;
 }): Promise<import("./bootstrap.ts").BootstrapResult> {
   const logger = args.logger ?? console;
   const result = await maybeBootstrapDefaultApps({
@@ -377,7 +391,7 @@ export async function runBootstrap(args: {
   if (!args.skipSelfRegister && result.bootstrapped.length > 0) {
     try {
       selfRegister({
-        boundPort: 0,
+        boundPort: args.boundPort,
         installDir: resolveProjectRoot(),
         manifestPath: args.manifestPath,
         extraFields: { uis: buildUisExtraFieldForBoot(args.adminOpts.state.registeredUis) },
