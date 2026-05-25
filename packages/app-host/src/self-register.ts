@@ -135,6 +135,28 @@ export function selfRegister(opts: SelfRegisterOpts): SelfRegisterResult {
   }
 
   const portToWrite = existing?.port ?? opts.boundPort;
+  // Defensive: reject invalid ports BEFORE writing rather than
+  // corrupting services.json + waiting for hub to barf on read. Hub's
+  // validator rejects any port not in [1, 65535] — this guard matches.
+  // Caller paths to be aware of:
+  //   - serve() passes `server.port` (always a real bound port)
+  //   - runBootstrap() passes the same boundPort threaded from serve()
+  //   - admin-routes selfRegister calls also use real ports
+  // The legacy hardcoded `boundPort: 0` in runBootstrap (pre-parachute-app#33)
+  // hit this exact failure mode when `existing` was undefined.
+  if (!Number.isInteger(portToWrite) || portToWrite <= 0 || portToWrite > 65535) {
+    const err = new Error(
+      `selfRegister: invalid port ${portToWrite} (existing=${existing?.port}, boundPort=${opts.boundPort}); refusing to corrupt services.json`,
+    );
+    logger.warn(`[app] skipped self-register: ${err.message}`);
+    return {
+      ok: false,
+      manifestPath: manifestPath ?? "~/.parachute/services.json",
+      hadExistingEntry: existing !== undefined,
+      portWritten: portToWrite,
+      error: err,
+    };
+  }
   const entry: ServiceEntry = {
     name: ROW_NAME,
     port: portToWrite,

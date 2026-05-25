@@ -250,6 +250,73 @@ describe("selfRegister — best-effort", () => {
   });
 });
 
+describe("selfRegister — invalid-port guard (parachute-app#33 regression)", () => {
+  test("refuses to write port=0 (the bootstrap-completion bug)", () => {
+    // The bootstrap-completion call used to pass boundPort=0. When the
+    // existing services.json row was missing for whatever reason,
+    // selfRegister wrote port=0 which corrupted services.json and caused
+    // hub to barf on read. The guard now rejects port=0 before writing.
+    const result = selfRegister({
+      boundPort: 0,
+      installDir: "/x",
+      manifestPath,
+      logger,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain("invalid port 0");
+    // services.json should NOT have been written (or should not contain
+    // a port=0 entry — same defensive shape).
+    if (fs.existsSync(manifestPath)) {
+      const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      expect(m.services.find((s: { port: number }) => s.port === 0)).toBeUndefined();
+    }
+  });
+
+  test("refuses to write negative or out-of-range port", () => {
+    for (const bad of [-1, 65536, 100000]) {
+      const result = selfRegister({
+        boundPort: bad,
+        installDir: "/x",
+        manifestPath,
+        logger,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error?.message).toContain(`invalid port ${bad}`);
+    }
+  });
+
+  test("refuses to write non-integer port", () => {
+    const result = selfRegister({
+      boundPort: 1946.5,
+      installDir: "/x",
+      manifestPath,
+      logger,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  test("preserves existing valid port even if boundPort is 0", () => {
+    // First write seeds a valid row.
+    selfRegister({
+      boundPort: 1946,
+      installDir: "/x",
+      manifestPath,
+      logger,
+    });
+    // Second call with boundPort=0 should use the existing port, NOT trip
+    // the guard. (The guard only fires when portToWrite — after the
+    // existing?.port ?? boundPort resolution — is invalid.)
+    const result = selfRegister({
+      boundPort: 0,
+      installDir: "/x",
+      manifestPath,
+      logger,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.portWritten).toBe(1946);
+  });
+});
+
 describe("resolveProjectRoot", () => {
   test("returns a directory containing .parachute/module.json", () => {
     const root = resolveProjectRoot();
