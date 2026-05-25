@@ -16,6 +16,7 @@
  */
 import { Link, Route, Routes } from "react-router-dom";
 import { TokenSetup } from "./TokenSetup.tsx";
+import { BrandMark } from "./components/BrandMark.tsx";
 import { Add } from "./routes/Add.tsx";
 import { Modules } from "./routes/Modules.tsx";
 import { UiInfo } from "./routes/UiInfo.tsx";
@@ -25,8 +26,13 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>
-          <Link to="/">parachute-app</Link>
-          <span className="app-subtitle">admin</span>
+          <Link to="/" className="brand" aria-label="Parachute · app">
+            <span className="brand-mark">
+              <BrandMark size={24} />
+            </span>
+            <span className="brand-name">Parachute</span>
+            <span className="brand-chip">app</span>
+          </Link>
         </h1>
         <nav className="app-nav">
           <Link to="/">Modules</Link>
@@ -47,7 +53,7 @@ export function App() {
 
       <footer className="app-footer">
         <small>
-          <code>parachute-app</code> · UI host module ·
+          <code>parachute-app</code> · UI host module ·{" "}
           <a href="https://github.com/ParachuteComputer/parachute-app">source</a>
         </small>
       </footer>

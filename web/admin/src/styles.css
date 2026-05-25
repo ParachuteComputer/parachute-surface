@@ -1,32 +1,72 @@
 /*
  * parachute-app admin SPA styles.
  *
- * Keep it deliberately plain and themable; matches the rest of the Parachute
- * admin surfaces (hub admin SPA's spare table-oriented look).
+ * Conforms to the canonical Parachute design system
+ * (parachute-patterns/patterns/design-system.md). Tokens (palette, type,
+ * radii, component shapes) are lifted verbatim from the source-of-truth —
+ * keep this file in lockstep with `parachute-hub/web/ui/src/styles.css`
+ * (the closest peer admin SPA). Drift here is a bug.
+ *
+ * Adopted from design-system.md sections:
+ *   §3 — palette tokens
+ *   §4 — privacy-safe typography stack (system fonts; no Google Fonts —
+ *         post-auth admin chrome)
+ *   §5 — verb vocabulary
+ *   §7 — buttons, brand-line, banners, status badges
  */
+:root {
+  --bg: #faf8f4;
+  --bg-soft: #f3f0ea;
+  --fg: #2c2a26;
+  --fg-muted: #6b6860;
+  --fg-dim: #9a9690;
+  --accent: #4a7c59;
+  --accent-soft: rgba(74, 124, 89, 0.08);
+  --accent-hover: #3d6849;
+  --accent-light: #6a9b77;
+  --border: #e4e0d8;
+  --border-light: #ece9e2;
+  --card-bg: #ffffff;
+  --error: #a3392b;
+  --error-soft: rgba(163, 57, 43, 0.08);
+  --warn: #b08023;
+  --warn-soft: rgba(176, 128, 35, 0.08);
+  --success: #3d6849;
+  --success-soft: rgba(61, 104, 73, 0.08);
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace;
+  font-family: var(--font-sans);
+}
+
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   margin: 0;
-  color: #222;
-  background: #fafafa;
-  font-size: 15px;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
   line-height: 1.5;
 }
 
 a {
-  color: #1e6bb8;
+  color: var(--accent);
   text-decoration: none;
 }
 a:hover {
   text-decoration: underline;
 }
+
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-soft);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
 }
 
 .app {
@@ -38,8 +78,8 @@ code {
 .app-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  border-bottom: 1px solid #ddd;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
   padding-bottom: 1rem;
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
@@ -47,21 +87,90 @@ code {
 }
 .app-header h1 {
   margin: 0;
-  font-weight: 600;
-  font-size: 1.4rem;
+  font-weight: 400;
+  font-size: 1rem;
+  line-height: 1;
 }
 .app-header h1 a {
   color: inherit;
+  text-decoration: none;
 }
-.app-subtitle {
-  font-size: 0.85rem;
-  color: #888;
-  margin-left: 0.6rem;
+.app-header h1 a:hover {
+  text-decoration: none;
+}
+
+/*
+ * Brand-line — mark + wordmark + context chip, per design-system.md §7.
+ * Inlined SVG mark from §2 (24×24, currentColor, aria-hidden). The
+ * wordmark is "Parachute" set in the serif; chip is "app" as the
+ * sub-surface label.
+ */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-weight: 500;
+  font-size: 0.95rem;
+  font-family: var(--font-serif);
+}
+.brand .brand-mark {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.brand .brand-mark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.brand .brand-name {
+  font-family: var(--font-serif);
   font-weight: 400;
+  font-size: 1.15rem;
+  color: var(--fg);
+  letter-spacing: 0.01em;
 }
+.brand .brand-chip {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+  border: 1px solid var(--border-light);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+/* Back-compat alias — `.brand-tag` is the legacy name (also used by
+   hub's admin-login-ui). One-release alias per design-system.md §7. */
+.brand .brand-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+  border: 1px solid var(--border-light);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
 .app-nav {
   display: flex;
   gap: 1.2rem;
+  align-items: center;
+}
+.app-nav a {
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+}
+.app-nav a:hover {
+  text-decoration: none;
+  color: var(--fg);
 }
 
 .app-main {
@@ -70,26 +179,35 @@ code {
 .app-footer {
   margin-top: 3rem;
   padding-top: 1rem;
-  border-top: 1px solid #eee;
-  color: #888;
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 0.85rem;
 }
 
+/*
+ * Token-setup banner — operator pastes a bearer here. Uses the warn-banner
+ * palette (this is a "needs your attention" affordance) when uncollapsed,
+ * success palette once configured.
+ */
 .token-setup {
-  padding: 1rem;
-  background: #fffbe6;
-  border: 1px solid #f0d770;
-  border-radius: 4px;
+  padding: 1rem 1.25rem;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
   margin-bottom: 1.5rem;
+  color: var(--warn);
 }
 .token-setup--collapsed {
   display: flex;
   align-items: center;
   gap: 1rem;
-  background: #f1f7ed;
-  border-color: #b1d997;
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success);
 }
 .token-setup p {
   margin-top: 0;
+  color: var(--fg);
 }
 .token-setup__row {
   display: flex;
@@ -99,40 +217,100 @@ code {
   flex: 1;
 }
 
+/*
+ * Buttons — per design-system.md §7. Default is sage-filled primary;
+ * `.btn-primary` is preserved as an alias for the existing `<Link className="btn btn-primary">`
+ * usage in Modules.tsx. Secondary + destructive variants follow the spec.
+ */
 button,
 .btn {
-  font-family: inherit;
-  font-size: 0.92rem;
-  padding: 0.35rem 0.75rem;
-  border: 1px solid #c4c4c4;
-  background: #fff;
-  border-radius: 3px;
+  font: inherit;
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.55rem 1.1rem;
   cursor: pointer;
+  transition: background 0.15s ease;
+  text-decoration: none;
+  display: inline-block;
 }
 button:hover,
 .btn:hover {
-  background: #f1f1f1;
+  background: var(--accent-hover);
+  text-decoration: none;
 }
-button:disabled {
-  color: #999;
+button:disabled,
+.btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Secondary — white fill, ink text, border. Used for adjacent
+   actions of equal weight (Cancel beside Save, per-row Reload). */
+button.secondary,
+.btn.secondary,
+.btn-secondary {
+  background: white;
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+button.secondary:hover,
+.btn.secondary:hover,
+.btn-secondary:hover {
+  background: var(--bg-soft);
+}
+
+/* Destructive — white fill, error-color text + border. Used for
+   Uninstall / Revoke / Delete affordances. */
+button.destructive,
+.btn.destructive,
+.btn-destructive {
+  background: white;
+  color: var(--error);
+  border: 1px solid var(--error);
+}
+button.destructive:hover,
+.btn.destructive:hover,
+.btn-destructive:hover {
+  background: var(--error-soft);
+}
+
+/* `.btn-primary` is an alias kept for the existing call-sites that
+   declare it explicitly (e.g. `<Link className="btn btn-primary">`).
+   Resolves to the canonical primary shape. */
 .btn-primary {
-  background: #1e6bb8;
+  background: var(--accent);
   color: white;
-  border-color: #1e6bb8;
+  border: 0;
 }
 .btn-primary:hover {
-  background: #195a9a;
+  background: var(--accent-hover);
 }
 
 input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+input[type="url"],
+input,
+select,
+textarea {
+  font: inherit;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  color: var(--fg);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+input[type="text"],
 input[type="password"] {
-  font-family: inherit;
-  font-size: 0.95rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid #c4c4c4;
-  border-radius: 3px;
   width: 100%;
 }
 
@@ -145,25 +323,31 @@ input[type="password"] {
 .modules__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
 }
 .modules__table th,
 .modules__table td {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-light);
   padding: 0.75rem;
   text-align: left;
   vertical-align: top;
 }
+/*
+ * Table headers — sentence-case per design-system.md §9 row 1 (the
+ * outlier was uppercase + 0.06em letter-spacing). The canonical hub
+ * admin SPA uses inline `<h2>` headings + table headers in regular
+ * weight without forcing upper-case.
+ */
 .modules__table th {
   font-weight: 600;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #555;
-  background: #f5f5f5;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  text-transform: none;
+  letter-spacing: 0;
 }
 .modules__mount {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
 }
 .modules__scopes {
@@ -177,52 +361,111 @@ input[type="password"] {
 .modules__actions {
   display: flex;
   gap: 0.4rem;
+  flex-wrap: wrap;
+}
+/* Per-row action buttons — visually lighter than primary, sized down
+   so a row of three or four actions doesn't dominate. */
+.modules__actions button,
+.modules__actions .btn {
+  background: white;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.88rem;
+  border-radius: 6px;
+}
+.modules__actions button:hover,
+.modules__actions .btn:hover {
+  background: var(--bg-soft);
+  border-color: var(--accent-light);
+}
+.modules__actions button.destructive,
+.modules__actions .btn.destructive {
+  color: var(--error);
+  border-color: var(--error);
+}
+.modules__actions button.destructive:hover,
+.modules__actions .btn.destructive:hover {
+  background: var(--error-soft);
 }
 
 .badge {
   display: inline-block;
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;
-  border: 1px solid #888;
-  border-radius: 3px;
-  color: #555;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
   margin-top: 0.2rem;
+  font-weight: 500;
+}
+.badge-dev {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .empty,
 .loading {
-  padding: 2rem;
+  padding: 1.5rem 1rem;
   text-align: center;
-  color: #888;
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  border-radius: 10px;
+  font-size: 0.95rem;
 }
 
+/*
+ * Banners — error / warn / success. Per design-system.md §7.
+ * Existing classes `.error`, `.warning`, `.success` map to the canonical
+ * banner shape via these rules so consumers don't need to be touched at
+ * the call-site in this PR.
+ */
 .error {
-  padding: 0.6rem 0.9rem;
-  background: #ffe5e5;
-  border: 1px solid #f0a0a0;
-  border-radius: 3px;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--error);
+  background: var(--error-soft);
+  color: var(--error);
+  font-size: 0.9rem;
 }
 .warning {
-  padding: 0.4rem 0.7rem;
-  background: #fff5d6;
-  border: 1px solid #e0c060;
-  border-radius: 3px;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 0.9rem;
 }
 .success {
-  padding: 1rem;
-  background: #f1f7ed;
-  border: 1px solid #b1d997;
-  border-radius: 3px;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 0.9rem;
+}
+.success h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: var(--success);
+  font-weight: 600;
+}
+.success p,
+.warning p,
+.error p {
+  margin: 0.4rem 0 0;
 }
 .muted {
-  color: #888;
+  color: var(--fg-muted);
 }
 
 .small-code {
   font-size: 0.78rem;
-  color: #555;
+  color: var(--fg-muted);
 }
 
 .add__form {
@@ -236,29 +479,35 @@ input[type="password"] {
 }
 .add__form label > span {
   font-weight: 500;
+  color: var(--fg);
+  font-size: 0.92rem;
 }
 .add__form small {
-  color: #888;
+  color: var(--fg-muted);
   font-size: 0.82rem;
 }
 
 .modules__skipped {
   margin-top: 2rem;
-  padding: 1rem;
-  background: #fff5d6;
-  border: 1px solid #e0c060;
-  border-radius: 4px;
+  padding: 1rem 1.25rem;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  color: var(--fg);
 }
 .modules__skipped h3 {
   margin-top: 0;
+  color: var(--warn);
+  font-weight: 600;
 }
 
 .meta-json {
   padding: 1rem;
-  background: #f5f5f5;
-  border-radius: 3px;
+  background: var(--bg-soft);
+  border-radius: 6px;
   overflow: auto;
   font-size: 0.85rem;
+  border: 1px solid var(--border-light);
 }
 
 .ui-info ul {
@@ -272,7 +521,7 @@ input[type="password"] {
 }
 .schema-requirements summary {
   cursor: pointer;
-  color: #1e6bb8;
+  color: var(--accent);
   padding: 0.15rem 0;
 }
 .schema-requirements summary:hover {
@@ -286,14 +535,14 @@ input[type="password"] {
 .schema-requirements__tag {
   margin-bottom: 0.75rem;
   padding-left: 0.5rem;
-  border-left: 2px solid #ddd;
+  border-left: 2px solid var(--border);
 }
 .schema-requirements__tag-name {
   font-weight: 600;
   font-size: 0.9rem;
 }
 .schema-requirements__tag-desc {
-  color: #555;
+  color: var(--fg-muted);
   font-size: 0.85rem;
 }
 .schema-requirements__fields {
@@ -308,16 +557,84 @@ input[type="password"] {
   vertical-align: top;
 }
 .schema-requirements__fields th {
-  color: #666;
+  color: var(--fg-muted);
   font-weight: 500;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-light);
 }
 .schema-requirements__note {
   margin: 0.5rem 0 0 0;
   font-size: 0.78rem;
-  color: #888;
+  color: var(--fg-muted);
   font-style: italic;
 }
 .schema-requirements--compact .schema-requirements__fields {
   font-size: 0.78rem;
+}
+
+/*
+ * Status badges — per design-system.md §6, §7. The app-admin SPA
+ * doesn't currently render module supervisor states (those live in the
+ * hub admin SPA), but the shape is declared here so any future state
+ * surface can use it without re-inventing the vocabulary.
+ */
+.status {
+  display: inline-block;
+  padding: 0.1em 0.55em;
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.status-active {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.status-pending {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.status-inactive {
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+}
+.status-failing {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+/* Dark mode tokens — per design-system.md §3 dark-mode table. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1917;
+    --bg-soft: #24221f;
+    --fg: #e8e4dc;
+    --fg-muted: #a8a49a;
+    --fg-dim: #6b6860;
+    --accent: #7ab08a;
+    --accent-hover: #8fc49e;
+    --accent-light: #8fc49e;
+    --border: #3a3733;
+    --card-bg: #24221f;
+  }
+  input,
+  select,
+  textarea,
+  .modules__actions button,
+  .modules__actions .btn,
+  button.secondary,
+  .btn.secondary,
+  .btn-secondary,
+  button.destructive,
+  .btn.destructive,
+  .btn-destructive {
+    background: var(--card-bg);
+  }
+  .modules__actions button:hover,
+  .modules__actions .btn:hover,
+  button.secondary:hover,
+  .btn.secondary:hover,
+  .btn-secondary:hover {
+    background: var(--bg-soft);
+  }
 }
