@@ -134,7 +134,17 @@ export function selfRegister(opts: SelfRegisterOpts): SelfRegisterResult {
     };
   }
 
-  const portToWrite = existing?.port ?? opts.boundPort;
+  // Treat a POISONED existing port (e.g. left over from the rc.10
+  // bootstrap-completion bug that wrote port=0) the same as a missing
+  // row — fall through to boundPort so a fresh restart can heal the
+  // corruption. Without this guard, an existing port=0 row stays at 0
+  // forever even after the operator upgrades to a fixed version.
+  const existingPortIsValid =
+    existing?.port !== undefined &&
+    Number.isInteger(existing.port) &&
+    existing.port > 0 &&
+    existing.port <= 65535;
+  const portToWrite = existingPortIsValid ? (existing as ServiceEntry).port : opts.boundPort;
   // Defensive: reject invalid ports BEFORE writing rather than
   // corrupting services.json + waiting for hub to barf on read. Hub's
   // validator rejects any port not in [1, 65535] — this guard matches.

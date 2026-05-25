@@ -315,6 +315,39 @@ describe("selfRegister — invalid-port guard (parachute-app#33 regression)", ()
     expect(result.ok).toBe(true);
     expect(result.portWritten).toBe(1946);
   });
+
+  test("self-heal: existing row with port=0 is replaced by boundPort on restart", () => {
+    // Seed the file with a poisoned row (port=0) — simulates an operator's
+    // services.json that was corrupted by the rc.10 bug pre-upgrade.
+    fs.writeFileSync(
+      manifestPath,
+      `${JSON.stringify({
+        services: [
+          {
+            name: "parachute-app",
+            port: 0,
+            paths: ["/app", "/.parachute"],
+            health: "/app/healthz",
+            version: "0.0.0-poisoned",
+          },
+        ],
+      })}\n`,
+    );
+    // selfRegister with a valid boundPort should HEAL the row (treat
+    // existing.port=0 as if missing) rather than just refusing to write.
+    const result = selfRegister({
+      boundPort: 1946,
+      installDir: "/x",
+      manifestPath,
+      logger,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.portWritten).toBe(1946);
+    // Verify on-disk row is healed.
+    const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const row = m.services.find((s: { name: string }) => s.name === "parachute-app");
+    expect(row.port).toBe(1946);
+  });
 });
 
 describe("resolveProjectRoot", () => {
