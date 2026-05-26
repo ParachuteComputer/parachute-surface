@@ -9,6 +9,23 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [app 0.2.0-rc.14] - 2026-05-26
+
+**Major admin SPA redesign (#37). Card-based layouts, calmer token banner, info-grid for the detail view.**
+
+### Changed
+
+- **Modules route.** 7-column dense table → card list. Each UI gets a card with: serif title + mono path on the left, badge cluster (PWA / public / Dev ON / OAuth status) on the right, labeled meta grid (Package / Version / Scopes), action row at bottom with primary "Reload" + secondaries + destructive "Uninstall" pushed right. Subtle hover affordance.
+- **Empty state.** Rich card with headline + explanation + "Add your first UI" CTA, mirroring the hub admin SPA's `.empty-rich` pattern.
+- **Add UI form.** Reorganized into two grouped fieldsets — Source (required) and Overrides (optional with explanation). Cancel button added. Form wrapped in a card for visual weight.
+- **UiInfo detail.** Four `<h3>` + `<ul>` blocks → two-column `.info-grid` of `.info-card`s (Mount / OAuth client / Schema requirements / meta.json). "Open UI" primary CTA in the page header. "← All UIs" back-link.
+- **TokenSetup banner.** Lower visual weight — warm cream + subtle border instead of warn-amber. Editing state gets a serif heading + `parachute auth mint-token` example. Collapsed state is a tight strip with green dot + status + secondary-styled actions. Enter-to-submit in the input.
+- **Shared design tokens added.** `.page-header`, `.info-grid`, `.info-card`, `.form-card`, `.form-section`, `.form-field`, `.form-actions`, `.back-link`, `[data-route-content]` fade-up animation (respects `prefers-reduced-motion`).
+
+### Removed (visible UI)
+
+- The raw OAuth `client_id` no longer renders as visible text in the Modules list. It surfaces as a `title` attribute on the OAuth-status badge (hover to see the full value) and remains selectable in the UiInfo detail card. This is the deliberate visual-clutter / discoverability tradeoff documented in PR #37 review.
+
 ## [app 0.2.0-rc.10] - 2026-05-23
 
 ### Removed
