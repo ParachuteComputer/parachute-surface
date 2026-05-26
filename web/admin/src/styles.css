@@ -401,8 +401,12 @@ input[type="password"] {
   flex-wrap: wrap;
 }
 .page-header__title {
+  /* Let flex handle sizing — no min-width override. An 18rem min would
+   * force horizontal scroll on 320 px viewports (the smallest phone
+   * tier we care about); flex-wrap on `.page-header` wraps the CTA
+   * below when the title needs the full width instead. */
   flex: 1 1 auto;
-  min-width: 18rem;
+  min-width: 0;
 }
 .page-header__title h1 {
   margin: 0 0 0.35rem;
@@ -651,6 +655,22 @@ input[type="password"] {
   background: var(--bg-soft);
   border-radius: 10px;
   font-size: 0.95rem;
+}
+
+/* Rich empty state — uses a white card on the cream page with a left-
+ * aligned headline + body + CTA. Mirrors the hub admin SPA's pattern
+ * (parachute-hub/web/ui/src/styles.css). */
+.empty-rich {
+  text-align: left;
+  padding: 2rem 1.75rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+}
+.empty-rich .empty-headline {
+  font-size: 1.05rem;
+  color: var(--fg);
+  margin: 0 0 0.5rem;
+  font-weight: 500;
 }
 
 /*
