@@ -151,13 +151,25 @@ export function Modules() {
   }
 
   return (
-    <section className="modules">
-      <div className="modules__header">
-        <h2>Installed UIs</h2>
+    <section className="modules" data-route-content>
+      <header className="page-header">
+        <div className="page-header__title">
+          <h1>Installed UIs</h1>
+          <p className="page-header__sub">
+            UIs hosted by this <code>parachute-app</code> instance.
+            {data && data.uis.length > 0 && (
+              <>
+                {" "}
+                Currently <strong>{data.uis.length}</strong>{" "}
+                {data.uis.length === 1 ? "UI" : "UIs"} live.
+              </>
+            )}
+          </p>
+        </div>
         <Link to="/add" className="btn btn-primary">
           Add UI
         </Link>
-      </div>
+      </header>
 
       {error && (
         <p role="alert" className="error">
@@ -166,164 +178,161 @@ export function Modules() {
       )}
 
       {data && data.uis.length === 0 && (
-        <p className="empty">
-          No UIs installed yet. <Link to="/add">Add your first UI</Link>.
-        </p>
+        <div className="empty empty-rich">
+          <p className="empty-headline">No UIs installed yet.</p>
+          <p className="muted">
+            UIs are React or static bundles that mount under <code>/app/&lt;name&gt;/</code>.
+            Notes ships as the canonical first UI; add your own to host bespoke apps next to it.
+          </p>
+          <Link to="/add" className="btn btn-primary" style={{ marginTop: "0.75rem" }}>
+            Add your first UI
+          </Link>
+        </div>
       )}
 
       {data && data.uis.length > 0 && (
-        <table className="modules__table">
-          <thead>
-            <tr>
-              <th>Path</th>
-              <th>Name</th>
-              <th>Version</th>
-              <th>OAuth client</th>
-              <th>Scopes</th>
-              <th>Dev</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.uis.map((u) => {
-              const dev = devMap.get(u.name);
-              const devOn = dev?.enabled === true;
-              return (
-                <tr key={u.name}>
-                  <td>
-                    <a href={u.path} className="modules__mount">
+        <ul className="ui-list">
+          {data.uis.map((u) => {
+            const dev = devMap.get(u.name);
+            const devOn = dev?.enabled === true;
+            const oauthBadge: { label: string; status: "active" | "pending" | "inactive" } = u.oauthClientId
+              ? u.oauthStatus === "approved"
+                ? { label: "OAuth connected", status: "active" }
+                : { label: `OAuth ${u.oauthStatus ?? "pending"}`, status: "pending" }
+              : { label: "OAuth not registered", status: "inactive" };
+            return (
+              <li key={u.name} className="ui-card">
+                <div className="ui-card__head">
+                  <div className="ui-card__title">
+                    <Link to={`/info/${u.name}`} className="ui-card__name">
+                      {u.displayName}
+                    </Link>
+                    <a href={u.path} className="ui-card__path">
                       {u.path}
                     </a>
-                  </td>
-                  <td>
-                    <Link to={`/info/${u.name}`}>{u.displayName}</Link>
-                    <br />
-                    <small>
+                  </div>
+                  <div className="ui-card__badges">
+                    {u.pwa && <span className="badge">PWA</span>}
+                    {u.public && <span className="badge">public</span>}
+                    {devOn && (
+                      <span className="badge badge-dev" aria-label={`dev mode on for ${u.name}`}>
+                        Dev ON
+                      </span>
+                    )}
+                    <span className={`status status-${oauthBadge.status}`} title={u.oauthClientId ?? "no client registered"}>
+                      {oauthBadge.label}
+                    </span>
+                  </div>
+                </div>
+
+                <dl className="ui-card__meta">
+                  <div>
+                    <dt>Package</dt>
+                    <dd>
                       <code>{u.name}</code>
-                    </small>
-                    {u.pwa && (
-                      <>
-                        <br />
-                        <span className="badge">PWA</span>
-                      </>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Version</dt>
+                    <dd>{u.version ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Scopes</dt>
+                    <dd>
+                      {u.scopes_required.length === 0 ? (
+                        <span className="muted">none</span>
+                      ) : (
+                        <ul className="ui-card__scopes">
+                          {u.scopes_required.map((s) => (
+                            <li key={s}>
+                              <code>{s}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+
+                {u.required_schema && (
+                  <SchemaRequirements schema={u.required_schema} compact={true} />
+                )}
+
+                {devOn && (dev?.subscribers || dev?.watcher) && (
+                  <p className="ui-card__dev-detail muted">
+                    {dev?.subscribers && dev.subscribers > 0 && (
+                      <>{dev.subscribers} tab(s) subscribed. </>
                     )}
-                    {u.public && (
-                      <>
-                        <br />
-                        <span className="badge">public</span>
-                      </>
-                    )}
-                  </td>
-                  <td>{u.version ?? "—"}</td>
-                  <td>
-                    {u.oauthClientId ? (
-                      <>
-                        <code className="small-code">{u.oauthClientId.slice(0, 16)}…</code>
-                        {u.oauthStatus && <small>{` (${u.oauthStatus})`}</small>}
-                      </>
-                    ) : (
-                      <span className="muted">not registered</span>
-                    )}
-                  </td>
-                  <td>
-                    <ul className="modules__scopes">
-                      {u.scopes_required.map((s) => (
-                        <li key={s}>
-                          <code>{s}</code>
-                        </li>
-                      ))}
-                    </ul>
-                    {u.required_schema && (
-                      <SchemaRequirements schema={u.required_schema} compact={true} />
-                    )}
-                  </td>
-                  <td className="modules__dev">
-                    {devOn ? (
-                      <>
-                        <span className="badge badge-dev" aria-label={`dev mode on for ${u.name}`}>
-                          Dev ON
-                        </span>
-                        {dev && dev.subscribers > 0 && (
+                    {dev?.watcher?.watching && (
+                      <span title={dev.watcher.watchDir}>
+                        Watching {shortenPath(dev.watcher.watchDir)}
+                        {dev.watcher.buildCmd && (
                           <>
-                            <br />
-                            <small>{dev.subscribers} tab(s)</small>
+                            {" "}
+                            (build: <code>{dev.watcher.buildCmd}</code>)
                           </>
                         )}
-                        {dev?.watcher?.watching && (
-                          <>
-                            <br />
-                            <small className="muted" title={dev.watcher.watchDir}>
-                              watching {shortenPath(dev.watcher.watchDir)}
-                              {dev.watcher.buildCmd && (
-                                <>
-                                  <br />
-                                  build: <code>{dev.watcher.buildCmd}</code>
-                                </>
-                              )}
-                            </small>
-                          </>
-                        )}
-                        {dev?.watcher && !dev.watcher.watching && (
-                          <>
-                            <br />
-                            <small className="muted">
-                              watcher off{dev.watcher.warning ? `: ${dev.watcher.warning}` : ""}
-                            </small>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <span className="muted">off</span>
+                        .
+                      </span>
                     )}
-                  </td>
-                  <td className="modules__actions">
-                    <button
-                      type="button"
-                      onClick={() => void onReload(u.name)}
-                      disabled={busy === `reload:${u.name}`}
-                    >
-                      Reload
-                    </button>
-                    {devOn ? (
+                    {dev?.watcher && !dev.watcher.watching && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => void onTriggerReload(u.name)}
-                          disabled={busy === `dev-trigger:${u.name}`}
-                        >
-                          Trigger reload
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void onDisableDev(u.name)}
-                          disabled={busy === `dev-disable:${u.name}`}
-                        >
-                          Disable dev
-                        </button>
+                        Watcher off{dev.watcher.warning ? `: ${dev.watcher.warning}` : ""}.
                       </>
-                    ) : (
+                    )}
+                  </p>
+                )}
+
+                <div className="ui-card__actions">
+                  <button
+                    type="button"
+                    onClick={() => void onReload(u.name)}
+                    disabled={busy === `reload:${u.name}`}
+                  >
+                    Reload
+                  </button>
+                  {devOn ? (
+                    <>
                       <button
                         type="button"
-                        onClick={() => void onEnableDev(u.name)}
-                        disabled={busy === `dev-enable:${u.name}`}
+                        className="secondary"
+                        onClick={() => void onTriggerReload(u.name)}
+                        disabled={busy === `dev-trigger:${u.name}`}
                       >
-                        Enable dev
+                        Trigger reload
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => void onDisableDev(u.name)}
+                        disabled={busy === `dev-disable:${u.name}`}
+                      >
+                        Disable dev
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
-                      className="destructive"
-                      onClick={() => void onUninstall(u.name)}
-                      disabled={busy === `remove:${u.name}`}
+                      className="secondary"
+                      onClick={() => void onEnableDev(u.name)}
+                      disabled={busy === `dev-enable:${u.name}`}
                     >
-                      Uninstall
+                      Enable dev
                     </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  )}
+                  <button
+                    type="button"
+                    className="destructive ui-card__uninstall"
+                    onClick={() => void onUninstall(u.name)}
+                    disabled={busy === `remove:${u.name}`}
+                  >
+                    Uninstall
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       {data && data.skipped.length > 0 && (

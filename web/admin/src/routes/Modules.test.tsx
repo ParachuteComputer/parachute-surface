@@ -104,7 +104,12 @@ describe("Modules", () => {
     renderWithRouter();
     expect(await screen.findByText("Notes")).toBeInTheDocument();
     expect(screen.getByText("/app/notes")).toBeInTheDocument();
-    expect(screen.getByText(/client_notes/)).toBeInTheDocument();
+    // Card layout (post-redesign) doesn't render the raw OAuth client_id as
+    // visible text — it surfaces as a `title` attribute on the OAuth-status
+    // badge so operators see "OAuth connected" / "OAuth pending" at a glance.
+    // The client_id is still in the DOM for diagnostic hover; assert that.
+    const oauthBadge = screen.getByTitle("client_notes");
+    expect(oauthBadge).toBeInTheDocument();
     expect(screen.getByText("PWA")).toBeInTheDocument();
   });
 

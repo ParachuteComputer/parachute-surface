@@ -75,6 +75,33 @@ code {
   padding: 1.5rem 2rem;
 }
 
+/* Route content fades up on mount — mirrors the hub admin SPA's pattern
+ * so routes feel settled rather than slammed when their data arrives.
+ * Respects prefers-reduced-motion. */
+@keyframes pc-route-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+[data-route-content] {
+  animation: pc-route-fade-up 0.32s ease forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-route-content] {
+    animation: none;
+  }
+}
+
+/* "← back" link above page headers on detail routes. */
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+.back-link:hover {
+  color: var(--accent);
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
@@ -189,21 +216,67 @@ code {
  * palette (this is a "needs your attention" affordance) when uncollapsed,
  * success palette once configured.
  */
+/*
+ * Token-setup banner — operator pastes a bearer here. Two states:
+ *   - editing (no token / Change clicked): warm cream card with heading +
+ *     hint, input + Save inline
+ *   - collapsed (token set): tight strip with green dot + status + actions
+ *
+ * Lower-visual-weight than the original warn-color banner — most operators
+ * set this once and forget; the urgency was creating noise.
+ */
 .token-setup {
-  padding: 1rem 1.25rem;
-  background: var(--warn-soft);
-  border: 1px solid var(--warn);
-  border-radius: 8px;
+  padding: 1.1rem 1.4rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   margin-bottom: 1.5rem;
-  color: var(--warn);
+  color: var(--fg);
 }
 .token-setup--collapsed {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
   background: var(--success-soft);
   border-color: var(--success);
   color: var(--success);
+  font-size: 0.88rem;
+}
+.token-setup__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+.token-setup__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--success);
+}
+.token-setup__actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+.token-setup__actions button {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+}
+.token-setup__heading {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 400;
+  color: var(--fg);
+}
+.token-setup__hint {
+  margin: 0 0 0.9rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
 }
 .token-setup p {
   margin-top: 0;
@@ -314,6 +387,175 @@ input[type="password"] {
   width: 100%;
 }
 
+/*
+ * Page header — page title + sub on the left, primary CTA on the right.
+ * Replaces the legacy .modules__header (table + sticky CTA) — kept
+ * as an alias below for any caller that still references it.
+ */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+  flex-wrap: wrap;
+}
+.page-header__title {
+  /* Let flex handle sizing — no min-width override. An 18rem min would
+   * force horizontal scroll on 320 px viewports (the smallest phone
+   * tier we care about); flex-wrap on `.page-header` wraps the CTA
+   * below when the title needs the full width instead. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.page-header__title h1 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-serif);
+  font-size: 1.85rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--fg);
+}
+.page-header__sub {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  max-width: 38rem;
+}
+.page-header__sub strong {
+  color: var(--fg);
+}
+
+/*
+ * Card-based UI listing. Each UI gets its own card with a clear visual
+ * hierarchy: serif title up top, meta grid below, action row at bottom.
+ * Replaces the 7-column table that crammed too much horizontal info
+ * into a single row (Aaron 2026-05-26: "app UI is god-awful").
+ */
+.ui-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.25rem;
+}
+.ui-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ui-card:hover {
+  border-color: var(--accent-light);
+  box-shadow: 0 4px 16px rgba(44, 42, 38, 0.06);
+}
+
+/* Head row — title + path on the left, badges on the right. */
+.ui-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.ui-card__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.ui-card__name {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  color: var(--fg);
+  line-height: 1.2;
+}
+.ui-card__name:hover {
+  text-decoration: none;
+  color: var(--accent);
+}
+.ui-card__path {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+.ui-card__path:hover {
+  color: var(--accent);
+}
+.ui-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+/* Meta grid — labeled fields (Package, Version, Scopes). */
+.ui-card__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 0;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+}
+.ui-card__meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.ui-card__meta dt {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ui-card__meta dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+.ui-card__scopes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.ui-card__scopes li {
+  font-size: 0.82rem;
+}
+
+.ui-card__dev-detail {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* Action row — primary first (Reload), secondaries, destructive pushed right. */
+.ui-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.ui-card__uninstall {
+  margin-left: auto;
+}
+
+/* Legacy alias kept so any out-of-tree caller still finds the
+ * old selector. Maps to the new .page-header shape. */
 .modules__header {
   display: flex;
   justify-content: space-between;
@@ -415,6 +657,22 @@ input[type="password"] {
   font-size: 0.95rem;
 }
 
+/* Rich empty state — uses a white card on the cream page with a left-
+ * aligned headline + body + CTA. Mirrors the hub admin SPA's pattern
+ * (parachute-hub/web/ui/src/styles.css). */
+.empty-rich {
+  text-align: left;
+  padding: 2rem 1.75rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+}
+.empty-rich .empty-headline {
+  font-size: 1.05rem;
+  color: var(--fg);
+  margin: 0 0 0.5rem;
+  font-weight: 500;
+}
+
 /*
  * Banners — error / warn / success. Per design-system.md §7.
  * Existing classes `.error`, `.warning`, `.success` map to the canonical
@@ -485,6 +743,129 @@ input[type="password"] {
 .add__form small {
   color: var(--fg-muted);
   font-size: 0.82rem;
+}
+
+/* Info cards (UiInfo route). Two-column grid on wide viewports, single
+ * column on mobile. Each card has a serif title + label/value list. */
+.info-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  margin-bottom: 1.25rem;
+}
+.info-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+}
+.info-card + .info-card {
+  margin-top: 0;
+}
+.info-card__title {
+  margin: 0 0 1rem;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  color: var(--fg);
+}
+.info-card__list {
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.info-card__list > div {
+  display: grid;
+  gap: 0.15rem;
+}
+.info-card__list dt {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.info-card__list dd {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--fg);
+  word-break: break-word;
+}
+.path-code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+/* Form-card layout — fieldsets grouped into sections with clear headings.
+ * Replaces the dense vertical stack of unlabeled groups. */
+.form-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.75rem 2rem;
+  max-width: 640px;
+  display: grid;
+  gap: 1.5rem;
+}
+.form-section {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 1rem;
+}
+.form-section__title {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: var(--fg);
+}
+.form-section__sub {
+  margin: -0.5rem 0 0;
+  font-size: 0.88rem;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+.form-field {
+  display: grid;
+  gap: 0.3rem;
+}
+.form-field__label {
+  font-weight: 500;
+  color: var(--fg);
+  font-size: 0.92rem;
+}
+.form-field small {
+  color: var(--fg-muted);
+  font-size: 0.82rem;
+}
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+  cursor: pointer;
+}
+.form-checkbox input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+.form-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0.5rem;
 }
 
 .modules__skipped {

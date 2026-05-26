@@ -66,48 +66,103 @@ export function UiInfo() {
     return <p className="loading">Loading…</p>;
   }
   return (
-    <section className="ui-info">
-      <Link to="/">← Back</Link>
-      <h2>{data.ui.displayName}</h2>
-      {data.ui.tagline && <p className="tagline">{data.ui.tagline}</p>}
+    <section className="ui-info" data-route-content>
+      <Link to="/" className="back-link">
+        ← All UIs
+      </Link>
 
-      <h3>Mount</h3>
-      <p>
-        <a href={data.ui.path}>{data.ui.path}</a>
-      </p>
+      <header className="page-header">
+        <div className="page-header__title">
+          <h1>{data.ui.displayName}</h1>
+          {data.ui.tagline && <p className="page-header__sub">{data.ui.tagline}</p>}
+        </div>
+        <a href={data.ui.path} className="btn btn-primary">
+          Open UI
+        </a>
+      </header>
 
-      <h3>Paths</h3>
-      <ul>
-        <li>
-          UI dir: <code>{data.paths.uiDir}</code>
-        </li>
-        <li>
-          dist: <code>{data.paths.distDir}</code>
-        </li>
-      </ul>
+      <div className="info-grid">
+        <article className="info-card">
+          <h2 className="info-card__title">Mount</h2>
+          <dl className="info-card__list">
+            <div>
+              <dt>Path</dt>
+              <dd>
+                <a href={data.ui.path}>
+                  <code>{data.ui.path}</code>
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt>Package</dt>
+              <dd>
+                <code>{data.ui.name}</code>
+                {data.ui.version && <span className="muted"> · v{data.ui.version}</span>}
+              </dd>
+            </div>
+            <div>
+              <dt>UI directory</dt>
+              <dd>
+                <code className="path-code">{data.paths.uiDir}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Dist directory</dt>
+              <dd>
+                <code className="path-code">{data.paths.distDir}</code>
+              </dd>
+            </div>
+          </dl>
+        </article>
 
-      <h3>OAuth client</h3>
-      {data.oauth_client ? (
-        <ul>
-          <li>
-            client_id: <code>{data.oauth_client.client_id}</code>
-          </li>
-          <li>
-            scope: <code>{data.oauth_client.scope}</code>
-          </li>
-          <li>
-            hub: <code>{data.oauth_client.hub_url}</code>
-          </li>
-          <li>registered: {data.oauth_client.registered_at}</li>
-          {data.oauth_client.status && <li>status: {data.oauth_client.status}</li>}
-        </ul>
-      ) : (
-        <p className="muted">no OAuth client registered</p>
-      )}
+        <article className="info-card">
+          <h2 className="info-card__title">OAuth client</h2>
+          {data.oauth_client ? (
+            <dl className="info-card__list">
+              <div>
+                <dt>Client ID</dt>
+                <dd>
+                  <code className="path-code">{data.oauth_client.client_id}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Scopes</dt>
+                <dd>
+                  <code>{data.oauth_client.scope}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Hub</dt>
+                <dd>
+                  <code>{data.oauth_client.hub_url}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Registered</dt>
+                <dd>{new Date(data.oauth_client.registered_at).toLocaleString()}</dd>
+              </div>
+              {data.oauth_client.status && (
+                <div>
+                  <dt>Status</dt>
+                  <dd>
+                    <span
+                      className={`status status-${data.oauth_client.status === "approved" ? "active" : "pending"}`}
+                    >
+                      {data.oauth_client.status}
+                    </span>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          ) : (
+            <p className="muted">No OAuth client registered for this UI.</p>
+          )}
+        </article>
+      </div>
 
       {data.ui.required_schema && (
-        <>
-          <h3>Schema requirements</h3>
+        <article className="info-card">
+          <h2 className="info-card__title">Schema requirements</h2>
           <SchemaRequirements schema={data.ui.required_schema} defaultExpanded={true} />
           <div className="ui-info__provision">
             <button
@@ -119,7 +174,7 @@ export function UiInfo() {
               {provisioning ? "Provisioning…" : "Provision schema"}
             </button>
             <p className="muted small">
-              Idempotent: re-running against a vault that already has these tags is a no-op.
+              Idempotent — re-running against a vault that already has these tags is a no-op.
             </p>
             {provisionError && (
               <p role="alert" className="error">
@@ -163,11 +218,13 @@ export function UiInfo() {
               </div>
             )}
           </div>
-        </>
+        </article>
       )}
 
-      <h3>meta.json</h3>
-      <pre className="meta-json">{JSON.stringify(data.meta, null, 2)}</pre>
+      <article className="info-card">
+        <h2 className="info-card__title">meta.json</h2>
+        <pre className="meta-json">{JSON.stringify(data.meta, null, 2)}</pre>
+      </article>
     </section>
   );
 }
