@@ -64,13 +64,17 @@ export function Add() {
   };
 
   return (
-    <section className="add">
-      <h2>Add UI</h2>
-      <p>
-        Register a new UI under <code>~/.parachute/app/uis/&lt;name&gt;/</code>. Source can be a
-        local path to a built bundle (contains
-        <code>index.html</code>) or an npm package specifier.
-      </p>
+    <section className="add" data-route-content>
+      <header className="page-header">
+        <div className="page-header__title">
+          <h1>Add UI</h1>
+          <p className="page-header__sub">
+            Register a new UI under <code>~/.parachute/app/uis/&lt;name&gt;/</code>. Point at a built
+            bundle on disk or an npm package — the rest of the form fills in from the bundle's
+            <code> .parachute/meta.json</code> when present.
+          </p>
+        </div>
+      </header>
 
       {error && (
         <p role="alert" className="error">
@@ -99,93 +103,117 @@ export function Add() {
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="add__form">
-        <label>
-          <span>Source*</span>
-          <input
-            type="text"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            placeholder="/abs/path or @openparachute/notes-ui[@version]"
-            required
-          />
-          <small>Local path to a built bundle, OR an npm package specifier.</small>
-        </label>
+      <form onSubmit={onSubmit} className="add__form form-card">
+        {/* Source — the only required field. Most operators set this and submit;
+            meta.json on the bundle fills in the rest. */}
+        <fieldset className="form-section">
+          <legend className="form-section__title">Source</legend>
+          <p className="form-section__sub">
+            A local filesystem path to a built bundle (must contain <code>index.html</code>) OR
+            an npm package specifier. Required.
+          </p>
+          <label className="form-field">
+            <span className="form-field__label">Source path or package</span>
+            <input
+              type="text"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="/abs/path or @openparachute/notes-ui[@version]"
+              required
+              autoFocus
+            />
+          </label>
+        </fieldset>
 
-        <label>
-          <span>Name</span>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="my-ui"
-            pattern="^[a-z][a-z0-9-]*$"
-          />
-          <small>Lowercase, hyphenated. Required when the source has no meta.json.</small>
-        </label>
+        {/* Overrides — populated from the bundle's meta.json when omitted. */}
+        <fieldset className="form-section">
+          <legend className="form-section__title">Overrides</legend>
+          <p className="form-section__sub">
+            All optional. When the bundle ships <code>.parachute/meta.json</code>, the values
+            there are used as defaults; anything you fill in below overrides them.
+          </p>
+          <label className="form-field">
+            <span className="form-field__label">Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-ui"
+              pattern="^[a-z][a-z0-9-]*$"
+            />
+            <small>Lowercase, hyphenated. Required when the source has no meta.json.</small>
+          </label>
 
-        <label>
-          <span>Mount path</span>
-          <input
-            type="text"
-            value={pathField}
-            onChange={(e) => setPathField(e.target.value)}
-            placeholder="/app/my-ui"
-            pattern="^/app/[a-z0-9-]+$"
-          />
-          <small>
-            Always under <code>/app/</code>. Single segment.
-          </small>
-        </label>
+          <label className="form-field">
+            <span className="form-field__label">Mount path</span>
+            <input
+              type="text"
+              value={pathField}
+              onChange={(e) => setPathField(e.target.value)}
+              placeholder="/app/my-ui"
+              pattern="^/app/[a-z0-9-]+$"
+            />
+            <small>
+              Always under <code>/app/</code>. Single segment.
+            </small>
+          </label>
 
-        <label>
-          <span>Display name</span>
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="My UI"
-          />
-        </label>
+          <label className="form-field">
+            <span className="form-field__label">Display name</span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="My UI"
+            />
+          </label>
 
-        <label>
-          <span>Tagline</span>
-          <input
-            type="text"
-            value={tagline}
-            onChange={(e) => setTagline(e.target.value)}
-            placeholder="One-line description"
-          />
-        </label>
+          <label className="form-field">
+            <span className="form-field__label">Tagline</span>
+            <input
+              type="text"
+              value={tagline}
+              onChange={(e) => setTagline(e.target.value)}
+              placeholder="One-line description"
+            />
+          </label>
 
-        <label>
-          <span>Scopes (comma-separated)</span>
-          <input
-            type="text"
-            value={scopesCsv}
-            onChange={(e) => setScopesCsv(e.target.value)}
-            placeholder="vault:*:read, vault:*:write"
-          />
-        </label>
+          <label className="form-field">
+            <span className="form-field__label">Scopes (comma-separated)</span>
+            <input
+              type="text"
+              value={scopesCsv}
+              onChange={(e) => setScopesCsv(e.target.value)}
+              placeholder="vault:*:read, vault:*:write"
+            />
+          </label>
 
-        <label>
-          <span>Default vault</span>
-          <input
-            type="text"
-            value={vaultDefault}
-            onChange={(e) => setVaultDefault(e.target.value)}
-            placeholder="(optional, for single-vault UIs)"
-          />
-        </label>
+          <label className="form-field">
+            <span className="form-field__label">Default vault</span>
+            <input
+              type="text"
+              value={vaultDefault}
+              onChange={(e) => setVaultDefault(e.target.value)}
+              placeholder="(optional, for single-vault UIs)"
+            />
+          </label>
+        </fieldset>
 
-        <label>
+        <label className="form-checkbox">
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-          <span>Force (replace existing UI with the same name)</span>
+          <span>
+            <strong>Force</strong> — replace an existing UI with the same name.
+          </span>
         </label>
 
-        <button type="submit" disabled={submitting || source.trim().length === 0}>
-          {submitting ? "Adding…" : "Add UI"}
-        </button>
+        <div className="form-actions">
+          <button type="button" className="secondary" onClick={() => navigate("/")}>
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting || source.trim().length === 0}>
+            {submitting ? "Adding…" : "Add UI"}
+          </button>
+        </div>
       </form>
     </section>
   );

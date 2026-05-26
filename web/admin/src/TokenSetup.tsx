@@ -38,23 +38,29 @@ export function TokenSetup() {
   if (!editing && token.length > 0) {
     return (
       <div className="token-setup token-setup--collapsed">
-        <span>Token configured.</span>
-        <button type="button" onClick={() => setEditing(true)}>
-          Change
-        </button>
-        <button type="button" onClick={clear}>
-          Clear
-        </button>
-        {savedAt && <small>saved {new Date(savedAt).toLocaleTimeString()}</small>}
+        <span className="token-setup__status">
+          <span className="token-setup__dot" aria-hidden="true" />
+          Token configured
+        </span>
+        <div className="token-setup__actions">
+          <button type="button" className="secondary" onClick={() => setEditing(true)}>
+            Change
+          </button>
+          <button type="button" className="secondary" onClick={clear}>
+            Clear
+          </button>
+        </div>
+        {savedAt && <small className="muted">saved {new Date(savedAt).toLocaleTimeString()}</small>}
       </div>
     );
   }
 
   return (
     <div className="token-setup">
-      <p>
-        Paste an operator bearer with <code>app:admin</code> scope. Stored in
-        <code>localStorage["{TOKEN_STORAGE_KEY}"]</code> for this browser only.
+      <h3 className="token-setup__heading">Sign in to manage UIs</h3>
+      <p className="token-setup__hint">
+        Paste an operator bearer with <code>app:admin</code> scope. Mint one with{" "}
+        <code>parachute auth mint-token --scope app:admin</code>. Stored in this browser only.
       </p>
       <div className="token-setup__row">
         <input
@@ -62,7 +68,10 @@ export function TokenSetup() {
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder="eyJ..."
+          placeholder="eyJ…"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && token.trim().length > 0) save();
+          }}
         />
         <button type="button" onClick={save} disabled={token.trim().length === 0}>
           Save
