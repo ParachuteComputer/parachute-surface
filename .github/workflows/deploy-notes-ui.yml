@@ -58,6 +58,22 @@ jobs:
       - name: copy CNAME into dist
         run: cp packages/notes-ui/public/CNAME packages/notes-ui/dist/CNAME
 
+      # SPA fallback for GitHub Pages. Pages serves a static file tree —
+      # `/oauth/callback?code=…&state=…` (and any other client-side route)
+      # has no on-disk match and returns the default 404 page. Copying
+      # `index.html` to `404.html` flips that: Pages serves the SPA shell
+      # on every unknown path, the bundle boots, React Router parses the
+      # URL, and `/oauth/callback` lands at AddVault's completion handler.
+      #
+      # Doing the copy here (post-build, deploy-only) keeps it out of the
+      # npm-published `dist/` — parachute-surface consumers serve the bundle
+      # through hub's proxy where `404.html` is irrelevant. The copy
+      # depends on the freshly-built `dist/index.html` (asset hashes match
+      # by construction) — copying `public/index.html` would risk a
+      # template that lacks the production injection.
+      - name: emit 404.html (SPA fallback for GitHub Pages)
+        run: cp packages/notes-ui/dist/index.html packages/notes-ui/dist/404.html
+
       - name: upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
