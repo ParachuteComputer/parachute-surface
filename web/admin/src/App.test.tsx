@@ -36,7 +36,7 @@ describe("App shell", () => {
     // accessible name.
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading).toHaveTextContent(/Parachute/);
-    expect(heading).toHaveTextContent(/app/);
+    expect(heading).toHaveTextContent(/surface/);
     expect(screen.getByRole("link", { name: "Parachute · app" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Modules" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add UI" })).toBeInTheDocument();

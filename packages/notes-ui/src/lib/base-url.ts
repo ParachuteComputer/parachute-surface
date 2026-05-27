@@ -7,15 +7,15 @@
  *   depending on who hosts it:
  *
  *     - Legacy notes-daemon          → `/notes/`
- *     - parachute-app (default name) → `/app/notes/`
- *     - parachute-app (custom slug)  → `/app/<name>/`
+ *     - parachute-surface (default name) → `/surface/notes/`
+ *     - parachute-surface (custom slug)  → `/surface/<name>/`
  *
  *   Hard-coding `base: "/notes"` at Vite build time (the old shape)
  *   bakes asset URLs and the React Router basename into one mount —
  *   the bundle can't relocate without a rebuild. That's exactly the
  *   bug Aaron hit: the published 0.1.0 bundle 404'd / mis-routed when
- *   parachute-app mounted it at `/app/notes/`, because `<Router
- *   basename="/notes">` refused to match `/app/notes/...` and the
+ *   parachute-surface mounted it at `/surface/notes/`, because `<Router
+ *   basename="/notes">` refused to match `/surface/notes/...` and the
  *   OAuth redirect URI registered with the AS pointed at the wrong
  *   path.
  *
@@ -34,11 +34,11 @@
  *   URLs. Recognised mount shapes (regex fallback for pathname-based
  *   callers):
  *
- *     - `/app/<slug>` — parachute-app hosts (the future-default)
+ *     - `/surface/<slug>` — parachute-surface hosts (the future-default)
  *     - `/notes`     — legacy notes-daemon host (preserved for
  *                       back-compat through notes-daemon's retirement)
  *
- *   Slug grammar matches parachute-app's `meta-schema.ts` `PATH_PATTERN`
+ *   Slug grammar matches parachute-surface's `meta-schema.ts` `PATH_PATTERN`
  *   (single segment of `[a-z0-9][a-z0-9_-]*`). Anything else falls
  *   back to `/notes` so an unmounted load (operator types the bare
  *   origin) still degrades into the historical default rather than
@@ -49,7 +49,7 @@
  *   default — so tests that don't explicitly stub a path keep the
  *   pre-refactor behaviour.
  *
- *   Canonical path (meta-tag) delegates to `@openparachute/app-client`'s
+ *   Canonical path (meta-tag) delegates to `@openparachute/surface-client`'s
  *   `getMountBase()` so every Parachute app reads the runtime tenancy
  *   contract through the same library. The local regex fallback stays
  *   here for the pathname-passing callers (sw-bootstrap) — app-client's
@@ -57,21 +57,21 @@
  *   and returns `null` when no tag is present.
  */
 
-import { getMountBase } from "@openparachute/app-client";
+import { getMountBase } from "@openparachute/surface-client";
 
 /**
  * Recognised mount-prefix patterns. Order matters — most specific first.
  *
- *   - `/app/<slug>`: parachute-app hosts. Slug matches PATH_PATTERN
- *     in parachute-app's meta-schema. The capture group is the full
+ *   - `/surface/<slug>`: parachute-surface hosts. Slug matches PATH_PATTERN
+ *     in parachute-surface's meta-schema. The capture group is the full
  *     two-segment prefix (slash included) so the regex match returns
- *     `/app/notes` directly.
+ *     `/surface/notes` directly.
  *   - `/notes`: legacy notes-daemon mount. Preserved as a recognised
  *     shape until notes-daemon is fully retired (Phase 4 of the
  *     migration arc per parachute.computer design doc §16).
  */
 const MOUNT_PATTERNS: readonly RegExp[] = [
-  /^(\/app\/[a-z0-9][a-z0-9_-]*)(?=\/|$)/,
+  /^(\/surface\/[a-z0-9][a-z0-9_-]*)(?=\/|$)/,
   /^(\/notes)(?=\/|$)/,
 ] as const;
 
@@ -83,10 +83,10 @@ const LEGACY_FALLBACK = "/notes" as const;
  *
  * Two-tier resolution:
  *
- *   1. **Canonical** — `getMountBase()` from `@openparachute/app-client`
- *      reads `<meta name="parachute-mount" content="/app/<name>">` from
+ *   1. **Canonical** — `getMountBase()` from `@openparachute/surface-client`
+ *      reads `<meta name="parachute-mount" content="/surface/<name>">` from
  *      the host-supplied document. This is the load-bearing path once
- *      parachute-app injects the meta tag (shipped in app#25).
+ *      parachute-surface injects the meta tag (shipped in app#25).
  *   2. **Pathname fallback** — when a `pathname` is supplied (sw-bootstrap
  *      passes one for the SW gate), regex-match against the recognised
  *      mount patterns. Without a pathname and without a meta tag, fall
@@ -123,7 +123,7 @@ export function detectMountBase(pathname?: string, doc?: Document): string {
 /**
  * Convenience accessor: the mount base with a trailing slash, suitable
  * for building absolute URLs (e.g. PWA manifest start_url, OAuth
- * callback construction). `/app/notes` → `/app/notes/`.
+ * callback construction). `/surface/notes` → `/surface/notes/`.
  */
 export function detectMountBaseWithSlash(pathname?: string, doc?: Document): string {
   const base = detectMountBase(pathname, doc);

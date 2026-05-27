@@ -16,7 +16,7 @@ function mockFetch(response: { ok?: boolean; status?: number; json?: unknown; te
 
 // Tests in this file cover ONLY the Notes-specific surface on
 // `VaultClient` — the methods Notes adds on top of
-// `@openparachute/app-client`'s base class:
+// `@openparachute/surface-client`'s base class:
 //
 //   - `linkAttachment` (Notes-only alias of base `addAttachment`)
 //   - `renameTag` / `mergeTags` / `deleteTag` (tag-curation)
@@ -25,8 +25,8 @@ function mockFetch(response: { ok?: boolean; status?: number; json?: unknown; te
 //
 // The shared request loop (auto-refresh on 401/403, reachability
 // signals, structured error classification) is covered by app-client's
-// own test suite (`packages/app-client/src/__tests__/vault-client.test.ts`
-// in parachute-app). Re-asserting those behaviors here would be
+// own test suite (`packages/surface-client/src/__tests__/vault-client.test.ts`
+// in parachute-surface). Re-asserting those behaviors here would be
 // redundant and slow.
 
 describe("VaultClient (Notes subclass) — Notes-only endpoints", () => {

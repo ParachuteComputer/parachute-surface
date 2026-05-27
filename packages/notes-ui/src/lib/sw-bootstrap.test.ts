@@ -9,8 +9,8 @@ import {
 //
 // The contract: notes-ui builds with a fixed mount baked into the PWA
 // manifest + service-worker precache (default `/notes/`). When the same
-// `dist/` is served at a different runtime mount (e.g. `/app/notes/`
-// under parachute-app), we must NOT register the SW — its scope would
+// `dist/` is served at a different runtime mount (e.g. `/surface/notes/`
+// under parachute-surface), we must NOT register the SW — its scope would
 // straddle a precache table built for the wrong path, breaking every
 // navigation. And we must also unregister any stale SW left behind by a
 // pre-0.1.2 install that auto-registered before this gate existed.
@@ -34,17 +34,17 @@ describe("shouldRegisterServiceWorker", () => {
     expect(shouldRegisterServiceWorker("/notes/n/abc123")).toBe(true);
   });
 
-  it("returns false when the runtime mount is parachute-app's /app/notes/", () => {
-    // The bug: bundle built for /notes/, served at /app/notes/.
-    expect(shouldRegisterServiceWorker("/app/notes/")).toBe(false);
+  it("returns false when the runtime mount is parachute-surface's /surface/notes/", () => {
+    // The bug: bundle built for /notes/, served at /surface/notes/.
+    expect(shouldRegisterServiceWorker("/surface/notes/")).toBe(false);
   });
 
   it("returns false for a custom-slug app mount", () => {
-    expect(shouldRegisterServiceWorker("/app/my-notes/")).toBe(false);
+    expect(shouldRegisterServiceWorker("/surface/my-notes/")).toBe(false);
   });
 
   it("returns false for an OAuth callback under a mismatched mount (the exact scenario Aaron hit)", () => {
-    expect(shouldRegisterServiceWorker("/app/notes/oauth/callback")).toBe(false);
+    expect(shouldRegisterServiceWorker("/surface/notes/oauth/callback")).toBe(false);
   });
 });
 
@@ -67,10 +67,10 @@ describe("cleanupStaleServiceWorker", () => {
     } as unknown as Navigator;
   }
 
-  it("unregisters a stale /notes/-scoped SW when running under /app/notes/", async () => {
+  it("unregisters a stale /notes/-scoped SW when running under /surface/notes/", async () => {
     const stale = fakeRegistration("https://hub.example.com/notes/");
     const nav = fakeNavigator([stale]);
-    const count = await cleanupStaleServiceWorker(nav, "/app/notes/");
+    const count = await cleanupStaleServiceWorker(nav, "/surface/notes/");
     expect(count).toBe(1);
     expect(stale.unregister).toHaveBeenCalledTimes(1);
   });
@@ -83,11 +83,11 @@ describe("cleanupStaleServiceWorker", () => {
     expect(matching.unregister).not.toHaveBeenCalled();
   });
 
-  it("unregisters a stale /app/old-notes/ SW when the runtime mount is /app/notes/", async () => {
+  it("unregisters a stale /surface/old-notes/ SW when the runtime mount is /surface/notes/", async () => {
     // Operator renamed their app install — the previous slug's SW is now stale.
-    const stale = fakeRegistration("https://hub.example.com/app/old-notes/");
+    const stale = fakeRegistration("https://hub.example.com/surface/old-notes/");
     const nav = fakeNavigator([stale]);
-    const count = await cleanupStaleServiceWorker(nav, "/app/notes/");
+    const count = await cleanupStaleServiceWorker(nav, "/surface/notes/");
     expect(count).toBe(1);
     expect(stale.unregister).toHaveBeenCalledTimes(1);
   });
@@ -96,7 +96,7 @@ describe("cleanupStaleServiceWorker", () => {
     // Defensive: don't clobber unrelated SWs on the same origin.
     const unrelated = fakeRegistration("https://hub.example.com/some-other-app/");
     const nav = fakeNavigator([unrelated]);
-    const count = await cleanupStaleServiceWorker(nav, "/app/notes/");
+    const count = await cleanupStaleServiceWorker(nav, "/surface/notes/");
     expect(count).toBe(0);
     expect(unrelated.unregister).not.toHaveBeenCalled();
   });
@@ -117,9 +117,9 @@ describe("cleanupStaleServiceWorker", () => {
       "https://hub.example.com/notes/",
       vi.fn().mockRejectedValue(new Error("boom")),
     );
-    const succeeding = fakeRegistration("https://hub.example.com/app/old-notes/");
+    const succeeding = fakeRegistration("https://hub.example.com/surface/old-notes/");
     const nav = fakeNavigator([failing, succeeding]);
-    const count = await cleanupStaleServiceWorker(nav, "/app/notes/");
+    const count = await cleanupStaleServiceWorker(nav, "/surface/notes/");
     // Only the second one succeeds; the first throws inside the loop's
     // try/catch and bumps no counter.
     expect(count).toBe(1);
@@ -128,9 +128,9 @@ describe("cleanupStaleServiceWorker", () => {
 
   it("unregisters multiple stale SWs in one pass", async () => {
     const a = fakeRegistration("https://hub.example.com/notes/");
-    const b = fakeRegistration("https://hub.example.com/app/other-notes/");
+    const b = fakeRegistration("https://hub.example.com/surface/other-notes/");
     const nav = fakeNavigator([a, b]);
-    const count = await cleanupStaleServiceWorker(nav, "/app/notes/");
+    const count = await cleanupStaleServiceWorker(nav, "/surface/notes/");
     expect(count).toBe(2);
     expect(a.unregister).toHaveBeenCalledTimes(1);
     expect(b.unregister).toHaveBeenCalledTimes(1);

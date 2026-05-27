@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isIOS, isStandalone } from "./pwa";
 
 // `reloadAfterServiceWorkerUpdate` + `SW_RELOAD_FALLBACK_MS` were lifted
-// into `@openparachute/app-client/sw-reload` during Phase 2 (parachute-
+// into `@openparachute/surface-client/sw-reload` during Phase 2 (parachute-
 // app#6). Their behavior tests now live in app-client's own suite —
 // re-running them here would be redundant. Notes keeps the platform
 // sniffers (`isStandalone`, `isIOS`) covered locally because they're

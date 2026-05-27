@@ -17,7 +17,7 @@ function withFetchMock(handler: typeof fetch) {
 }
 
 /**
- * Build a fake fetch that handles `/app/list`, `/app/dev/list`, and any
+ * Build a fake fetch that handles `/surface/list`, `/surface/dev/list`, and any
  * additional routes via the supplied `extras` map. Test-only convenience
  * — every Modules test fetches both endpoints in parallel.
  */
@@ -35,7 +35,7 @@ function buildFetch(opts: {
   return vi.fn((url: string, init?: RequestInit) => {
     const extra = opts.extras?.(url, init);
     if (extra) return Promise.resolve(extra);
-    if (url.endsWith("/app/dev/list")) {
+    if (url.endsWith("/surface/dev/list")) {
       return Promise.resolve(
         new Response(JSON.stringify({ uis: devUis }), {
           status: 200,
@@ -43,7 +43,7 @@ function buildFetch(opts: {
         }),
       );
     }
-    if (url.endsWith("/app/list")) {
+    if (url.endsWith("/surface/list")) {
       const status = opts.listStatus ?? 200;
       const body = opts.listBody ?? { uis, skipped };
       return Promise.resolve(
@@ -89,7 +89,7 @@ describe("Modules", () => {
             name: "notes",
             dirName: "notes",
             displayName: "Notes",
-            path: "/app/notes",
+            path: "/surface/notes",
             version: "0.1.0",
             scopes_required: ["vault:*:read", "vault:*:write"],
             pwa: true,
@@ -103,7 +103,7 @@ describe("Modules", () => {
     );
     renderWithRouter();
     expect(await screen.findByText("Notes")).toBeInTheDocument();
-    expect(screen.getByText("/app/notes")).toBeInTheDocument();
+    expect(screen.getByText("/surface/notes")).toBeInTheDocument();
     // Card layout (post-redesign) doesn't render the raw OAuth client_id as
     // visible text — it surfaces as a `title` attribute on the OAuth-status
     // badge so operators see "OAuth connected" / "OAuth pending" at a glance.
@@ -125,7 +125,7 @@ describe("Modules", () => {
     expect(alert.textContent).toContain("HTTP 401");
   });
 
-  test("Reload button triggers POST /app/<name>/reload", async () => {
+  test("Reload button triggers POST /surface/<name>/reload", async () => {
     const callLog: Array<{ url: string; method: string }> = [];
     const fakeFetch = vi.fn((url: string, init?: RequestInit) => {
       callLog.push({ url, method: init?.method ?? "GET" });
@@ -134,7 +134,7 @@ describe("Modules", () => {
           new Response(JSON.stringify({ ok: true, ui: null }), { status: 200 }),
         );
       }
-      if (url.endsWith("/app/dev/list")) {
+      if (url.endsWith("/surface/dev/list")) {
         return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
       }
       return Promise.resolve(
@@ -145,7 +145,7 @@ describe("Modules", () => {
                 name: "alpha",
                 dirName: "alpha",
                 displayName: "Alpha",
-                path: "/app/alpha",
+                path: "/surface/alpha",
                 scopes_required: [],
                 pwa: false,
                 public: false,
@@ -179,7 +179,7 @@ describe("Modules", () => {
           new Response(JSON.stringify({ ok: true, removed: "alpha" }), { status: 200 }),
         );
       }
-      if (url.endsWith("/app/dev/list")) {
+      if (url.endsWith("/surface/dev/list")) {
         return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
       }
       return Promise.resolve(
@@ -190,7 +190,7 @@ describe("Modules", () => {
                 name: "alpha",
                 dirName: "alpha",
                 displayName: "Alpha",
-                path: "/app/alpha",
+                path: "/surface/alpha",
                 scopes_required: [],
                 pwa: false,
                 public: false,
@@ -211,7 +211,7 @@ describe("Modules", () => {
     await waitFor(() => {
       const del = callLog.find((c) => c.method === "DELETE");
       expect(del).toBeTruthy();
-      expect(del?.url).toContain("/app/alpha");
+      expect(del?.url).toContain("/surface/alpha");
     });
   });
 
@@ -225,7 +225,7 @@ describe("Modules", () => {
             name: "alpha",
             dirName: "alpha",
             displayName: "Alpha",
-            path: "/app/alpha",
+            path: "/surface/alpha",
             scopes_required: [],
             pwa: false,
             public: false,
@@ -249,7 +249,7 @@ describe("Modules", () => {
             name: "alpha",
             dirName: "alpha",
             displayName: "Alpha",
-            path: "/app/alpha",
+            path: "/surface/alpha",
             scopes_required: [],
             pwa: false,
             public: false,
@@ -286,7 +286,7 @@ describe("Modules", () => {
           ),
         );
       }
-      if (url.endsWith("/app/dev/list")) {
+      if (url.endsWith("/surface/dev/list")) {
         return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
       }
       return Promise.resolve(
@@ -297,7 +297,7 @@ describe("Modules", () => {
                 name: "alpha",
                 dirName: "alpha",
                 displayName: "Alpha",
-                path: "/app/alpha",
+                path: "/surface/alpha",
                 scopes_required: [],
                 pwa: false,
                 public: false,
@@ -317,7 +317,7 @@ describe("Modules", () => {
     await waitFor(() => {
       const post = callLog.find((c) => c.method === "POST" && c.url.endsWith("/dev/enable"));
       expect(post).toBeTruthy();
-      expect(post?.url).toContain("/app/alpha/dev/enable");
+      expect(post?.url).toContain("/surface/alpha/dev/enable");
     });
   });
 
@@ -331,7 +331,7 @@ describe("Modules", () => {
           new Response(JSON.stringify({ ok: true, name: "alpha", notified: 1 }), { status: 200 }),
         );
       }
-      if (url.endsWith("/app/dev/list")) {
+      if (url.endsWith("/surface/dev/list")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -349,7 +349,7 @@ describe("Modules", () => {
                 name: "alpha",
                 dirName: "alpha",
                 displayName: "Alpha",
-                path: "/app/alpha",
+                path: "/surface/alpha",
                 scopes_required: [],
                 pwa: false,
                 public: false,
@@ -369,7 +369,7 @@ describe("Modules", () => {
     await waitFor(() => {
       const post = callLog.find((c) => c.method === "POST" && c.url.endsWith("/dev/trigger"));
       expect(post).toBeTruthy();
-      expect(post?.url).toContain("/app/alpha/dev/trigger");
+      expect(post?.url).toContain("/surface/alpha/dev/trigger");
     });
   });
 
@@ -381,7 +381,7 @@ describe("Modules", () => {
             name: "notes",
             dirName: "notes",
             displayName: "Notes",
-            path: "/app/notes",
+            path: "/surface/notes",
             scopes_required: [],
             pwa: false,
             public: false,
@@ -414,7 +414,7 @@ describe("Modules", () => {
             name: "alpha",
             dirName: "alpha",
             displayName: "Alpha",
-            path: "/app/alpha",
+            path: "/surface/alpha",
             scopes_required: [],
             pwa: false,
             public: false,
@@ -440,7 +440,7 @@ describe("Modules", () => {
           }),
         );
       }
-      if (url.endsWith("/app/dev/list")) {
+      if (url.endsWith("/surface/dev/list")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -458,7 +458,7 @@ describe("Modules", () => {
                 name: "alpha",
                 dirName: "alpha",
                 displayName: "Alpha",
-                path: "/app/alpha",
+                path: "/surface/alpha",
                 scopes_required: [],
                 pwa: false,
                 public: false,
@@ -478,7 +478,7 @@ describe("Modules", () => {
     await waitFor(() => {
       const post = callLog.find((c) => c.method === "POST" && c.url.endsWith("/dev/disable"));
       expect(post).toBeTruthy();
-      expect(post?.url).toContain("/app/alpha/dev/disable");
+      expect(post?.url).toContain("/surface/alpha/dev/disable");
     });
   });
 });

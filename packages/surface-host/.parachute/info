@@ -1,0 +1,14 @@
+{
+  "name": "parachute-surface",
+  "displayName": "Surface",
+  "tagline": "Host module for custom Parachute surfaces — drop a built bundle in and serve it under one origin.",
+  "version": "0.2.0",
+  "capabilities": [
+    "ui-host",
+    "oauth-client-registration",
+    "admin-spa",
+    "dev-mode-sse",
+    "bootstrap-default-apps",
+    "auto-provision-schema"
+  ]
+}

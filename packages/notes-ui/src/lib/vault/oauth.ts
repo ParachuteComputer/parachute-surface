@@ -1,5 +1,5 @@
 /**
- * Notes' OAuth flow — orchestrates `@openparachute/app-client`'s PKCE +
+ * Notes' OAuth flow — orchestrates `@openparachute/surface-client`'s PKCE +
  * discovery + DCR primitives around Notes-specific concerns:
  *
  *   - `priorHaltedVaultId` round-trip via sessionStorage (notes#148) so
@@ -12,7 +12,7 @@
  *     historical localStorage entries rather than re-DCR on first load.
  *   - `redirectUriForOrigin` derived from `detectMountBase()` so
  *     a hub-mounted Notes (`/notes/`), a parachute-app-mounted Notes
- *     (`/app/notes/`), and a renamed-install Notes (`/app/<slug>/`)
+ *     (`/surface/notes/`), and a renamed-install Notes (`/surface/<slug>/`)
  *     all land back on a URL the SPA actually serves. The detector
  *     reads from `window.location.pathname` at call time — the same
  *     built bundle picks up the correct mount regardless of where
@@ -34,7 +34,7 @@ import {
   generateCodeVerifier,
   generateState,
   storedFromTokenResponse,
-} from "@openparachute/app-client";
+} from "@openparachute/surface-client";
 import { detectMountBase } from "../base-url";
 import { discoverAuthServer, registerClient } from "./discovery";
 import {
@@ -63,8 +63,8 @@ export const DEFAULT_SCOPE: TokenScope = "vault:read vault:write";
 // Notes can be mounted at several paths depending on the host:
 //
 //   - `/notes/`          (legacy notes-daemon)
-//   - `/app/notes/`      (parachute-app default)
-//   - `/app/<slug>/`     (parachute-app with a renamed install)
+//   - `/surface/notes/`      (parachute-surface default)
+//   - `/surface/<slug>/`     (parachute-surface with a renamed install)
 //
 // The OAuth callback must include the live mount prefix so the
 // authorization server bounces the browser back to a URL the SPA

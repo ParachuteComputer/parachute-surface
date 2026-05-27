@@ -181,7 +181,7 @@ export function Modules() {
         <div className="empty empty-rich">
           <p className="empty-headline">No UIs installed yet.</p>
           <p className="muted">
-            UIs are React or static bundles that mount under <code>/app/&lt;name&gt;/</code>.
+            UIs are React or static bundles that mount under <code>/surface/&lt;name&gt;/</code>.
             Notes ships as the canonical first UI; add your own to host bespoke apps next to it.
           </p>
           <Link to="/add" className="btn btn-primary" style={{ marginTop: "0.75rem" }}>

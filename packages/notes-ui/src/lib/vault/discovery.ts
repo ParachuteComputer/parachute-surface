@@ -1,6 +1,6 @@
 /**
  * AS-metadata discovery + DCR — thin Notes wrapper over
- * `@openparachute/app-client`'s helpers.
+ * `@openparachute/surface-client`'s helpers.
  *
  * Phase 2 of the notes-migration-to-app arc (parachute-app#6, design doc
  * section 16) moved both functions into app-client. Notes keeps a thin
@@ -14,7 +14,7 @@ import {
   type ClientRegistration,
   discoverAuthServer as appClientDiscoverAuthServer,
   registerClient as appClientRegisterClient,
-} from "@openparachute/app-client";
+} from "@openparachute/surface-client";
 
 const NOTES_CLIENT_NAME = "Parachute Notes";
 
