@@ -78,12 +78,21 @@ function parseBlock(text: string): Record<string, unknown> {
     const valueText = (match[2] ?? "").trim();
 
     if (valueText === "") {
-      // Block-form value: peek ahead. If the next non-blank line is
-      // indented and starts with `- `, parse a block array. Otherwise
-      // emit the key with an empty string — we don't support nested
-      // objects in v1 (no Obsidian shape needs them).
+      // Block-form value: peek ahead. If the next non-blank line starts
+      // with `- `, parse a block array. Otherwise emit the key with an
+      // empty string — we don't support nested objects in v1 (no
+      // Obsidian shape needs them).
+      //
+      // Don't gate on `indent > 0` — Obsidian's Properties panel emits
+      // zero-indented block arrays for tags / aliases, e.g.
+      //   tags:
+      //   - work
+      //   - idea
+      // Gating on indent previously silently dropped these into an
+      // empty-string value, which `mergeTags` then dissolved with no
+      // error surfaced — note created without tags. Reviewer fold on #47.
       const peek = peekNextNonBlank(lines, i + 1);
-      if (peek?.line.trimStart().startsWith("- ") && peek.indent > 0) {
+      if (peek?.line.trimStart().startsWith("- ")) {
         const { items, consumed } = parseBlockArray(lines, i + 1, peek.indent);
         out[key] = items;
         i = i + 1 + consumed;

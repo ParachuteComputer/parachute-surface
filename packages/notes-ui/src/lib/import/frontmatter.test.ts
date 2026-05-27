@@ -33,6 +33,21 @@ describe("parseFrontmatter", () => {
     expect(out.content).toBe("body");
   });
 
+  it("parses zero-indent block-form tag arrays (Obsidian Properties panel shape)", () => {
+    // Obsidian's Properties panel emits block arrays at zero indent, e.g.
+    //   tags:
+    //   - work
+    //   - idea
+    // Previously the parser gated block-array detection on `peek.indent > 0`
+    // and silently dropped these into an empty-string value, which
+    // `mergeTags` then dissolved with no error surfaced. Reviewer-caught
+    // on #47.
+    const raw = "---\ntags:\n- work\n- idea\n---\nbody";
+    const out = parseFrontmatter(raw);
+    expect(out.data).toEqual({ tags: ["work", "idea"] });
+    expect(out.content).toBe("body");
+  });
+
   it("respects quoted strings (commas + special chars)", () => {
     const raw = "---\ntitle: \"Hello, world\"\nnote: 'don''t panic'\n---\nx";
     const out = parseFrontmatter(raw);
