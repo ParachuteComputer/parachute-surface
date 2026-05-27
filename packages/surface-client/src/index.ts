@@ -50,9 +50,12 @@ export { discoverAuthServer, registerClient, type RegisterClientOpts } from "./d
 // Vault REST client + structured errors.
 export {
   VaultClient,
+  VaultError,
   VaultAuthError,
+  VaultPermissionError,
   VaultNotFoundError,
   VaultUnreachableError,
+  VaultServerError,
   VaultConflictError,
   VaultTargetExistsError,
   VaultUploadError,
@@ -72,6 +75,7 @@ export type {
   TagUpsertPayload,
   UpdateNotePayload,
   CreateNotePayload,
+  FindPathResult,
   StorageUploadResult,
   UploadProgress,
   ReachabilitySignal,

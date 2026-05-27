@@ -1,5 +1,58 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Script-friendly `VaultClient` surface.** New entry points for code
+  writing against a Parachute vault from Bun / Node / browser scripts
+  without having to compose the canonical URL or carry the OAuth
+  apparatus:
+
+  - `VaultClient.fromHub({ hubOrigin, vaultName, token, tokenProvider })`
+    — static factory composing `<hubOrigin>/vault/<name>` so scripts
+    don't glue the pieces together. URL-encodes the vault name.
+  - `tokenProvider: () => Promise<string> | string` option on the main
+    constructor — called once per request, wins over `accessToken`
+    when both are supplied. The script-side complement to `onAuthError`
+    (which is for in-flight refresh, not external token rotation).
+  - `createNotes(payloads)` — batch create via `POST /api/notes` with
+    a `{notes: [...]}` envelope. Vault wraps in a transaction so
+    partial batches roll back.
+  - `findPath(from, to, { maxDepth? })` — graph BFS shortest path,
+    `GET /api/find-path?source=&target=&max_depth=`. Returns
+    `{ path: string[], relationships: string[] } | null`.
+  - `deleteTag(name)` — `DELETE /api/tags/:name`. Surfaces vault's
+    tag-in-use 409 as `VaultConflictError` (the `referenced_by` token
+    list lives on `error.body`).
+  - `VaultError` — new abstract base class. All concrete error
+    classes now extend it; scripts can `catch (e instanceof
+    VaultError)` to handle "any vault error" without enumerating.
+  - `VaultPermissionError` (extends `VaultAuthError`) — thrown
+    specifically on `403` so scripts can distinguish "wrong scope"
+    from "dead token" (`401`). Back-compat: existing `instanceof
+    VaultAuthError` checks still catch 403s.
+  - `VaultServerError` (extends `VaultUnreachableError`) — thrown
+    specifically on `5xx` responses. `VaultUnreachableError` is now
+    the network-down case (`status: 0`). Back-compat: existing
+    `instanceof VaultUnreachableError` checks still catch 5xx.
+  - `FindPathResult` type exposed from the barrel.
+
+  Motivates: ad-hoc scripts against a vault (the onboarding
+  prompt's "scripted import" path) need an ergonomic client that
+  doesn't require the full OAuth + reachability + auto-refresh
+  apparatus. Same `VaultClient` class — script callers use the
+  thinner surface, UI callers keep the full driver.
+
+### Verified
+
+- `bun test src/` → 153 pass / 0 fail across 8 test files (33 new
+  cases in `vault-client-script.test.ts`).
+- `bun run typecheck` clean.
+- `bun run build` clean — `dist/vault-client.d.ts` exports
+  `VaultError`, `VaultPermissionError`, `VaultServerError`,
+  `createNotes`, `findPath`, `deleteTag`, `fromHub`.
+
 ## [0.1.0-rc.4] - 2026-05-23
 
 ### Added

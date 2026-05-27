@@ -40,6 +40,7 @@
 
 import type {
   CreateNotePayload,
+  FindPathResult,
   Note,
   NoteAttachment,
   ReachabilitySignal,
@@ -52,7 +53,30 @@ import type {
   VaultInfo,
 } from "./vault-types.js";
 
-export class VaultUploadError extends Error {
+/**
+ * Common base class for every `VaultClient` error.
+ *
+ * Callers that want to handle "anything the client threw" can `catch (e
+ * instanceof VaultError)` without enumerating every subclass; callers
+ * that want fine-grained handling can `instanceof` the specific
+ * subclass. Every concrete error carries `status` (HTTP status, or `0`
+ * for pre-flight network failures) and an optional `body` (raw response
+ * body when one was available) — both useful for `console.error` /
+ * log-line diagnosis from scripts.
+ */
+export abstract class VaultError extends Error {
+  /** HTTP status, or `0` for a network-level failure with no response. */
+  abstract readonly status: number;
+  /** Raw response body, when one was available. */
+  readonly body?: string;
+  constructor(message: string, body?: string) {
+    super(message);
+    this.name = "VaultError";
+    if (body !== undefined) this.body = body;
+  }
+}
+
+export class VaultUploadError extends VaultError {
   readonly status: number;
   constructor(message: string, status: number) {
     super(message);
@@ -72,46 +96,85 @@ export class VaultUploadError extends Error {
  *   - `tag_scope_violation` — tag-scoped pvt_ token violation on a write.
  *   - `undefined` — vault returned a 401 without a discriminator
  *     (signature, audience, expired, revoked).
+ *
+ * 403 responses surface as `VaultPermissionError` (a subclass of this)
+ * so script callers can distinguish "token's identity is broken" (401)
+ * from "token identity is fine but it lacks the scope" (403) with
+ * `instanceof VaultPermissionError`. Callers that just want "auth
+ * failed" continue to work with `instanceof VaultAuthError`.
  */
-export class VaultAuthError extends Error {
+export class VaultAuthError extends VaultError {
   readonly status: number;
   readonly errorType?: string;
-  readonly body?: string;
   constructor(
     message = "Vault rejected the token",
     status = 0,
     opts: { errorType?: string; body?: string } = {},
   ) {
-    super(message);
+    super(message, opts.body);
     this.name = "VaultAuthError";
     this.status = status;
     if (opts.errorType) this.errorType = opts.errorType;
-    if (opts.body) this.body = opts.body;
   }
 }
 
-export class VaultNotFoundError extends Error {
-  constructor(message = "Not found") {
-    super(message);
+/**
+ * Thrown specifically on a 403 from the vault — the token authenticated
+ * but lacks the scope needed for this endpoint. Extends `VaultAuthError`
+ * so existing consumers that catch `VaultAuthError` keep working; new
+ * consumers can branch on `instanceof VaultPermissionError` for the
+ * "ask the operator to reissue with a wider scope" UX vs the
+ * "token is dead / expired, re-auth" UX of a bare `VaultAuthError`.
+ */
+export class VaultPermissionError extends VaultAuthError {
+  constructor(message = "Insufficient permission", opts: { errorType?: string; body?: string } = {}) {
+    super(message, 403, opts);
+    this.name = "VaultPermissionError";
+  }
+}
+
+export class VaultNotFoundError extends VaultError {
+  readonly status = 404;
+  constructor(message = "Not found", body?: string) {
+    super(message, body);
     this.name = "VaultNotFoundError";
   }
 }
 
 /**
- * Thrown when the vault is unreachable — 5xx from the proxy or network-
- * level failure (ECONNREFUSED, DNS, TypeError). `status` is 0 for
- * network errors that never produced a response.
+ * Thrown when the vault is unreachable — network-level failure
+ * (ECONNREFUSED, DNS, TypeError) with `status === 0` and no response
+ * body. For 5xx responses (vault answered with an error), use the
+ * `VaultServerError` subclass; both share this base so the
+ * `try/catch VaultUnreachableError` shape works for "vault is having
+ * a bad time, either way" handling.
  */
-export class VaultUnreachableError extends Error {
+export class VaultUnreachableError extends VaultError {
   readonly status: number;
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(message: string, status: number, body?: string) {
+    super(message, body);
     this.name = "VaultUnreachableError";
     this.status = status;
   }
 }
 
-export class VaultConflictError extends Error {
+/**
+ * Thrown when the vault answered with a 5xx — the request reached vault
+ * (or its proxy) but the server returned an error. Extends
+ * `VaultUnreachableError` so existing consumers that branch on
+ * "is the vault healthy?" keep working; scripts that want to log a
+ * different message for "server error" vs "network down" can branch
+ * on `instanceof VaultServerError`.
+ */
+export class VaultServerError extends VaultUnreachableError {
+  constructor(message: string, status: number, body?: string) {
+    super(message, status, body);
+    this.name = "VaultServerError";
+  }
+}
+
+export class VaultConflictError extends VaultError {
+  readonly status = 409;
   readonly currentUpdatedAt: string | null;
   readonly expectedUpdatedAt: string | null;
   constructor(body: {
@@ -119,14 +182,15 @@ export class VaultConflictError extends Error {
     expected_updated_at?: string | null;
     message?: string;
   }) {
-    super(body.message ?? "Note was edited elsewhere");
+    super(body.message ?? "Note was edited elsewhere", JSON.stringify(body));
     this.name = "VaultConflictError";
     this.currentUpdatedAt = body.current_updated_at ?? null;
     this.expectedUpdatedAt = body.expected_updated_at ?? null;
   }
 }
 
-export class VaultTargetExistsError extends Error {
+export class VaultTargetExistsError extends VaultError {
+  readonly status = 409;
   readonly target: string;
   constructor(target: string, message?: string) {
     super(message ?? `A tag named "${target}" already exists`);
@@ -137,7 +201,27 @@ export class VaultTargetExistsError extends Error {
 
 export interface VaultClientOptions {
   vaultUrl: string;
-  accessToken: string;
+  /**
+   * Static access token to send as `Authorization: Bearer <token>` on
+   * every request. Either this or `tokenProvider` must be supplied.
+   * If both are supplied, `tokenProvider` wins (the static token is
+   * ignored — passing both is a programmer mistake, not a fallback).
+   */
+  accessToken?: string;
+  /**
+   * Callback resolving to a token for the next request. Called once per
+   * request before sending; the resolved value is used as the Bearer
+   * credential. Use this when the calling code owns a refresh-flow loop
+   * (the OAuth layer in `surface-client/oauth.ts`, or a script that
+   * mints fresh tokens from a long-lived credential) — return the
+   * current valid token from your loop.
+   *
+   * Errors thrown from `tokenProvider` propagate to the caller
+   * unchanged; they're not converted to `VaultAuthError`. This is
+   * intentional — a token-provider failure is the caller's failure
+   * domain, not vault's.
+   */
+  tokenProvider?: () => Promise<string> | string;
   fetchImpl?: typeof fetch;
   xhrFactory?: () => XMLHttpRequest;
   /**
@@ -145,6 +229,11 @@ export interface VaultClientOptions {
    * token exchange and return the fresh access token, or `null` if
    * refresh is not possible (legacy `pvt_*` token, no refresh token, or
    * refresh failed). Without this, the first 401 throws immediately.
+   *
+   * Note: when `tokenProvider` is supplied, the post-retry token comes
+   * from a fresh `tokenProvider()` call — the `onAuthError` return is
+   * still honored (rotates the in-memory cache) but the next request
+   * will re-call `tokenProvider` regardless.
    */
   onAuthError?: () => Promise<string | null>;
   /**
@@ -175,6 +264,13 @@ export class VaultClient {
   private readonly baseUrl: string;
   /** Mutable so a successful refresh-on-401 retry can rotate in-place. */
   private token: string;
+  /**
+   * When set, called once per request to resolve the Bearer token. Wins
+   * over `token` (the cached static value). The cache field still gets
+   * rotated on `setAccessToken` / `onAuthError`-returned-fresh so
+   * subclasses that read it directly continue to see the latest value.
+   */
+  private readonly tokenProvider?: () => Promise<string> | string;
   private readonly fetchImpl: typeof fetch;
   private readonly xhrFactory: () => XMLHttpRequest;
   private readonly onAuthError?: () => Promise<string | null>;
@@ -185,8 +281,13 @@ export class VaultClient {
   private readonly onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
 
   constructor(opts: VaultClientOptions) {
+    if (opts.accessToken === undefined && opts.tokenProvider === undefined) {
+      throw new TypeError(
+        "VaultClient: must supply either `accessToken` (static) or `tokenProvider` (callback).",
+      );
+    }
     this.baseUrl = opts.vaultUrl.replace(/\/$/, "");
-    this.token = opts.accessToken;
+    this.token = opts.accessToken ?? "";
     this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     this.xhrFactory =
       opts.xhrFactory ??
@@ -199,9 +300,59 @@ export class VaultClient {
         }
         return new XMLHttpRequest();
       });
+    if (opts.tokenProvider !== undefined) this.tokenProvider = opts.tokenProvider;
     if (opts.onAuthError !== undefined) this.onAuthError = opts.onAuthError;
     if (opts.onAuthRevoked !== undefined) this.onAuthRevoked = opts.onAuthRevoked;
     if (opts.onReachability !== undefined) this.onReachability = opts.onReachability;
+  }
+
+  /**
+   * Build a `VaultClient` from a hub origin + vault name. The
+   * script-friendly entry point — captures the canonical Parachute URL
+   * shape (`<hubOrigin>/vault/<name>`) without callers having to glue
+   * the pieces together.
+   *
+   * Use this when scripting against a Parachute hub. The full-control
+   * constructor is still available if you need to point at a vault
+   * mounted under a non-standard URL (cross-origin test harnesses,
+   * direct-to-vault calls bypassing hub, etc.).
+   *
+   * Example:
+   *
+   * ```ts
+   * const vault = VaultClient.fromHub({
+   *   hubOrigin: "https://my-hub.parachute.computer",
+   *   vaultName: "default",
+   *   token: process.env.PARACHUTE_TOKEN!,
+   * });
+   * const notes = await vault.queryNotes({ tag: "#meeting" });
+   * ```
+   */
+  static fromHub(opts: {
+    hubOrigin: string;
+    vaultName: string;
+    /** Static Bearer token. Mutually exclusive with `tokenProvider`. */
+    token?: string;
+    /** Callback resolving to a Bearer token for each request. */
+    tokenProvider?: () => Promise<string> | string;
+    fetchImpl?: typeof fetch;
+    onAuthError?: () => Promise<string | null>;
+    onAuthRevoked?: (
+      status: number,
+      detail?: { errorType?: string; message?: string },
+    ) => void;
+    onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
+  }): VaultClient {
+    const origin = opts.hubOrigin.replace(/\/$/, "");
+    const vaultUrl = `${origin}/vault/${encodeURIComponent(opts.vaultName)}`;
+    const ctorOpts: VaultClientOptions = { vaultUrl };
+    if (opts.token !== undefined) ctorOpts.accessToken = opts.token;
+    if (opts.tokenProvider !== undefined) ctorOpts.tokenProvider = opts.tokenProvider;
+    if (opts.fetchImpl !== undefined) ctorOpts.fetchImpl = opts.fetchImpl;
+    if (opts.onAuthError !== undefined) ctorOpts.onAuthError = opts.onAuthError;
+    if (opts.onAuthRevoked !== undefined) ctorOpts.onAuthRevoked = opts.onAuthRevoked;
+    if (opts.onReachability !== undefined) ctorOpts.onReachability = opts.onReachability;
+    return new VaultClient(ctorOpts);
   }
 
   /** Update the in-memory access token (e.g. after a manual refresh). */
@@ -211,6 +362,21 @@ export class VaultClient {
 
   get vaultBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  /**
+   * Resolve the Bearer token for the next request. When a
+   * `tokenProvider` was supplied, calls it; otherwise returns the
+   * static token. Protected so subclasses that build their own request
+   * paths can reuse the resolution logic.
+   */
+  protected async resolveToken(): Promise<string> {
+    if (this.tokenProvider) {
+      const fresh = await this.tokenProvider();
+      this.token = fresh;
+      return fresh;
+    }
+    return this.token;
   }
 
   /**
@@ -234,8 +400,9 @@ export class VaultClient {
     init: RequestInit,
     allowRetry: boolean,
   ): Promise<T> {
+    const token = await this.resolveToken();
     const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${this.token}`);
+    headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/json");
     if (init.body && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
@@ -253,9 +420,11 @@ export class VaultClient {
 
     if (res.status >= 500) {
       this.onReachability?.("unreachable", `HTTP ${res.status}`);
-      throw new VaultUnreachableError(
+      const bodyText = await res.text().catch(() => "");
+      throw new VaultServerError(
         `${init.method ?? "GET"} ${path} → ${res.status}`,
         res.status,
+        bodyText || undefined,
       );
     }
 
@@ -296,6 +465,13 @@ export class VaultClient {
       const opts: { errorType?: string; body?: string } = {};
       if (errorType !== undefined) opts.errorType = errorType;
       if (bodyText) opts.body = bodyText;
+      // 403 is a subclass of VaultAuthError — existing `instanceof
+      // VaultAuthError` checks still catch it; scripts wanting to branch
+      // "wrong scope" from "dead token" use `instanceof
+      // VaultPermissionError`.
+      if (res.status === 403) {
+        throw new VaultPermissionError(composed, opts);
+      }
       throw new VaultAuthError(composed, res.status, opts);
     }
     if (res.status === 404) {
@@ -369,8 +545,9 @@ export class VaultClient {
     path: string,
     allowRetry: boolean,
   ): Promise<{ items: Note[]; nextCursor?: string }> {
+    const token = await this.resolveToken();
     const headers = new Headers({
-      Authorization: `Bearer ${this.token}`,
+      Authorization: `Bearer ${token}`,
       Accept: "application/json",
     });
     let res: Response;
@@ -384,7 +561,8 @@ export class VaultClient {
     }
     if (res.status >= 500) {
       this.onReachability?.("unreachable", `HTTP ${res.status}`);
-      throw new VaultUnreachableError(`GET ${path} → ${res.status}`, res.status);
+      const bodyText = await res.text().catch(() => "");
+      throw new VaultServerError(`GET ${path} → ${res.status}`, res.status, bodyText || undefined);
     }
     this.onReachability?.("healthy");
     if (res.status === 401 || res.status === 403) {
@@ -417,6 +595,9 @@ export class VaultClient {
       const opts: { errorType?: string; body?: string } = {};
       if (errorType !== undefined) opts.errorType = errorType;
       if (bodyText) opts.body = bodyText;
+      if (res.status === 403) {
+        throw new VaultPermissionError(composed, opts);
+      }
       throw new VaultAuthError(composed, res.status, opts);
     }
     if (!res.ok) {
@@ -446,6 +627,46 @@ export class VaultClient {
     const init: RequestInit = { method: "POST", body: JSON.stringify(payload) };
     if (opts.signal) init.signal = opts.signal;
     return this.request<Note>("/api/notes", init);
+  }
+
+  /**
+   * Batch-create notes via `POST /api/notes` with a `{notes: [...]}`
+   * envelope. Vault wraps the batch in a SQLite transaction — a mid-
+   * batch failure (path conflict, etc.) rolls back every prior insert,
+   * so the caller gets either "all of these landed" or
+   * "none of these landed" (no partial state).
+   *
+   * **Batch cap.** Vault refuses batches over its `MAX_BATCH_SIZE`
+   * (500 at time of writing — see vault#213). Oversized batches return
+   * `413 batch_too_large`, which surfaces here as an `Error` carrying
+   * the upstream message; vault doesn't yet emit a structured shape
+   * the client can class-discriminate on.
+   *
+   * **Conflict handling.** A path collision (or any other 409 from the
+   * store) throws `VaultConflictError` — or `VaultTargetExistsError`
+   * for the tag-rename collision shape — same as `createNote`.
+   *
+   * Returns the created notes in the order they were submitted.
+   *
+   * @example
+   * ```ts
+   * const notes = await vault.createNotes([
+   *   { content: "Note A", tags: ["#log"] },
+   *   { content: "Note B", tags: ["#log"] },
+   * ]);
+   * console.log(`Created ${notes.length} notes`);
+   * ```
+   */
+  async createNotes(
+    payloads: CreateNotePayload[],
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<Note[]> {
+    const init: RequestInit = {
+      method: "POST",
+      body: JSON.stringify({ notes: payloads }),
+    };
+    if (opts.signal) init.signal = opts.signal;
+    return this.request<Note[]>("/api/notes", init);
   }
 
   async updateNote(
@@ -520,6 +741,60 @@ export class VaultClient {
     return this.request<TagRecord>(`/api/tags/${encodeURIComponent(name)}`, init);
   }
 
+  /**
+   * Delete a tag identity row + remove the tag from every note that
+   * carries it. Vault's `DELETE /api/tags/:name`.
+   *
+   * **Tag-scoped-token guard.** Vault refuses 409 if any tag-scoped
+   * token references the tag in its allowlist (deleting the tag would
+   * silently orphan the token's scope). The caller has to revoke or
+   * re-mint those tokens before retrying. Surfaces as
+   * `VaultConflictError` with the upstream `referenced_by` payload
+   * carried on `error.body` (JSON-encoded) for diagnostic logging.
+   */
+  async deleteTag(name: string, opts: { signal?: AbortSignal } = {}): Promise<void> {
+    const init: RequestInit = { method: "DELETE" };
+    if (opts.signal) init.signal = opts.signal;
+    await this.request<{ deleted?: boolean } | undefined>(
+      `/api/tags/${encodeURIComponent(name)}`,
+      init,
+    );
+  }
+
+  // ---------- graph ----------
+
+  /**
+   * Find a path between two notes in the link graph (BFS shortest
+   * path; bi-directional — traverses both inbound and outbound links).
+   * Calls `GET /api/find-path?source=...&target=...&max_depth=...`.
+   *
+   * Vault caps `max_depth` at 10 internally; values above that get
+   * clamped silently. Returns `null` when no path is reachable within
+   * the depth limit.
+   *
+   * `from` and `to` accept either note IDs or note paths. Vault
+   * resolves both the same way it does for other note-level calls.
+   *
+   * @example
+   * ```ts
+   * const result = await vault.findPath("note-a", "note-b");
+   * if (result) {
+   *   console.log(`Connected via ${result.path.length - 1} hop(s)`);
+   * }
+   * ```
+   */
+  async findPath(
+    from: string,
+    to: string,
+    opts: { maxDepth?: number; signal?: AbortSignal } = {},
+  ): Promise<FindPathResult | null> {
+    const params = new URLSearchParams({ source: from, target: to });
+    if (typeof opts.maxDepth === "number") params.set("max_depth", String(opts.maxDepth));
+    const init: RequestInit = {};
+    if (opts.signal) init.signal = opts.signal;
+    return this.request<FindPathResult | null>(`/api/find-path?${params.toString()}`, init);
+  }
+
   // ---------- attachments ----------
 
   async addAttachment(
@@ -562,6 +837,12 @@ export class VaultClient {
       const form = new FormData();
       form.append("file", file);
 
+      // Upload uses XHR (for the progress events fetch can't expose), so
+      // we resolve the token synchronously off the cached value. When a
+      // `tokenProvider` is in use, the cache is whatever the last
+      // request resolved — `uploadStorageFile` callers wanting a fresh
+      // token should do an unrelated JSON request first to warm the
+      // cache, or call `resolveToken()` directly before invoking this.
       xhr.open("POST", `${this.baseUrl}/api/storage/upload`);
       xhr.setRequestHeader("Authorization", `Bearer ${this.token}`);
       xhr.setRequestHeader("Accept", "application/json");
@@ -595,7 +876,11 @@ export class VaultClient {
           const aopts: { errorType?: string; body?: string } = {};
           if (errorType !== undefined) aopts.errorType = errorType;
           if (bodyText) aopts.body = bodyText;
-          reject(new VaultAuthError(composed, xhr.status, aopts));
+          if (xhr.status === 403) {
+            reject(new VaultPermissionError(composed, aopts));
+          } else {
+            reject(new VaultAuthError(composed, xhr.status, aopts));
+          }
           return;
         }
         if (xhr.status < 200 || xhr.status >= 300) {
