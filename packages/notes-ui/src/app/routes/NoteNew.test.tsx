@@ -635,6 +635,31 @@ describe("NoteNew — voice affordance", () => {
     expect(screen.getByRole("button", { name: /^create$/i })).not.toBeDisabled();
   });
 
+  it("keyboard activation (click) on Stop ends recording — no-pointer path", async () => {
+    // Regression for the a11y bug where Stop had only onPointerDown:
+    // keyboard (Space/Enter) on a <button> dispatches `click` with no
+    // pointer events, so an onPointerDown-only handler is unreachable
+    // from the keyboard. The Stop button keeps both handlers; this
+    // exercises the click-only path explicitly.
+    installFetch({});
+    renderAt("/new");
+
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.click(recordBtn);
+      await Promise.resolve();
+    });
+    const stopBtn = await screen.findByRole("button", { name: /stop/i });
+    await act(async () => {
+      fireEvent.click(stopBtn);
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+  });
+
   it("voice + Create → enqueues create-note + upload-attachment + link-attachment{transcribe}", async () => {
     installFetch({});
     renderAt("/new");
