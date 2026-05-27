@@ -70,11 +70,26 @@ function normalizeBase(input: string): string {
 }
 
 export default defineConfig({
-  // Relative-mode asset URLs (`./assets/...`) so the same built bundle
-  // works at any mount path. See the long comment above `basePath` for
-  // the runtime mount detection that replaces `import.meta.env.BASE_URL`
-  // as the source of truth for the router basename + OAuth callback path.
-  base: "",
+  // Asset URL strategy:
+  //
+  //   - **Standalone deploy** (notes.parachute.computer): VITE_BASE_PATH=/
+  //     → base="/" → emit absolute URLs rooted at `/assets/...`. Critical
+  //     for deep routes: at `/oauth/callback`, relative `./assets/...`
+  //     would resolve to `/oauth/assets/...` → 404. Absolute URLs always
+  //     resolve to the right path regardless of the document URL.
+  //
+  //   - **Default / multi-mount publish** (npm, surface-host bundling at
+  //     `/surface/notes/`, legacy notes-daemon at `/notes/`): no
+  //     VITE_BASE_PATH → base="" → relative URLs. The host's reverse
+  //     proxy + the runtime mount detection (detectMountBase) cover
+  //     routing for these cases. Multi-mount with absolute URLs would
+  //     require build-per-mount or a serve-time index.html rewrite,
+  //     which is out of scope today.
+  //
+  // Previously `base: ""` was hardcoded; the standalone deep-route case
+  // surfaced as broken on 2026-05-27 when 404.html SPA fallback let the
+  // bundle bootstrap at `/oauth/callback` for the first time.
+  base: process.env.VITE_BASE_PATH ?? "",
   plugins: [
     react(),
     tailwindcss(),
