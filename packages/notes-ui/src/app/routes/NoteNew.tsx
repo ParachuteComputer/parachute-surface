@@ -494,7 +494,10 @@ function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
             e.preventDefault();
             void stopRecording();
           }}
-          onClick={() => void stopRecording()}
+          // No onClick — onPointerDown already fires on tap + click; adding
+          // onClick caused a triple-fire (pointer + click + global pointerup
+          // listener in use-voice-capture). All three were no-ops after the
+          // first thanks to phase-guards but noisy. Reviewer-flagged on #53.
           aria-label={`Recording — ${formatElapsed(elapsedMs)} — stop`}
           aria-pressed="true"
           className="flex min-h-11 items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400"
