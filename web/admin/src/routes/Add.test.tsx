@@ -28,7 +28,7 @@ function renderWithRouter() {
 }
 
 describe("Add", () => {
-  test("submitting calls POST /app/add with the right body shape", async () => {
+  test("submitting calls POST /surface/add with the right body shape", async () => {
     let capturedInit: RequestInit | undefined;
     const fakeFetch = vi.fn((_url: string, init?: RequestInit) => {
       capturedInit = init;
@@ -36,7 +36,7 @@ describe("Add", () => {
         new Response(
           JSON.stringify({
             ok: true,
-            ui: { name: "myui", path: "/app/myui", displayName: "My UI" },
+            ui: { name: "myui", path: "/surface/myui", displayName: "My UI" },
             oauth_client_id: "client_myui",
           }),
           { status: 201, headers: { "content-type": "application/json" } },
@@ -48,7 +48,7 @@ describe("Add", () => {
     renderWithRouter();
     await userEvent.type(screen.getByPlaceholderText(/^\/abs\/path/), "/tmp/my-ui");
     await userEvent.type(screen.getByPlaceholderText("my-ui"), "myui");
-    await userEvent.type(screen.getByPlaceholderText("/app/my-ui"), "/app/myui");
+    await userEvent.type(screen.getByPlaceholderText("/surface/my-ui"), "/surface/myui");
     await userEvent.type(screen.getByPlaceholderText("My UI"), "My UI");
     await userEvent.type(
       screen.getByPlaceholderText(/vault:\*:read, vault:\*:write/),
@@ -62,14 +62,14 @@ describe("Add", () => {
     const body = JSON.parse(capturedInit?.body as string);
     expect(body.source).toBe("/tmp/my-ui");
     expect(body.name).toBe("myui");
-    expect(body.path).toBe("/app/myui");
+    expect(body.path).toBe("/surface/myui");
     expect(body.displayName).toBe("My UI");
     expect(body.scopes_required).toEqual(["vault:default:read", "vault:default:write"]);
     expect(await screen.findByText(/Added myui/)).toBeInTheDocument();
     expect(screen.getByText(/client_myui/)).toBeInTheDocument();
   });
 
-  test("error from /app/add surfaces inline", async () => {
+  test("error from /surface/add surfaces inline", async () => {
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(
         new Response(JSON.stringify({ error: "name_exists", message: 'UI named "x" exists' }), {

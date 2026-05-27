@@ -1,0 +1,56 @@
+{
+  "name": "@openparachute/surface",
+  "version": "0.2.0",
+  "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
+  "module": "src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./meta-schema": "./src/meta-schema.ts"
+  },
+  "private": false,
+  "license": "AGPL-3.0",
+  "bin": {
+    "parachute-surface": "bin/parachute-surface.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "bin/**/*.ts",
+    "dist/admin/**",
+    ".parachute/module.json",
+    ".parachute/info",
+    ".parachute/config/schema",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "bun run bin/parachute-surface.ts serve",
+    "build": "cd ../../web/admin && bun install --frozen-lockfile && bun run build",
+    "build:admin": "cd ../../web/admin && bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@openparachute/surface-client": "^0.1.0-rc.3",
+    "@openparachute/scope-guard": "^0.4.0-rc.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-app.git",
+    "directory": "packages/surface-host"
+  }
+}

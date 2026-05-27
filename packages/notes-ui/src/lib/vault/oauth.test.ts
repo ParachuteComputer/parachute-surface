@@ -11,7 +11,7 @@ import { clearCachedClientId, loadPendingOAuth, savePendingOAuth } from "./stora
 import type { PendingOAuthState } from "./types";
 
 // `storedFromTokenResponse` is now a re-export from
-// `@openparachute/app-client` (Phase 2, parachute-app#6) — its unit
+// `@openparachute/surface-client` (Phase 2, parachute-app#6) — its unit
 // tests live in app-client's own suite. `refreshAccessToken` stays
 // Notes-side because it's wired into refresh.ts without the
 // ParachuteOAuth driver class. The `beginOAuth` + `completeOAuth` tests
@@ -183,17 +183,17 @@ describe("redirectUriForOrigin under runtime mount detection", () => {
     );
   });
 
-  it("includes the parachute-app default mount when served from /app/notes/...", () => {
-    window.history.replaceState({}, "", "/app/notes/");
+  it("includes the parachute-surface default mount when served from /surface/notes/...", () => {
+    window.history.replaceState({}, "", "/surface/notes/");
     expect(redirectUriForOrigin("http://host.example")).toBe(
-      "http://host.example/app/notes/oauth/callback",
+      "http://host.example/surface/notes/oauth/callback",
     );
   });
 
-  it("includes a renamed-install slug when served from /app/<slug>/...", () => {
-    window.history.replaceState({}, "", "/app/my-notes/");
+  it("includes a renamed-install slug when served from /surface/<slug>/...", () => {
+    window.history.replaceState({}, "", "/surface/my-notes/");
     expect(redirectUriForOrigin("http://host.example")).toBe(
-      "http://host.example/app/my-notes/oauth/callback",
+      "http://host.example/surface/my-notes/oauth/callback",
     );
   });
 

@@ -4,19 +4,19 @@
  * Why this file exists:
  *
  *   notes-ui 0.1.1 introduced runtime mount detection — the same built
- *   `dist/` works at any mount path (`/notes/`, `/app/notes/`,
- *   `/app/<custom-slug>/`). Asset URLs, the React Router basename, and
+ *   `dist/` works at any mount path (`/notes/`, `/surface/notes/`,
+ *   `/surface/<custom-slug>/`). Asset URLs, the React Router basename, and
  *   the OAuth redirect URI all rebase at runtime via `detectMountBase()`.
  *
  *   But the service worker and PWA manifest are baked at *build time*.
  *   The manifest's `start_url`/`scope` and the SW's precache manifest
  *   (every `/notes/index.html`, `/notes/assets/...` entry) are hard
  *   `/notes/`-scoped in the default build. When the same bundle gets
- *   mounted at `/app/notes/`, the React app loads and routes work — but
+ *   mounted at `/surface/notes/`, the React app loads and routes work — but
  *   then `useRegisterSW()` registers the SW *with the page's current
- *   scope* (`/app/notes/`), and the SW immediately starts intercepting
+ *   scope* (`/surface/notes/`), and the SW immediately starts intercepting
  *   every fetch under that scope. The precache table doesn't contain
- *   `/app/notes/...` entries; navigations fall through to workbox's
+ *   `/surface/notes/...` entries; navigations fall through to workbox's
  *   navigation route which serves `/notes/index.html` (HTML) for a
  *   request that the importing browser expected to be a JS module or a
  *   JSON manifest.
@@ -30,7 +30,7 @@
  *       fetch and returns the wrong document
  *
  *   The right fix is mount-aware build-time PWA assets, but that needs
- *   a parachute-app manifest-rewrite hook + multi-scope SW generation —
+ *   a parachute-surface manifest-rewrite hook + multi-scope SW generation —
  *   non-trivial work. The immediate fix is to gate registration: if the
  *   runtime mount doesn't match the build-time vite base, don't
  *   register the SW at all, and unregister any stale registration left
@@ -39,7 +39,7 @@
  *   PWA "Add to Home Screen" therefore remains a build-time-pinned
  *   feature (already acknowledged in 0.1.1's CHANGELOG). Operators who
  *   want PWA install at a non-default mount must build with
- *   `VITE_BASE_PATH=/app/<name>`. In-browser use works at any mount
+ *   `VITE_BASE_PATH=/surface/<name>`. In-browser use works at any mount
  *   from the default bundle, no SW interference.
  */
 
@@ -103,15 +103,15 @@ export function shouldRegisterServiceWorker(pathname?: string): boolean {
  * current runtime mount.
  *
  * The shape we're cleaning up after: a user on 0.1.1 or earlier installed
- * Notes via parachute-app at `/app/notes/`, the bundle auto-registered
+ * Notes via parachute-surface at `/surface/notes/`, the bundle auto-registered
  * the SW (build-time-scoped to `/notes/` via `vite.config.ts`'s `basePath`)
- * at `/app/notes/`, and the SW now intercepts every fetch under
- * `/app/notes/` with a precache table built for `/notes/`. Result: HTML
+ * at `/surface/notes/`, and the SW now intercepts every fetch under
+ * `/surface/notes/` with a precache table built for `/notes/`. Result: HTML
  * served for JS-module requests, MIME errors, broken OAuth callbacks.
  *
  * We unregister any SW whose normalised scope-pathname differs from the
  * runtime mount AND looks like a parachute mount we recognise
- * (`/notes` or `/app/<slug>`). The "looks like ours" guard keeps us
+ * (`/notes` or `/surface/<slug>`). The "looks like ours" guard keeps us
  * from clobbering an unrelated SW that happens to be registered on the
  * same origin.
  *
@@ -140,7 +140,7 @@ export async function cleanupStaleServiceWorker(
       // recognise — be conservative about clobbering unrelated SWs on
       // the same origin.
       const looksLikeParachuteMount =
-        /^\/notes$/.test(scopePath) || /^\/app\/[a-z0-9][a-z0-9_-]*$/.test(scopePath);
+        /^\/notes$/.test(scopePath) || /^\/surface\/[a-z0-9][a-z0-9_-]*$/.test(scopePath);
       if (!looksLikeParachuteMount) continue;
       await registration.unregister();
       unregistered += 1;

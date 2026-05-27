@@ -3,7 +3,7 @@
  *
  * Phase 2.1 adds a "Provision schema" affordance when the UI declares
  * `required_schema`: a button next to the schema-requirements section
- * that POSTs to `/app/<name>/provision-schema` and surfaces the
+ * that POSTs to `/surface/<name>/provision-schema` and surfaces the
  * per-tag summary (provisioned + errors + skipReason) inline.
  */
 import { useCallback, useEffect, useState } from "react";

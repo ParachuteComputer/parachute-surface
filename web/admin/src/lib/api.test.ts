@@ -58,7 +58,7 @@ describe("api calls", () => {
       );
     }) as unknown as typeof fetch;
     await listUis();
-    expect(capturedUrl).toBe("/app/list");
+    expect(capturedUrl).toBe("/surface/list");
     expect((capturedHeaders as Record<string, string>).authorization).toBe("Bearer op-token");
   });
 
@@ -68,11 +68,11 @@ describe("api calls", () => {
       captured = { url, init: init as RequestInit };
       return Promise.resolve(new Response(JSON.stringify({ ok: true, ui: null }), { status: 201 }));
     }) as unknown as typeof fetch;
-    await addUi({ source: "/tmp/x", name: "x", path: "/app/x" });
-    expect(captured?.url).toBe("/app/add");
+    await addUi({ source: "/tmp/x", name: "x", path: "/surface/x" });
+    expect(captured?.url).toBe("/surface/add");
     expect(captured?.init.method).toBe("POST");
     const body = JSON.parse(captured?.init.body as string);
-    expect(body).toEqual({ source: "/tmp/x", name: "x", path: "/app/x" });
+    expect(body).toEqual({ source: "/tmp/x", name: "x", path: "/surface/x" });
   });
 
   test("removeUi URL-encodes the name", async () => {
@@ -85,17 +85,17 @@ describe("api calls", () => {
       );
     }) as unknown as typeof fetch;
     await removeUi("my-ui");
-    expect(capturedUrl).toBe("/app/my-ui");
+    expect(capturedUrl).toBe("/surface/my-ui");
   });
 
-  test("reloadUi → POST /app/<name>/reload", async () => {
+  test("reloadUi → POST /surface/<name>/reload", async () => {
     let captured: { url: string; method: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
       captured = { url, method: init?.method ?? "GET" };
       return Promise.resolve(new Response(JSON.stringify({ ok: true, ui: null }), { status: 200 }));
     }) as unknown as typeof fetch;
     await reloadUi("zz");
-    expect(captured?.url).toBe("/app/zz/reload");
+    expect(captured?.url).toBe("/surface/zz/reload");
     expect(captured?.method).toBe("POST");
   });
 
@@ -118,19 +118,19 @@ describe("api calls", () => {
 });
 
 describe("dev-mode helpers", () => {
-  test("listDevMode → GET /app/dev/list", async () => {
+  test("listDevMode → GET /surface/dev/list", async () => {
     let captured: { url: string; method: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
       captured = { url, method: init?.method ?? "GET" };
       return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
     }) as unknown as typeof fetch;
     const res = await listDevMode();
-    expect(captured?.url).toBe("/app/dev/list");
+    expect(captured?.url).toBe("/surface/dev/list");
     expect(captured?.method).toBe("GET");
     expect(res.uis).toEqual([]);
   });
 
-  test("getDevModeStatus → GET /app/<name>/dev", async () => {
+  test("getDevModeStatus → GET /surface/<name>/dev", async () => {
     let capturedUrl: string | undefined;
     globalThis.fetch = vi.fn((url: string) => {
       capturedUrl = url;
@@ -142,11 +142,11 @@ describe("dev-mode helpers", () => {
       );
     }) as unknown as typeof fetch;
     const res = await getDevModeStatus("notes");
-    expect(capturedUrl).toBe("/app/notes/dev");
+    expect(capturedUrl).toBe("/surface/notes/dev");
     expect(res.enabled).toBe(true);
   });
 
-  test("enableDevMode → POST /app/<name>/dev/enable", async () => {
+  test("enableDevMode → POST /surface/<name>/dev/enable", async () => {
     let captured: { url: string; method: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
       captured = { url, method: init?.method ?? "GET" };
@@ -158,11 +158,11 @@ describe("dev-mode helpers", () => {
       );
     }) as unknown as typeof fetch;
     await enableDevMode("notes");
-    expect(captured?.url).toBe("/app/notes/dev/enable");
+    expect(captured?.url).toBe("/surface/notes/dev/enable");
     expect(captured?.method).toBe("POST");
   });
 
-  test("disableDevMode → POST /app/<name>/dev/disable", async () => {
+  test("disableDevMode → POST /surface/<name>/dev/disable", async () => {
     let captured: { url: string; method: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
       captured = { url, method: init?.method ?? "GET" };
@@ -173,11 +173,11 @@ describe("dev-mode helpers", () => {
       );
     }) as unknown as typeof fetch;
     await disableDevMode("notes");
-    expect(captured?.url).toBe("/app/notes/dev/disable");
+    expect(captured?.url).toBe("/surface/notes/dev/disable");
     expect(captured?.method).toBe("POST");
   });
 
-  test("triggerReload → POST /app/<name>/dev/trigger", async () => {
+  test("triggerReload → POST /surface/<name>/dev/trigger", async () => {
     let captured: { url: string; method: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
       captured = { url, method: init?.method ?? "GET" };
@@ -186,14 +186,14 @@ describe("dev-mode helpers", () => {
       );
     }) as unknown as typeof fetch;
     const res = await triggerReload("notes");
-    expect(captured?.url).toBe("/app/notes/dev/trigger");
+    expect(captured?.url).toBe("/surface/notes/dev/trigger");
     expect(captured?.method).toBe("POST");
     expect(res.notified).toBe(3);
   });
 });
 
 describe("provisionSchema (Phase 2.1)", () => {
-  test("POST /app/<name>/provision-schema with auth", async () => {
+  test("POST /surface/<name>/provision-schema with auth", async () => {
     setOperatorToken("op-token");
     let captured: { url: string; method: string; auth?: string } | undefined;
     globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
@@ -216,7 +216,7 @@ describe("provisionSchema (Phase 2.1)", () => {
       );
     }) as unknown as typeof fetch;
     const res = await provisionSchema("notes");
-    expect(captured?.url).toBe("/app/notes/provision-schema");
+    expect(captured?.url).toBe("/surface/notes/provision-schema");
     expect(captured?.method).toBe("POST");
     expect(captured?.auth).toBe("Bearer op-token");
     expect(res.provisioned).toEqual(["capture"]);
@@ -233,7 +233,7 @@ describe("provisionSchema (Phase 2.1)", () => {
       );
     }) as unknown as typeof fetch;
     await provisionSchema("w x");
-    expect(capturedUrl).toBe("/app/w%20x/provision-schema");
+    expect(capturedUrl).toBe("/surface/w%20x/provision-schema");
   });
 
   test("surfaces skipReason from the server response", async () => {

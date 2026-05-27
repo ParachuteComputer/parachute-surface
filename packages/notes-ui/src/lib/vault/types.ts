@@ -3,7 +3,7 @@
  *
  * Phase 2 of the notes-migration-to-app arc (parachute-app#6, design doc
  * section 16): the OAuth + vault REST shapes that used to live here moved
- * to `@openparachute/app-client` so other hosted apps don't re-roll them.
+ * to `@openparachute/surface-client` so other hosted apps don't re-roll them.
  * This module now re-exports the canonical types from app-client and
  * holds the small handful of Notes-specific extensions:
  *
@@ -21,7 +21,7 @@
  *     re-added).
  */
 
-import type { PendingOAuthState as BasePendingOAuthState } from "@openparachute/app-client";
+import type { PendingOAuthState as BasePendingOAuthState } from "@openparachute/surface-client";
 
 // Canonical OAuth + vault shapes live in app-client — re-export so existing
 // import sites (`import type { Note, TagSummary, ... } from "@/lib/vault/types"`)
@@ -45,7 +45,7 @@ export type {
   UpdateNotePayload,
   UploadProgress,
   VaultInfo,
-} from "@openparachute/app-client";
+} from "@openparachute/surface-client";
 
 export interface VaultRecord {
   id: string;

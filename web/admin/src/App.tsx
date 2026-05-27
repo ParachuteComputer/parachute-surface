@@ -12,7 +12,7 @@
  *
  * Cross-surface navigation off the SPA (back to hub admin, to a hosted UI)
  * uses plain `<a href>` since react-router's `<Link>` resolves against the
- * SPA basename `/app/admin`.
+ * SPA basename `/surface/admin`.
  */
 import { Link, Route, Routes } from "react-router-dom";
 import { TokenSetup } from "./TokenSetup.tsx";

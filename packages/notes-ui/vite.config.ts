@@ -24,8 +24,8 @@ const devExposure = process.env.VITE_EXPOSE === "true";
 //   - The bundle's *runtime* mount is detected at load time via
 //     `detectMountBase()` in `src/lib/base-url.ts` (reads
 //     `window.location.pathname`). That's how the same built `dist/`
-//     can serve at `/notes/` (legacy daemon), `/app/notes/`
-//     (parachute-app default), or `/app/<custom-slug>/` (parachute-app
+//     can serve at `/notes/` (legacy daemon), `/surface/notes/`
+//     (parachute-surface default), or `/surface/<custom-slug>/` (parachute-surface
 //     with a renamed install) without a rebuild.
 //
 // The big shift (2026-05-23, this commit): `base: ""` below tells Vite
@@ -40,7 +40,7 @@ const devExposure = process.env.VITE_EXPOSE === "true";
 // server-side rewriting). The PWA install therefore launches under the
 // build-time `basePath` (default `/notes/`). Operators who want PWA
 // install at a non-default mount must build with VITE_BASE_PATH set
-// to that mount. Documented in CHANGELOG; revisit when parachute-app
+// to that mount. Documented in CHANGELOG; revisit when parachute-surface
 // grows a manifest-rewrite hook.
 const basePath = normalizeBase(process.env.VITE_BASE_PATH ?? "/notes");
 
@@ -94,7 +94,7 @@ export default defineConfig({
       // vite-plugin-pwa NOT to auto-inject a registration script into
       // `index.html` — otherwise that script would register the SW
       // unconditionally at the page's current scope, which is exactly
-      // the bug we just fixed for parachute-app installs (notes 0.1.2,
+      // the bug we just fixed for parachute-surface installs (notes 0.1.2,
       // 2026-05-23). Belt + suspenders: even though vite-plugin-pwa's
       // default in v1 is to skip auto-inject when `useRegisterSW` is
       // used, declaring it explicitly here documents the contract.

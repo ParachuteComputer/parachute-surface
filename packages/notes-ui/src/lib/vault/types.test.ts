@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isLegacyVaultUrl } from "./types";
 
 // `normalizeVaultUrl` and `vaultIdFromUrl` tests live in
-// `@openparachute/app-client`'s own suite — those helpers were lifted out
+// `@openparachute/surface-client`'s own suite — those helpers were lifted out
 // during Phase 2 (parachute-app#6). What remains here is the Notes-
 // specific guard for pre-PR-7 vault URLs (`/vaults/<name>/` plural or
 // origin-only). The Vaults page reads `isLegacyVaultUrl` to mark stored

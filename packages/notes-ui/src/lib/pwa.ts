@@ -3,7 +3,7 @@
  *
  * The SW-reload helper used to live here in full; Phase 2 of the
  * notes-migration-to-app arc (parachute-app#6, design doc section 16)
- * moved it into `@openparachute/app-client/sw-reload` so any future PWA-
+ * moved it into `@openparachute/surface-client/sw-reload` so any future PWA-
  * mode app inherits Notes' load-bearing reload behavior without
  * copy-pasting. The platform sniffers (`isStandalone`, `isIOS`) and the
  * BeforeInstallPromptEvent type stay Notes-side — they're install-banner
@@ -14,7 +14,7 @@ export {
   SW_RELOAD_FALLBACK_MS,
   __resetReloadArmedForTests,
   reloadAfterServiceWorkerUpdate,
-} from "@openparachute/app-client";
+} from "@openparachute/surface-client";
 
 // BeforeInstallPromptEvent isn't in lib.dom yet — declare what we use.
 export interface BeforeInstallPromptEvent extends Event {

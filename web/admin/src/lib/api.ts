@@ -1,13 +1,13 @@
 /**
  * API helpers — thin fetch wrapper for the admin endpoints.
  *
- * All admin endpoints under `/app/*` (except `/oauth-client`) require a
+ * All admin endpoints under `/surface/*` (except `/oauth-client`) require a
  * bearer carrying `app:admin` or `app:read`. The SPA reads the operator's
  * token from `localStorage["parachute_operator_token"]`, set via the
  * `TokenSetup` banner.
  */
 
-// Canonical type definitions live in app-host (`packages/app-host/src/
+// Canonical type definitions live in app-host (`packages/surface-host/src/
 // meta-schema.ts`) — re-imported here so the admin SPA can't drift from
 // the server's shape. Type-only import keeps zero runtime bundle cost.
 import type {
@@ -15,7 +15,7 @@ import type {
   RequiredSchemaFieldType,
   TagSchemaDeclaration,
   TagSchemaFieldDeclaration,
-} from "@openparachute/app/meta-schema";
+} from "@openparachute/surface/meta-schema";
 
 export type {
   RequiredSchemaDeclaration,
@@ -147,23 +147,23 @@ async function call<T>(
 }
 
 export function listUis(): Promise<ListResponse> {
-  return call("GET", "/app/list");
+  return call("GET", "/surface/list");
 }
 
 export function addUi(body: AddRequestBody): Promise<AddResponse> {
-  return call("POST", "/app/add", body);
+  return call("POST", "/surface/add", body);
 }
 
 export function removeUi(name: string): Promise<{ ok: boolean; removed: string }> {
-  return call("DELETE", `/app/${encodeURIComponent(name)}`);
+  return call("DELETE", `/surface/${encodeURIComponent(name)}`);
 }
 
 export function reloadUi(name: string): Promise<{ ok: boolean; ui: UiSummary | null }> {
-  return call("POST", `/app/${encodeURIComponent(name)}/reload`);
+  return call("POST", `/surface/${encodeURIComponent(name)}/reload`);
 }
 
 export function getUiInfo(name: string): Promise<UiInfoResponse> {
-  return call("GET", `/app/${encodeURIComponent(name)}/info`);
+  return call("GET", `/surface/${encodeURIComponent(name)}/info`);
 }
 
 // --- Phase 2.1: required_schema provisioning ----------------------------
@@ -182,7 +182,7 @@ export type ProvisionSchemaResponse = {
 };
 
 export function provisionSchema(name: string): Promise<ProvisionSchemaResponse> {
-  return call("POST", `/app/${encodeURIComponent(name)}/provision-schema`);
+  return call("POST", `/surface/${encodeURIComponent(name)}/provision-schema`);
 }
 
 // --- Phase 1.3: dev mode ------------------------------------------------
@@ -216,27 +216,27 @@ export type DevListResponse = {
 };
 
 export function listDevMode(): Promise<DevListResponse> {
-  return call("GET", "/app/dev/list");
+  return call("GET", "/surface/dev/list");
 }
 
 export function getDevModeStatus(name: string): Promise<DevModeStatus> {
-  return call("GET", `/app/${encodeURIComponent(name)}/dev`);
+  return call("GET", `/surface/${encodeURIComponent(name)}/dev`);
 }
 
 export function enableDevMode(name: string): Promise<{ ok: boolean } & DevModeStatus> {
-  return call("POST", `/app/${encodeURIComponent(name)}/dev/enable`);
+  return call("POST", `/surface/${encodeURIComponent(name)}/dev/enable`);
 }
 
 export function disableDevMode(
   name: string,
 ): Promise<{ ok: boolean; name: string; enabled: false; was_on: boolean }> {
-  return call("POST", `/app/${encodeURIComponent(name)}/dev/disable`);
+  return call("POST", `/surface/${encodeURIComponent(name)}/dev/disable`);
 }
 
 export function triggerReload(
   name: string,
 ): Promise<{ ok: boolean; name: string; notified: number }> {
-  return call("POST", `/app/${encodeURIComponent(name)}/dev/trigger`);
+  return call("POST", `/surface/${encodeURIComponent(name)}/dev/trigger`);
 }
 
 /** Format an ApiError for inline display. */

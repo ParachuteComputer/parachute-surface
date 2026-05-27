@@ -1,5 +1,5 @@
 /**
- * URL helpers — re-exports from `@openparachute/app-client` plus Notes'
+ * URL helpers — re-exports from `@openparachute/surface-client` plus Notes'
  * legacy-vault-URL guard.
  *
  * Phase 2 of the notes-migration-to-app arc (parachute-app#6, design doc
@@ -10,5 +10,5 @@
  * `/vaults/` → `/vault/` rename.
  */
 
-export { normalizeVaultUrl, vaultIdFromUrl } from "@openparachute/app-client";
+export { normalizeVaultUrl, vaultIdFromUrl } from "@openparachute/surface-client";
 export { isLegacyVaultUrl } from "./types";

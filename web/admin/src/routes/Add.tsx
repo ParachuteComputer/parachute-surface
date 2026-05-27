@@ -1,5 +1,5 @@
 /**
- * Add UI — form for `POST /app/add`.
+ * Add UI — form for `POST /surface/add`.
  *
  * Two source modes:
  *   - Local path on the host filesystem
@@ -69,7 +69,7 @@ export function Add() {
         <div className="page-header__title">
           <h1>Add UI</h1>
           <p className="page-header__sub">
-            Register a new UI under <code>~/.parachute/app/uis/&lt;name&gt;/</code>. Point at a built
+            Register a new UI under <code>~/.parachute/surface/uis/&lt;name&gt;/</code>. Point at a built
             bundle on disk or an npm package — the rest of the form fills in from the bundle's
             <code> .parachute/meta.json</code> when present.
           </p>
@@ -150,11 +150,11 @@ export function Add() {
               type="text"
               value={pathField}
               onChange={(e) => setPathField(e.target.value)}
-              placeholder="/app/my-ui"
-              pattern="^/app/[a-z0-9-]+$"
+              placeholder="/surface/my-ui"
+              pattern="^/surface/[a-z0-9-]+$"
             />
             <small>
-              Always under <code>/app/</code>. Single segment.
+              Always under <code>/surface/</code>. Single segment.
             </small>
           </label>
 

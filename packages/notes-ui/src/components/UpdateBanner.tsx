@@ -67,8 +67,8 @@ function UpdateBannerInner() {
 /**
  * Mount-gated SW registration. The PWA service worker and manifest are
  * baked at Vite build time with a fixed scope (default `/notes/`); when
- * the bundle is served at a different mount (e.g. `/app/notes/` under
- * parachute-app), registering the SW there interferes with every fetch
+ * the bundle is served at a different mount (e.g. `/surface/notes/` under
+ * parachute-surface), registering the SW there interferes with every fetch
  * — workbox can't find precached entries for the runtime mount and ends
  * up returning HTML for what should be JS modules / JSON manifests.
  *

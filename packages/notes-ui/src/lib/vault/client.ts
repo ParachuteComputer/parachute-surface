@@ -4,7 +4,7 @@
  * Phase 2 of the notes-migration-to-app arc (parachute-app#6, design doc
  * section 16) moved the canonical `VaultClient` (with structured errors,
  * auto-refresh on 401/403, cursor pagination, reachability signals) into
- * `@openparachute/app-client`. notes#153 adopted those re-exports but
+ * `@openparachute/surface-client`. notes#153 adopted those re-exports but
  * kept a near-clone of the request loop here because app-client's
  * `request*` methods were still `private`.
  *
@@ -43,7 +43,7 @@ import {
   VaultUploadError as AppClientVaultUploadError,
   VaultClient as BaseVaultClient,
   type VaultClientOptions as BaseVaultClientOptions,
-} from "@openparachute/app-client";
+} from "@openparachute/surface-client";
 import type {
   CreateNotePayload,
   NoteAttachment,
