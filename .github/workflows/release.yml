@@ -21,10 +21,10 @@
 # Release flow:
 #   1. When ready to ship: bump version in the relevant package.json on main.
 #   2. Push a matching tag:
-#        # for app
+#        # for surface
 #        VERSION="v$(bun -e "console.log(require('./packages/surface-host/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
-#        # for app-client
+#        # for surface-client
 #        VERSION="client-v$(bun -e "console.log(require('./packages/surface-client/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
 #        # for notes-ui
@@ -34,8 +34,8 @@
 #      the tag prefix.
 #
 # Operator setup (one-time) — see RELEASING.md:
-#   - npm Trusted Publisher rules: one per package (app, app-client, notes-ui).
-#     All three rules point at: org=ParachuteComputer, repo=parachute-app,
+#   - npm Trusted Publisher rules: one per package (surface, surface-client, notes-ui).
+#     All three rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -73,14 +73,14 @@ jobs:
         # and web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks all three packages (app-host, app-client, notes-ui).
+        # Root script typechecks all three packages (surface-host, surface-client, notes-ui).
         run: bun run typecheck
       - name: tests
-        # Root script runs all three suites: app-host (bun test), app-client
+        # Root script runs all three suites: surface-host (bun test), surface-client
         # (bun test), and notes-ui (vitest via `bun run --filter`).
         run: bun run test
 
-  publish-app-npm:
+  publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
     # App-only: skip on client- and notes-ui- tags.
@@ -108,7 +108,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
         # Defense against tag-vs-package.json drift. If they don't match,
-        # we'd publish under the wrong version. We pin on app-host's
+        # we'd publish under the wrong version. We pin on surface-host's
         # package.json — that's the package this workflow publishes.
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-host/package.json').version)")
@@ -117,8 +117,8 @@ jobs:
             echo "::error::packages/surface-host/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
-      - name: build app-host (bundles admin SPA into dist/)
-        # app-host's `files` includes `dist/admin/**`, so the admin SPA
+      - name: build surface-host (bundles admin SPA into dist/)
+        # surface-host's `files` includes `dist/admin/**`, so the admin SPA
         # must be built before `npm publish` packs the tarball. The
         # package.json has no prepack/prepublishOnly hook, so we run
         # the build explicitly here.
@@ -127,7 +127,7 @@ jobs:
       - name: publish
         # Trusted Publishing: npm verifies the OIDC token from this workflow
         # against the package's configured trusted publisher rule
-        # (org=ParachuteComputer, repo=parachute-app, workflow=release.yml).
+        # (org=ParachuteComputer, repo=parachute-surface, workflow=release.yml).
         # No NPM_TOKEN secret needed; `id-token: write` permission above
         # makes the OIDC token available to npm CLI.
         working-directory: packages/surface-host
@@ -142,10 +142,10 @@ jobs:
           echo "publishing @openparachute/surface with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
-  publish-app-client-npm:
+  publish-surface-client-npm:
     name: publish @openparachute/surface-client to npm
     needs: test
-    # app-client-only: skip on app (`v*`) tags.
+    # surface-client-only: skip on surface (`v*`) tags.
     if: ${{ startsWith(github.ref_name, 'client-') }}
     runs-on: ubuntu-latest
     permissions:
@@ -164,7 +164,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against app-client's package.json — that's the package this
+        # Pin against surface-client's package.json — that's the package this
         # job publishes. Tag prefix is `client-v...`.
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-client/package.json').version)")
@@ -174,7 +174,7 @@ jobs:
             exit 1
           fi
       - name: publish
-        # app-client's package.json has `prepublishOnly: bun run build`, so
+        # surface-client's package.json has `prepublishOnly: bun run build`, so
         # `npm publish` will build (tsc) before packing. No explicit build
         # step needed here.
         working-directory: packages/surface-client
@@ -190,7 +190,7 @@ jobs:
   publish-notes-ui-npm:
     name: publish @openparachute/notes-ui to npm
     needs: test
-    # notes-ui-only: skip on app and client tags.
+    # notes-ui-only: skip on surface and surface-client tags.
     if: ${{ startsWith(github.ref_name, 'notes-ui-') }}
     runs-on: ubuntu-latest
     permissions:
