@@ -2,8 +2,8 @@
 #
 # This workflow publishes THREE packages on different tag namespaces:
 #
-#   - @openparachute/app          ← tag prefix `v...`          (from packages/app-host)
-#   - @openparachute/app-client   ← tag prefix `client-v...`   (from packages/app-client)
+#   - @openparachute/surface      ← tag prefix `v...`          (from packages/surface-host)
+#   - @openparachute/surface-client ← tag prefix `client-v...`   (from packages/surface-client)
 #   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
 #
 # All packages have npm Trusted Publisher rules pointing at this workflow
@@ -21,11 +21,11 @@
 # Release flow:
 #   1. When ready to ship: bump version in the relevant package.json on main.
 #   2. Push a matching tag:
-#        # for app
-#        VERSION="v$(bun -e "console.log(require('./packages/app-host/package.json').version)")"
+#        # for surface
+#        VERSION="v$(bun -e "console.log(require('./packages/surface-host/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
-#        # for app-client
-#        VERSION="client-v$(bun -e "console.log(require('./packages/app-client/package.json').version)")"
+#        # for surface-client
+#        VERSION="client-v$(bun -e "console.log(require('./packages/surface-client/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
 #        # for notes-ui
 #        VERSION="notes-ui-v$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")"
@@ -34,8 +34,8 @@
 #      the tag prefix.
 #
 # Operator setup (one-time) — see RELEASING.md:
-#   - npm Trusted Publisher rules: one per package (app, app-client, notes-ui).
-#     All three rules point at: org=ParachuteComputer, repo=parachute-app,
+#   - npm Trusted Publisher rules: one per package (surface, surface-client, notes-ui).
+#     All three rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -69,19 +69,19 @@ jobs:
         with:
           bun-version: 1.3
       - name: install deps
-        # Workspace root install — picks up packages/app-host, packages/app-client,
+        # Workspace root install — picks up packages/surface-host, packages/surface-client,
         # and web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks all three packages (app-host, app-client, notes-ui).
+        # Root script typechecks all three packages (surface-host, surface-client, notes-ui).
         run: bun run typecheck
       - name: tests
-        # Root script runs all three suites: app-host (bun test), app-client
+        # Root script runs all three suites: surface-host (bun test), surface-client
         # (bun test), and notes-ui (vitest via `bun run --filter`).
         run: bun run test
 
-  publish-app-npm:
-    name: publish @openparachute/app to npm
+  publish-surface-npm:
+    name: publish @openparachute/surface to npm
     needs: test
     # App-only: skip on client- and notes-ui- tags.
     if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'notes-ui-') }}
@@ -108,29 +108,29 @@ jobs:
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
         # Defense against tag-vs-package.json drift. If they don't match,
-        # we'd publish under the wrong version. We pin on app-host's
+        # we'd publish under the wrong version. We pin on surface-host's
         # package.json — that's the package this workflow publishes.
         run: |
-          PKG_VERSION=$(bun -e "console.log(require('./packages/app-host/package.json').version)")
+          PKG_VERSION=$(bun -e "console.log(require('./packages/surface-host/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::packages/app-host/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            echo "::error::packages/surface-host/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
-      - name: build app-host (bundles admin SPA into dist/)
-        # app-host's `files` includes `dist/admin/**`, so the admin SPA
+      - name: build surface-host (bundles admin SPA into dist/)
+        # surface-host's `files` includes `dist/admin/**`, so the admin SPA
         # must be built before `npm publish` packs the tarball. The
         # package.json has no prepack/prepublishOnly hook, so we run
         # the build explicitly here.
-        working-directory: packages/app-host
+        working-directory: packages/surface-host
         run: bun run build
       - name: publish
         # Trusted Publishing: npm verifies the OIDC token from this workflow
         # against the package's configured trusted publisher rule
-        # (org=ParachuteComputer, repo=parachute-app, workflow=release.yml).
+        # (org=ParachuteComputer, repo=parachute-surface, workflow=release.yml).
         # No NPM_TOKEN secret needed; `id-token: write` permission above
         # makes the OIDC token available to npm CLI.
-        working-directory: packages/app-host
+        working-directory: packages/surface-host
         run: |
           # Detect rc vs stable from tag name. Tag pattern in `on:` above
           # enforces the shape, so this is just disambiguation.
@@ -139,13 +139,13 @@ jobs:
           else
             DIST_TAG=latest
           fi
-          echo "publishing @openparachute/app with dist-tag=$DIST_TAG"
+          echo "publishing @openparachute/surface with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
-  publish-app-client-npm:
-    name: publish @openparachute/app-client to npm
+  publish-surface-client-npm:
+    name: publish @openparachute/surface-client to npm
     needs: test
-    # app-client-only: skip on app (`v*`) tags.
+    # surface-client-only: skip on surface (`v*`) tags.
     if: ${{ startsWith(github.ref_name, 'client-') }}
     runs-on: ubuntu-latest
     permissions:
@@ -164,33 +164,33 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against app-client's package.json — that's the package this
+        # Pin against surface-client's package.json — that's the package this
         # job publishes. Tag prefix is `client-v...`.
         run: |
-          PKG_VERSION=$(bun -e "console.log(require('./packages/app-client/package.json').version)")
+          PKG_VERSION=$(bun -e "console.log(require('./packages/surface-client/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#client-v}"
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::packages/app-client/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            echo "::error::packages/surface-client/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
       - name: publish
-        # app-client's package.json has `prepublishOnly: bun run build`, so
+        # surface-client's package.json has `prepublishOnly: bun run build`, so
         # `npm publish` will build (tsc) before packing. No explicit build
         # step needed here.
-        working-directory: packages/app-client
+        working-directory: packages/surface-client
         run: |
           if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
             DIST_TAG=rc
           else
             DIST_TAG=latest
           fi
-          echo "publishing @openparachute/app-client with dist-tag=$DIST_TAG"
+          echo "publishing @openparachute/surface-client with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-notes-ui-npm:
     name: publish @openparachute/notes-ui to npm
     needs: test
-    # notes-ui-only: skip on app and client tags.
+    # notes-ui-only: skip on surface and surface-client tags.
     if: ${{ startsWith(github.ref_name, 'notes-ui-') }}
     runs-on: ubuntu-latest
     permissions:
