@@ -156,3 +156,16 @@ export interface UploadProgress {
 }
 
 export type ReachabilitySignal = "healthy" | "unreachable";
+
+/**
+ * Result of `GET /api/find-path` — the BFS shortest-path between two
+ * notes in the link graph. `path` is the sequence of note IDs from
+ * source to target (inclusive at both ends); `relationships` is one
+ * entry shorter — the link type traversed at each hop. Vault returns
+ * `null` (no envelope) when no path is reachable within the depth
+ * limit.
+ */
+export interface FindPathResult {
+  path: string[];
+  relationships: string[];
+}

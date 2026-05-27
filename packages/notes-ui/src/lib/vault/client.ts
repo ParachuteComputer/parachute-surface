@@ -125,7 +125,14 @@ export class VaultClient extends BaseVaultClient {
 
   constructor(opts: VaultClientOptions) {
     super(opts);
-    this.currentToken = opts.accessToken;
+    // Base accepts `accessToken?` since the script-friendly surface
+    // (surface-client rc.5+) also permits a `tokenProvider` callback in
+    // place of a static token. Notes' subclass still expects a static
+    // token; default to "" matches the base's own fallback so the blob
+    // path still works when callers wire a tokenProvider (the next
+    // request through the standard path will rotate this field via
+    // setAccessToken → super.setAccessToken).
+    this.currentToken = opts.accessToken ?? "";
     this.currentFetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     if (opts.onAuthError !== undefined) this.currentOnAuthError = opts.onAuthError;
     if (opts.onAuthRevoked !== undefined) this.currentOnAuthRevoked = opts.onAuthRevoked;
