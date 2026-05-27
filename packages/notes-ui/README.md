@@ -20,7 +20,7 @@ parachute-surface fetches this package from npm, unpacks `dist/`, and serves it 
 
 The legacy module-shaped wrapper `@openparachute/notes` (in the now-archived `parachute-notes` repo) installed via `parachute install notes`. It shipped the same bundle during the notes migration arc but has been deprecated; hub redirects `/notes/*` → `/surface/notes/*` for backwards compat. See the [parachute-surface design doc §16][s16] for the migration arc.
 
-[s16]: https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-surfaces-design.md
+[s16]: https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-surface-design.md
 
 ## Source
 
