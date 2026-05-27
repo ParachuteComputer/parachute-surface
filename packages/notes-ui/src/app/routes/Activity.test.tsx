@@ -128,7 +128,7 @@ describe("Activity route", () => {
     expect(screen.getByText("Edited")).toBeInTheDocument();
   });
 
-  it("shows the empty state with capture link when there's nothing", async () => {
+  it("shows the empty state with a create link when there's nothing", async () => {
     installFetch([]);
     render(
       <Wrap>
@@ -136,7 +136,9 @@ describe("Activity route", () => {
       </Wrap>,
     );
     expect(await screen.findByText(/no activity in the last 30 days/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open capture/i })).toBeInTheDocument();
+    // Empty-state CTA points at the unified create surface (was "Open
+    // capture" → /capture pre-2026-05-27).
+    expect(screen.getByRole("link", { name: /new note/i })).toBeInTheDocument();
   });
 
   it("paginates with Load more and reveals the next 50", async () => {

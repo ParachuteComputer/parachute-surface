@@ -143,7 +143,7 @@ describe("Today route", () => {
     expect(screen.getByRole("link", { name: /^today$/i })).toBeInTheDocument();
   });
 
-  it("shows empty state with capture link when today is empty", async () => {
+  it("shows empty state with a create link when today is empty", async () => {
     installFetch([]);
     render(
       <Wrap>
@@ -151,10 +151,12 @@ describe("Today route", () => {
       </Wrap>,
     );
     expect(await screen.findByText(/nothing yet today — start capturing/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open capture/i })).toBeInTheDocument();
+    // Empty-state CTA points at /new (unified create surface) since
+    // 2026-05-27. Was /capture pre-rename.
+    expect(screen.getByRole("link", { name: /^new note$/i })).toBeInTheDocument();
   });
 
-  it("shows dated empty copy (no capture button) for a past day", async () => {
+  it("shows dated empty copy (no create button) for a past day", async () => {
     installFetch([]);
     render(
       <Wrap initial="/today?date=2026-04-10">
@@ -162,7 +164,7 @@ describe("Today route", () => {
       </Wrap>,
     );
     expect(await screen.findByText(/nothing on 2026-04-10/i)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /open capture/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^new note$/i })).not.toBeInTheDocument();
   });
 
   it("prev/next links point to the neighbouring day", async () => {

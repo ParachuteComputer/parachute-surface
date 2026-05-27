@@ -7,12 +7,44 @@ import { buildWikilinkResolver } from "@/components/MarkdownView";
 import { NoteRenderer } from "@/components/NoteRenderer";
 import { TagEditor, normalizeTag } from "@/components/TagEditor";
 import { useAttachmentUploader } from "@/components/useAttachmentUploader";
+import { extractHashtags } from "@/lib/capture/hashtags";
+import { memoFilename, quickPath } from "@/lib/capture/recorder";
+import { useVoiceCapture } from "@/lib/capture/use-voice-capture";
+import { blobRef, enqueue, newBlobId, newLocalId } from "@/lib/sync";
 import { useToastStore } from "@/lib/toast/store";
-import { useCreateNote, useLinkAttachment, useVaultStore } from "@/lib/vault";
+import { useCreateNote, useLinkAttachment, useTagRoles, useVaultStore } from "@/lib/vault";
 import { type CreateNotePayload, VaultAuthError } from "@/lib/vault/client";
+import { useActiveVaultClient } from "@/lib/vault/queries";
+import { ensureNotesSchema } from "@/lib/vault/schema-ensure";
 import type { Note } from "@/lib/vault/types";
+import { useSync } from "@/providers/SyncProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
+
+// Unified note-creation screen — replaces the prior split between `/new`
+// (form-shaped text-only) and `/capture` (voice + transcript landing).
+// Aaron's 2026-05-27 framing: "having New Note and Capture as two
+// different surfaces is confusing — unify into one simplified interface
+// that allows for folks to be specific but still keeps it simple."
+//
+// One screen:
+//   - Title input at the top (visible — not behind a "More fields" toggle)
+//   - Content area (CodeMirror)
+//   - Tags row (chips + add)
+//   - "Record" mic affordance — opens an inline recorder; on stop, audio
+//     stages alongside any text the operator wrote. Saving with audio
+//     present goes through the same sync-queue path as the old Capture
+//     route (create-note + upload-attachment + link-attachment{transcribe})
+//     so the scribe pipeline appends the transcript to the note body.
+//
+// Notably dropped:
+//   - The standalone "Summary" field. Operators were ignoring it; the
+//     metadata.summary key still exists at the vault level and can be set
+//     via MCP / direct API — just not here. Saves one field of friction.
+//   - Capture's background draft-save loop. `useCreateNote()` already
+//     queues offline; manual save is the only commit path now.
+//   - The "More fields" disclosure — Title is up front, Summary is gone,
+//     no need to hide anything.
 
 interface StagedUpload {
   path: string;
@@ -24,10 +56,9 @@ interface DraftState {
   content: string;
   path: string;
   tags: string[];
-  summary: string;
 }
 
-const EMPTY_DRAFT: DraftState = { content: "", path: "", tags: [], summary: "" };
+const EMPTY_DRAFT: DraftState = { content: "", path: "", tags: [] };
 
 export function NoteNew() {
   const activeVault = useVaultStore((s) => s.getActiveVault());
@@ -35,11 +66,25 @@ export function NoteNew() {
   const pushToast = useToastStore((s) => s.push);
   const mutation = useCreateNote();
   const linkAttachment = useLinkAttachment();
-  const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
+  const { db, blobStore, engine } = useSync();
+  const { roles } = useTagRoles(activeVault?.id ?? null);
+  const client = useActiveVaultClient();
+
+  // Default the path to a `quickPath()` so the operator sees a real value
+  // up front but can override (or clear) before save. Matches Capture's
+  // path-gen behaviour (see notes#126) — we never silently fall back to
+  // vault-auto-assign.
+  const defaultPathRef = useRef(quickPath());
+  const [draft, setDraft] = useState<DraftState>(() => ({
+    ...EMPTY_DRAFT,
+    path: defaultPathRef.current,
+  }));
   const [tagInput, setTagInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedUpload[]>([]);
+  const [isSavingAudio, setIsSavingAudio] = useState(false);
   const editorRef = useRef<CodeMirrorEditorHandle>(null);
+  const voice = useVoiceCapture();
 
   const uploader = useAttachmentUploader({
     noteId: null,
@@ -56,23 +101,32 @@ export function NoteNew() {
 
   if (!activeVault) return <Navigate to="/" replace />;
 
+  const hasAudio = voice.phase.kind === "have-audio";
+  const hasText = draft.content.trim().length > 0;
+
   const isDirty =
     draft.content.length > 0 ||
-    draft.path.length > 0 ||
+    draft.path !== defaultPathRef.current ||
     draft.tags.length > 0 ||
-    draft.summary.length > 0;
+    hasAudio;
 
-  const isValid = draft.content.trim().length > 0 && draft.path.trim().length > 0;
+  // Text-only mode requires path + content. Audio satisfies the "body" half
+  // because the transcript will land there; path still required so the
+  // operator always sees what they're writing.
+  const isValid = draft.path.trim().length > 0 && (hasText || hasAudio);
+  const pending = mutation.isPending || isSavingAudio;
 
-  const handleCreate = useCallback(() => {
-    if (!isValid || mutation.isPending) return;
+  // ---- text-only save ------------------------------------------------------
+  const saveTextOnly = useCallback(() => {
+    if (!isValid || pending) return;
+    const explicit = draft.tags;
+    const extracted = extractHashtags(draft.content);
+    const allTags = Array.from(new Set([...explicit, ...extracted].filter((t) => t.length > 0)));
     const payload: CreateNotePayload = {
       content: draft.content,
       path: draft.path.trim(),
     };
-    if (draft.tags.length) payload.tags = draft.tags;
-    const summary = draft.summary.trim();
-    if (summary) payload.metadata = { summary };
+    if (allTags.length) payload.tags = allTags;
 
     setSaveError(null);
     mutation.mutate(payload, {
@@ -106,13 +160,125 @@ export function NoteNew() {
         }
       },
     });
-  }, [draft, isValid, linkAttachment, mutation, navigate, pushToast, staged]);
+  }, [draft, isValid, linkAttachment, mutation, navigate, pending, pushToast, staged]);
+
+  // ---- audio save ----------------------------------------------------------
+  // Mirrors Capture's audio path: enqueue create-note + upload-attachment +
+  // link-attachment{transcribe:true} so the scribe pipeline appends the
+  // transcript to the body once it's processed. Goes through the sync queue
+  // (not useCreateNote) because audio blobs are big enough that the
+  // blob-store is the right place for them, and the queue handles retry on
+  // its own.
+  const saveWithAudio = useCallback(async () => {
+    if (!isValid || pending) return;
+    if (voice.phase.kind !== "have-audio") return;
+    if (!db || !blobStore) {
+      pushToast("Sync queue not ready — try again in a moment.", "error");
+      return;
+    }
+    setSaveError(null);
+    setIsSavingAudio(true);
+    const audio = voice.phase;
+    const path = draft.path.trim();
+    const explicit = draft.tags;
+    const extracted = extractHashtags(draft.content);
+    const finalTags = Array.from(
+      new Set([roles.captureVoice, ...explicit, ...extracted].filter((t) => t.length > 0)),
+    );
+    if (hasText) finalTags.push(roles.captureText);
+    // de-dupe again after the conditional push so the role tag isn't duplicated.
+    const tags = Array.from(new Set(finalTags));
+
+    const recordedAt = new Date();
+    const filename = memoFilename(audio.mimeType, recordedAt);
+    const blobId = newBlobId();
+    const localId = newLocalId();
+    const body = hasText
+      ? `${draft.content.trim()}\n\n_Transcript pending._\n\n![[${filename}]]\n`
+      : `_Transcript pending._\n\n![[${filename}]]\n`;
+
+    // Fire-and-forget schema ensure — mirrors Capture's behavior. Vault
+    // accepts notes with unwritten tag-identity rows, so we don't await.
+    if (client) {
+      void ensureNotesSchema(activeVault.id, client);
+    }
+
+    try {
+      await blobStore.put(blobId, audio.data, audio.mimeType, activeVault.id);
+      await enqueue(
+        db,
+        {
+          kind: "create-note",
+          localId,
+          payload: {
+            content: body,
+            path,
+            ...(tags.length ? { tags } : {}),
+          },
+        },
+        { vaultId: activeVault.id },
+      );
+      await enqueue(
+        db,
+        {
+          kind: "upload-attachment",
+          blobId,
+          filename,
+          mimeType: audio.mimeType,
+        },
+        { vaultId: activeVault.id },
+      );
+      await enqueue(
+        db,
+        {
+          kind: "link-attachment",
+          noteId: localId,
+          pathRef: blobRef(blobId),
+          mimeType: audio.mimeType,
+          transcribe: true,
+        },
+        { vaultId: activeVault.id },
+      );
+      void engine?.runOnce();
+      pushToast("Captured — syncing audio.", "success");
+      voice.discardAudio();
+      navigate(`/n/${encodeURIComponent(localId)}`);
+    } catch (e) {
+      pushToast(e instanceof Error ? `Capture failed: ${e.message}` : "Capture failed.", "error");
+      setSaveError(e instanceof Error ? e.message : "Capture failed");
+    } finally {
+      setIsSavingAudio(false);
+    }
+  }, [
+    activeVault,
+    blobStore,
+    client,
+    db,
+    draft,
+    engine,
+    hasText,
+    isValid,
+    navigate,
+    pending,
+    pushToast,
+    roles.captureText,
+    roles.captureVoice,
+    voice,
+  ]);
+
+  const handleSave = useCallback(() => {
+    if (hasAudio) void saveWithAudio();
+    else saveTextOnly();
+  }, [hasAudio, saveTextOnly, saveWithAudio]);
 
   const handleCancel = useCallback(() => {
     if (isDirty && !confirm("Discard this draft?")) return;
+    voice.discardAudio();
     navigate("/");
-  }, [isDirty, navigate]);
+  }, [isDirty, navigate, voice]);
 
+  // Page-leave guard. Don't pop on save-success (when we navigate
+  // programmatically, isDirty drops because state was just cleared).
   useEffect(() => {
     if (!isDirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -162,12 +328,12 @@ export function NoteNew() {
               </button>
               <button
                 type="button"
-                onClick={handleCreate}
-                disabled={!isValid || mutation.isPending}
+                onClick={handleSave}
+                disabled={!isValid || pending}
                 className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
                 title="Create (⌘S)"
               >
-                {mutation.isPending ? "Creating…" : "Create"}
+                {pending ? "Creating…" : "Create"}
               </button>
             </div>
           </div>
@@ -182,17 +348,6 @@ export function NoteNew() {
                 className="flex-1 rounded-md border border-border bg-card px-2.5 py-1 font-mono text-sm text-fg focus:border-accent focus:outline-none"
                 aria-label="Note path"
                 placeholder="e.g. Projects/README"
-              />
-            </label>
-            <label className="flex items-baseline gap-3 text-sm">
-              <span className="shrink-0 text-xs uppercase tracking-wider text-fg-dim">Summary</span>
-              <input
-                type="text"
-                value={draft.summary}
-                onChange={(e) => setDraft((d) => ({ ...d, summary: e.target.value }))}
-                className="flex-1 rounded-md border border-border bg-card px-2.5 py-1 text-sm text-fg focus:border-accent focus:outline-none"
-                aria-label="Note summary"
-                placeholder="(optional one-line description)"
               />
             </label>
             <TagEditor
@@ -214,6 +369,8 @@ export function NoteNew() {
           </div>
         ) : null}
 
+        <VoicePanel voice={voice} />
+
         <div className="grid min-h-[60vh] gap-4 lg:grid-cols-2">
           <AttachmentDropZone
             onDropFiles={uploader.start}
@@ -224,7 +381,7 @@ export function NoteNew() {
               ref={editorRef}
               value={draft.content}
               onChange={(content) => setDraft((d) => ({ ...d, content }))}
-              onSave={handleCreate}
+              onSave={handleSave}
               onCancel={handleCancel}
               onPasteFile={(files) => {
                 uploader.start(files);
@@ -284,4 +441,96 @@ export function NoteNew() {
       </article>
     </div>
   );
+}
+
+// Inline voice affordance. Sits above the editor so the operator sees it
+// at a glance — Aaron's "voice-capture affordance at the top of the content
+// area." Idle: a single "Record" button. Recording: live elapsed + stop
+// button (also stops on global pointerup if the user is hold-pressing).
+// Have-audio: preview + discard. Denied: error message inline.
+function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
+  const { phase, elapsedMs, startRecording, stopRecording, discardAudio } = voice;
+  const isRecording = phase.kind === "recording";
+  const isRequesting = phase.kind === "requesting";
+
+  if (phase.kind === "have-audio") {
+    return (
+      <div className="mb-4 flex flex-col gap-2 rounded-md border border-accent/30 bg-accent/5 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-fg-muted">
+            🎙 Recorded {formatElapsed(phase.durationMs)}
+          </span>
+          <button
+            type="button"
+            onClick={discardAudio}
+            className="text-xs text-fg-dim hover:text-red-400"
+          >
+            Discard
+          </button>
+        </div>
+        <audio controls src={phase.url} className="w-full">
+          <track kind="captions" />
+        </audio>
+        <p className="text-xs text-fg-dim">
+          Transcript will be appended once your vault processes it. Save to commit.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card/60 p-3">
+      <div className="text-xs text-fg-dim">
+        {isRecording
+          ? "Recording — release or click Stop to finish."
+          : isRequesting
+            ? "Requesting microphone…"
+            : "Add a voice memo to this note. Audio gets transcribed and appended."}
+      </div>
+      {isRecording ? (
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            void stopRecording();
+          }}
+          onClick={() => void stopRecording()}
+          aria-label={`Recording — ${formatElapsed(elapsedMs)} — stop`}
+          aria-pressed="true"
+          className="flex min-h-11 items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400"
+        >
+          <span aria-hidden="true" className="animate-pulse">
+            🎙
+          </span>
+          <span>Stop {formatElapsed(elapsedMs)}</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            void startRecording();
+          }}
+          aria-label="Record voice memo"
+          disabled={isRequesting}
+          className="flex min-h-11 items-center gap-2 rounded-full border border-accent/30 bg-accent/10 px-4 py-2 text-sm font-medium text-accent hover:bg-accent/15 disabled:opacity-40"
+        >
+          <span aria-hidden="true">🎙</span>
+          <span>{isRequesting ? "Requesting…" : "Record"}</span>
+        </button>
+      )}
+      {phase.kind === "denied" ? (
+        <p className="basis-full rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+          {phase.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }

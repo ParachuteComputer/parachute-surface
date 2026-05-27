@@ -134,10 +134,10 @@ function EmptyBlock() {
     <div className="rounded-md border border-border bg-card p-10 text-center">
       <p className="mb-4 text-fg-muted">No activity in the last 30 days.</p>
       <Link
-        to="/capture"
+        to="/new"
         className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
       >
-        Open capture
+        New note
       </Link>
     </div>
   );

@@ -85,10 +85,10 @@ export function Today() {
             Calendar
           </Link>
           <Link
-            to="/capture"
+            to="/new"
             className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:bg-accent-hover"
           >
-            + Capture
+            + New note
           </Link>
         </div>
       </header>
@@ -164,10 +164,10 @@ function EmptyBlock({ isToday, targetKey }: { isToday: boolean; targetKey: strin
       </p>
       {isToday ? (
         <Link
-          to="/capture"
+          to="/new"
           className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
         >
-          Open capture
+          New note
         </Link>
       ) : null}
     </div>

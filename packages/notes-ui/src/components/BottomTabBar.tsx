@@ -26,7 +26,10 @@ export function BottomTabBar() {
   const isHome =
     path === "/" || path.startsWith("/n/") || path === "/pinned" || path === "/archived";
   const isTags = path === "/tags";
-  const isCapture = path === "/capture" || path === "/new";
+  // `/new` is the unified create surface; `/capture` is a legacy redirect
+  // but it still flashes through this component during the location update,
+  // so include it in the active-match set.
+  const isNew = path === "/new" || path === "/capture";
   const isSettings = path === "/settings";
 
   return (
@@ -38,7 +41,7 @@ export function BottomTabBar() {
       <ul className="mx-auto flex max-w-5xl items-stretch justify-around">
         <Tab to="/" label="Home" active={isHome} icon={<IconHome />} />
         <Tab to="/tags" label="Tags" active={isTags} icon={<IconTag />} />
-        <Tab to="/capture" label="Capture" active={isCapture} icon={<IconPlus />} />
+        <Tab to="/new" label="New" active={isNew} icon={<IconPlus />} />
         <TabButton label="Search" icon={<IconSearch />} onClick={() => setSwitcherOpen(true)} />
         <Tab to="/settings" label="Settings" active={isSettings} icon={<IconCog />} />
       </ul>

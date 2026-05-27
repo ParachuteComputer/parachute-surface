@@ -1,6 +1,9 @@
 import { NoteNew } from "@/app/routes/NoteNew";
+import { type LensDB, openLensDB } from "@/lib/sync/db";
+import { listPending } from "@/lib/sync/queue";
 import { useToastStore } from "@/lib/toast/store";
 import { useVaultStore } from "@/lib/vault/store";
+import { SyncProvider } from "@/providers/SyncProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -51,6 +54,70 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
         </>
       );
     }),
+  };
+});
+
+// schema-ensure fires real `PUT /api/tags/:name` against the active vault.
+// The text-only tests mock fetch but don't enumerate every tag-ensure call;
+// stub the module to a no-op (schema-ensure has its own focused tests).
+vi.mock("@/lib/vault/schema-ensure", () => ({
+  ensureNotesSchema: vi.fn(async () => {}),
+}));
+
+// Audio-recording stubs — only the voice tests actually trigger these, but
+// the module mock has to be top-level. Mirrors the pattern Capture.test.tsx
+// used pre-unification.
+interface FakeController {
+  start: () => void;
+  pause: () => void;
+  resume: () => void;
+  stop: () => Promise<{ data: ArrayBuffer; mimeType: string; durationMs: number }>;
+  cancel: () => void;
+  state: "idle" | "recording" | "paused" | "stopped";
+  mimeType: string;
+}
+
+const fakeState = {
+  controller: null as FakeController | null,
+  requestMic: vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream),
+  pickResult: "audio/webm;codecs=opus" as string | null,
+};
+
+vi.mock("@/lib/capture/recorder", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/capture/recorder")>("@/lib/capture/recorder");
+  return {
+    ...actual,
+    pickMimeType: () => fakeState.pickResult,
+    requestMic: () => fakeState.requestMic(),
+    createRecorder: (opts: { mimeType: string }) => {
+      const c: FakeController = {
+        state: "idle",
+        mimeType: opts.mimeType,
+        start() {
+          this.state = "recording";
+        },
+        pause() {
+          this.state = "paused";
+        },
+        resume() {
+          this.state = "recording";
+        },
+        async stop() {
+          this.state = "stopped";
+          return {
+            data: new Uint8Array([10, 20, 30]).buffer,
+            mimeType: opts.mimeType,
+            durationMs: 4_200,
+          };
+        },
+        cancel() {
+          this.state = "stopped";
+        },
+      };
+      fakeState.controller = c;
+      return c;
+    },
   };
 });
 
@@ -162,9 +229,18 @@ function seedStore() {
   );
 }
 
+async function freshDb(): Promise<LensDB> {
+  indexedDB.deleteDatabase("parachute-lens");
+  return openLensDB();
+}
+
 function Wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <SyncProvider>{children}</SyncProvider>
+    </QueryClientProvider>
+  );
 }
 
 function renderAt(path: string) {
@@ -180,13 +256,25 @@ function renderAt(path: string) {
   );
 }
 
-describe("NoteNew route", () => {
-  beforeEach(() => {
+describe("NoteNew route — unified create surface", () => {
+  beforeEach(async () => {
+    const db = await freshDb();
+    db.close();
     localStorage.clear();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     useToastStore.setState({ toasts: [] });
     seedStore();
+    fakeState.controller = null;
+    fakeState.pickResult = "audio/webm;codecs=opus";
+    fakeState.requestMic = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
     vi.spyOn(window, "confirm").mockImplementation(() => true);
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => "blob:fake"),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
   });
 
   afterEach(() => {
@@ -194,23 +282,33 @@ describe("NoteNew route", () => {
     vi.restoreAllMocks();
   });
 
-  it("Create is disabled until both path and content are present", async () => {
+  it("Title field is visible up front, no Summary field present", async () => {
+    installFetch({});
+    renderAt("/new");
+
+    // Title visible — Aaron's "we shouldn't hide away Title".
+    expect(screen.getByLabelText(/note path/i)).toBeInTheDocument();
+    // Path defaults to a quickPath() value so the operator sees a real
+    // sample they can override or accept.
+    expect((screen.getByLabelText(/note path/i) as HTMLInputElement).value).toMatch(
+      /^Notes\/\d{4}\/\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/,
+    );
+    // Summary surface gone per Aaron's "don't include Summary on every note".
+    expect(screen.queryByLabelText(/summary/i)).toBeNull();
+  });
+
+  it("Create is disabled until content (or audio) is present", async () => {
     installFetch({});
     renderAt("/new");
 
     const create = screen.getByRole("button", { name: /^create$/i });
-    expect(create).toBeDisabled();
+    expect(create).toBeDisabled(); // path is pre-filled, but no body yet
 
-    const pathInput = screen.getByLabelText(/note path/i);
-    fireEvent.change(pathInput, { target: { value: "Projects/README" } });
-    expect(create).toBeDisabled(); // still need content
-
-    const cm = screen.getByTestId("cm-editor");
-    fireEvent.change(cm, { target: { value: "# hello" } });
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "# hello" } });
     expect(create).not.toBeDisabled();
   });
 
-  it("happy path: POSTs payload and navigates to /n/<new-id>", async () => {
+  it("happy path: POSTs payload without summary metadata and navigates to /n/<new-id>", async () => {
     const fetchImpl = installFetch({
       "POST /api/notes": {
         status: 201,
@@ -228,9 +326,6 @@ describe("NoteNew route", () => {
 
     fireEvent.change(screen.getByLabelText(/note path/i), {
       target: { value: "Projects/README" },
-    });
-    fireEvent.change(screen.getByLabelText(/note summary/i), {
-      target: { value: "A readme" },
     });
     const tagInput = screen.getByLabelText(/add tag/i);
     fireEvent.change(tagInput, { target: { value: "docs" } });
@@ -250,14 +345,47 @@ describe("NoteNew route", () => {
     );
     expect(postCall).toBeDefined();
     const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    // No `metadata.summary` — Summary field is gone from this surface.
     expect(body).toEqual({
       content: "# hi",
       path: "Projects/README",
       tags: ["docs"],
-      metadata: { summary: "A readme" },
     });
 
     expect(useToastStore.getState().toasts[0]?.message).toContain("Created");
+  });
+
+  it("extracts #hashtags from body content alongside explicit tag chips", async () => {
+    const fetchImpl = installFetch({
+      "POST /api/notes": {
+        status: 201,
+        body: {
+          id: "n",
+          path: "Notes/test",
+          createdAt: "2026-05-27T12:00:00Z",
+          content: "got an #idea",
+          tags: ["idea", "docs"],
+        },
+      },
+    });
+    renderAt("/new");
+
+    const tagInput = screen.getByLabelText(/add tag/i);
+    fireEvent.change(tagInput, { target: { value: "docs" } });
+    fireEvent.keyDown(tagInput, { key: "Enter" });
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "got an #idea" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage")).toBeInTheDocument();
+    });
+    const post = fetchImpl.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+    );
+    const body = JSON.parse((post![1] as RequestInit).body as string);
+    expect(new Set(body.tags)).toEqual(new Set(["docs", "idea"]));
   });
 
   it("drop file → uploads, inserts image markdown, stages for link-on-create", async () => {
@@ -431,5 +559,140 @@ describe("NoteNew route", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/500|path is taken/i);
     expect((screen.getByLabelText(/note path/i) as HTMLInputElement).value).toBe("dup");
     expect((screen.getByTestId("cm-editor") as HTMLTextAreaElement).value).toBe("keep me");
+  });
+});
+
+describe("NoteNew — voice affordance", () => {
+  let restoreOnline: (() => void) | null = null;
+
+  beforeEach(async () => {
+    const db = await freshDb();
+    db.close();
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    useToastStore.setState({ toasts: [] });
+    seedStore();
+    fakeState.controller = null;
+    fakeState.pickResult = "audio/webm;codecs=opus";
+    fakeState.requestMic = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
+    vi.spyOn(window, "confirm").mockImplementation(() => true);
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => "blob:fake"),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
+    // The audio path uses the sync queue, which is the offline-only path.
+    // Force navigator.onLine to false so the route doesn't try a live POST.
+    const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, "onLine");
+    Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });
+    restoreOnline = () => {
+      if (desc) Object.defineProperty(navigator, "onLine", desc);
+    };
+  });
+
+  afterEach(() => {
+    restoreOnline?.();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function releasePointer() {
+    window.dispatchEvent(new Event("pointerup"));
+  }
+
+  it("shows a Record button on the unified surface", async () => {
+    installFetch({});
+    renderAt("/new");
+    expect(await screen.findByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+  });
+
+  it("hold-press → release captures audio and enables Save", async () => {
+    installFetch({});
+    renderAt("/new");
+
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.pointerDown(recordBtn);
+      await Promise.resolve();
+    });
+    // Mid-recording: a Stop button shows up.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+    });
+    await act(async () => {
+      releasePointer();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Audio is now staged: the audio preview appears.
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+    // Create button enables even without typed content because audio
+    // satisfies the "body" half of the validity check.
+    expect(screen.getByRole("button", { name: /^create$/i })).not.toBeDisabled();
+  });
+
+  it("voice + Create → enqueues create-note + upload-attachment + link-attachment{transcribe}", async () => {
+    installFetch({});
+    renderAt("/new");
+
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.pointerDown(recordBtn);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releasePointer();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    });
+
+    // Navigated away — open the queue and inspect what we enqueued.
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage")).toBeInTheDocument();
+    });
+    const db = await openLensDB();
+    const pending = await listPending(db, "dev");
+    db.close();
+    const kinds = pending.map((p) => p.mutation.kind).sort();
+    expect(kinds).toEqual(["create-note", "link-attachment", "upload-attachment"]);
+    const link = pending.find((p) => p.mutation.kind === "link-attachment");
+    expect(link).toBeDefined();
+    if (link && link.mutation.kind === "link-attachment") {
+      expect(link.mutation.transcribe).toBe(true);
+    }
+  });
+
+  it("discard audio reverts the panel to idle", async () => {
+    installFetch({});
+    renderAt("/new");
+
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.pointerDown(recordBtn);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releasePointer();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /discard/i }));
+    });
+    expect(screen.queryByText(/recorded\s+/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
   });
 });

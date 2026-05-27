@@ -64,8 +64,8 @@ export function Header() {
               <Link to="/activity" className="text-sm text-fg-muted hover:text-accent">
                 Activity
               </Link>
-              <Link to="/capture" className="text-sm text-fg-muted hover:text-accent">
-                + Capture
+              <Link to="/new" className="text-sm text-fg-muted hover:text-accent">
+                + New
               </Link>
               <VaultPopover />
               <Link to="/settings" className="text-sm text-fg-muted hover:text-accent">
