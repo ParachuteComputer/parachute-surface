@@ -1,0 +1,76 @@
+name: Deploy notes-ui to notes.parachute.computer
+
+# Builds `@openparachute/notes-ui` to a static bundle at root path
+# (VITE_BASE_PATH=/) and publishes to GitHub Pages on a custom domain.
+#
+# notes.parachute.computer is the canonical "I just want to use my vault
+# in a browser" surface — operators on Render, Fly, or self-hosting paste
+# their hub URL into the Notes UI's connect flow and the OAuth + DCR
+# handshake wires them up. The bundle is platform-agnostic; only the
+# initial vault URL prompt is per-operator.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/notes-ui/**"
+      - "packages/surface-client/**"
+      - ".github/workflows/deploy-notes-ui.yml"
+  workflow_dispatch: {}
+
+# Two concurrent runs against the same Pages target would race; serialize.
+concurrency:
+  group: deploy-notes-ui
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: build notes-ui (root base-path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+
+      - name: install deps
+        run: bun install --frozen-lockfile
+
+      - name: build surface-client (dependency of notes-ui)
+        run: bun run --filter "@openparachute/surface-client" build
+
+      - name: build notes-ui (root base-path)
+        env:
+          # Override the default `/notes/` base path so assets resolve at
+          # root for notes.parachute.computer. The bundle's runtime
+          # `detectMountBase()` (src/lib/base-url.ts) still kicks in if
+          # someone deep-links into a sub-path, so back-compat with
+          # operator-side `/surface/notes/` mounts isn't affected.
+          VITE_BASE_PATH: "/"
+        run: bun run --filter "@openparachute/notes-ui" build
+
+      - name: copy CNAME into dist
+        run: cp packages/notes-ui/public/CNAME packages/notes-ui/dist/CNAME
+
+      - name: upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/notes-ui/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
