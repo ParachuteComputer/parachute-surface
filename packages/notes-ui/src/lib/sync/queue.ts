@@ -6,11 +6,9 @@ import {
   VaultNotFoundError,
 } from "@/lib/vault/client";
 import {
-  DEFAULT_LENS_SETTINGS,
-  LEGACY_SETTINGS_NOTE_PATH,
-  SETTINGS_NOTE_PATH,
+  DEFAULT_NOTES_SETTINGS,
   applySettingsPatch,
-  extractLensSettings,
+  extractNotesSettings,
 } from "@/lib/vault/settings";
 import type { BlobStore } from "./blob-store";
 import { type LensDB, setMeta } from "./db";
@@ -197,17 +195,6 @@ async function runMutation(ctx: DrainContext, row: PendingRow): Promise<void> {
       return;
     }
     case "update-settings": {
-      // A queued op enqueued under the brief Lens-rebrand window's path
-      // (`.parachute/lens/settings`) would otherwise drain to the legacy note
-      // instead of the current one. Settings ops are idempotent — drop the row
-      // with a warning; the user re-saves and the next write goes to the
-      // current path.
-      if (m.notePath === LEGACY_SETTINGS_NOTE_PATH) {
-        console.warn(
-          `[settings-queue] dropping queued op for migrated path "${m.notePath}" (current "${SETTINGS_NOTE_PATH}"). Re-save in Settings to apply.`,
-        );
-        return;
-      }
       await drainUpdateSettings(ctx.client, m.notePath, m.patch);
       return;
     }
@@ -352,7 +339,7 @@ async function drainUpdateNote(
 async function drainUpdateSettings(
   client: VaultClient,
   notePath: string,
-  patch: import("@/lib/vault/settings").LensSettingsPatch,
+  patch: import("@/lib/vault/settings").NotesSettingsPatch,
 ): Promise<void> {
   for (let attempt = 0; attempt <= SETTINGS_MERGE_RETRIES; attempt++) {
     let note: Awaited<ReturnType<VaultClient["getNote"]>> = null;
@@ -370,7 +357,7 @@ async function drainUpdateSettings(
         await client.createNote({
           path: notePath,
           content: "",
-          metadata: { notes: applySettingsPatch(DEFAULT_LENS_SETTINGS, patch) },
+          metadata: { notes: applySettingsPatch(DEFAULT_NOTES_SETTINGS, patch) },
         });
         return;
       } catch (err) {
@@ -381,7 +368,7 @@ async function drainUpdateSettings(
       }
     }
 
-    const server = extractLensSettings(note);
+    const server = extractNotesSettings(note);
     const merged = applySettingsPatch(server, patch);
     const baseline = note.updatedAt ?? note.createdAt;
     try {

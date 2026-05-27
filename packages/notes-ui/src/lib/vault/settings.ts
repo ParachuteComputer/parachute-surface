@@ -15,39 +15,37 @@ import type { Note } from "./types";
 // tablet / phone.
 export const SETTINGS_NOTE_PATH = ".parachute/notes/settings";
 
-// Prior location used by the Lens-branded frontend. Read on fetch-fallback so
-// existing installs (Aaron's running machine, anyone who hit main during the
-// brief Lens-branded window) keep their settings through the rebrand. We never
-// write here — the legacy note becomes harmless dead data after migration.
-export const LEGACY_SETTINGS_NOTE_PATH = ".parachute/lens/settings";
-
 export const SETTINGS_SCHEMA_VERSION = 1;
 
-// The `lens` sub-object of the settings note's metadata. Namespaced so a future
-// cross-module settings convention can layer on without collision.
-export interface LensSettings {
+// The settings sub-object of the note's metadata. Namespaced so a future
+// cross-module settings convention can layer on without collision. The on-disk
+// metadata key remains `lens` for backwards compatibility with notes written
+// during the brief Lens-branded window (April 2026); read-through accepts
+// either `notes` or `lens`, writes use `notes` going forward. A future
+// migration may rename the on-disk key.
+export interface NotesSettings {
   schemaVersion: number;
   tagRoles: TagRoles;
 }
 
-// Patch type mirrors LensSettings but lets callers supply only the fields
+// Patch type mirrors NotesSettings but lets callers supply only the fields
 // they want to change — including a partial tagRoles (e.g. bump `pinned` only).
 // Threaded through the write stack so that on a 409 we re-apply the ORIGINAL
 // patch onto the refetched server state, instead of overwriting with a
 // resolved-from-stale-cache `next`.
-export interface LensSettingsPatch {
+export interface NotesSettingsPatch {
   schemaVersion?: number;
   tagRoles?: Partial<TagRoles>;
 }
 
-export const DEFAULT_LENS_SETTINGS: LensSettings = {
+export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
   schemaVersion: SETTINGS_SCHEMA_VERSION,
   tagRoles: { ...DEFAULT_TAG_ROLES },
 };
 
-export function normalizeLensSettings(raw: unknown): LensSettings {
+export function normalizeNotesSettings(raw: unknown): NotesSettings {
   if (!raw || typeof raw !== "object") {
-    return { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
+    return { ...DEFAULT_NOTES_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
   }
   const r = raw as { schemaVersion?: unknown; tagRoles?: unknown };
   const schemaVersion =
@@ -56,17 +54,17 @@ export function normalizeLensSettings(raw: unknown): LensSettings {
   return { schemaVersion, tagRoles };
 }
 
-export function extractLensSettings(note: Note | null | undefined): LensSettings {
+export function extractNotesSettings(note: Note | null | undefined): NotesSettings {
   if (!note || !note.metadata || typeof note.metadata !== "object") {
-    return { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
+    return { ...DEFAULT_NOTES_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
   }
   const meta = note.metadata as Record<string, unknown>;
   // Read `notes` first, fall back to the legacy `lens` key so a settings note
   // written under the prior rename is still understood until it's next rewritten.
-  return normalizeLensSettings(meta.notes ?? meta.lens);
+  return normalizeNotesSettings(meta.notes ?? meta.lens);
 }
 
-export function applySettingsPatch(base: LensSettings, patch: LensSettingsPatch): LensSettings {
+export function applySettingsPatch(base: NotesSettings, patch: NotesSettingsPatch): NotesSettings {
   return {
     schemaVersion: patch.schemaVersion ?? base.schemaVersion,
     tagRoles: patch.tagRoles
@@ -80,11 +78,11 @@ export function applySettingsPatch(base: LensSettings, patch: LensSettingsPatch)
 // Newer field values win; when both sides have a partial `tagRoles`, merge
 // them key-by-key so changes on disjoint keys both survive.
 export function mergeSettingsPatches(
-  older: LensSettingsPatch | null,
-  newer: LensSettingsPatch,
-): LensSettingsPatch {
+  older: NotesSettingsPatch | null,
+  newer: NotesSettingsPatch,
+): NotesSettingsPatch {
   if (!older) return { ...newer, tagRoles: newer.tagRoles ? { ...newer.tagRoles } : undefined };
-  const merged: LensSettingsPatch = {};
+  const merged: NotesSettingsPatch = {};
   if (newer.schemaVersion !== undefined || older.schemaVersion !== undefined) {
     merged.schemaVersion = newer.schemaVersion ?? older.schemaVersion;
   }
@@ -105,7 +103,7 @@ export function mergeSettingsPatches(
 // devices may have touched between our fetch and our write.
 // ---------------------------------------------------------------------------
 
-const CACHE_PREFIX = "lens:settings:";
+const CACHE_PREFIX = "notes:settings:";
 
 function cacheKey(vaultId: string): string {
   return CACHE_PREFIX + vaultId;
@@ -114,9 +112,9 @@ function cacheKey(vaultId: string): string {
 export interface SettingsCacheEntry {
   // Rendered view (server ⊕ dirtyPatch). Stored directly so cold-mount paint
   // doesn't need to recompute.
-  settings: LensSettings;
+  settings: NotesSettings;
   // Last-known server-authored state. Null before the first successful fetch.
-  serverSettings: LensSettings | null;
+  serverSettings: NotesSettings | null;
   // `updated_at` of the settings note as we last observed it. The `if_updated_at`
   // baseline for the next PATCH. Null when the note hasn't been written.
   serverUpdatedAt: string | null;
@@ -126,11 +124,11 @@ export interface SettingsCacheEntry {
   // Accumulated locally-pending edits that haven't been confirmed on the
   // server. Null when clean. Persisted so a reboot-while-offline still flushes
   // on the next successful fetch.
-  dirtyPatch: LensSettingsPatch | null;
+  dirtyPatch: NotesSettingsPatch | null;
 }
 
-function cleanEntry(settings: LensSettings | null): SettingsCacheEntry {
-  const base = settings ?? { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
+function cleanEntry(settings: NotesSettings | null): SettingsCacheEntry {
+  const base = settings ?? { ...DEFAULT_NOTES_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
   return {
     settings: base,
     serverSettings: settings,
@@ -150,13 +148,16 @@ export function loadCachedSettings(vaultId: string): SettingsCacheEntry | null {
       parsed.serverSettings === null
         ? null
         : parsed.serverSettings
-          ? normalizeLensSettings(parsed.serverSettings)
+          ? normalizeNotesSettings(parsed.serverSettings)
           : null;
     const dirtyPatch = parsed.dirtyPatch ?? null;
-    const base = serverSettings ?? { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES } };
+    const base = serverSettings ?? {
+      ...DEFAULT_NOTES_SETTINGS,
+      tagRoles: { ...DEFAULT_TAG_ROLES },
+    };
     const settings = dirtyPatch
       ? applySettingsPatch(base, dirtyPatch)
-      : normalizeLensSettings(parsed.settings ?? base);
+      : normalizeNotesSettings(parsed.settings ?? base);
     return {
       settings,
       serverSettings,
@@ -192,8 +193,8 @@ function seedFromLegacyTagRoles(vaultId: string): SettingsCacheEntry | null {
   if (typeof localStorage === "undefined") return null;
   if (!localStorage.getItem(`lens:tag-roles:${vaultId}`)) return null;
   const legacyRoles = loadTagRoles(vaultId);
-  const patch: LensSettingsPatch = { tagRoles: legacyRoles };
-  const settings = applySettingsPatch(DEFAULT_LENS_SETTINGS, patch);
+  const patch: NotesSettingsPatch = { tagRoles: legacyRoles };
+  const settings = applySettingsPatch(DEFAULT_NOTES_SETTINGS, patch);
   // Seeded entries are dirty by construction: we've never pushed them up.
   return {
     settings,
@@ -224,13 +225,13 @@ function resolveInitialEntry(vaultId: string): SettingsCacheEntry {
 // ---------------------------------------------------------------------------
 
 export interface WriteSettingsState {
-  serverSettings: LensSettings | null;
+  serverSettings: NotesSettings | null;
   serverUpdatedAt: string | null;
   noteExists: boolean;
 }
 
 export interface WriteSettingsResult {
-  server: LensSettings;
+  server: NotesSettings;
   serverUpdatedAt: string | null;
   noteExists: true;
 }
@@ -238,13 +239,13 @@ export interface WriteSettingsResult {
 async function writeSettingsToVault(
   client: VaultClient,
   state: WriteSettingsState,
-  patch: LensSettingsPatch,
+  patch: NotesSettingsPatch,
   signal?: AbortSignal,
 ): Promise<WriteSettingsResult> {
   // First-ever write — the note doesn't exist yet. POST with the patch
   // layered onto defaults (no server state to merge against).
   if (!state.noteExists) {
-    const initial = applySettingsPatch(state.serverSettings ?? DEFAULT_LENS_SETTINGS, patch);
+    const initial = applySettingsPatch(state.serverSettings ?? DEFAULT_NOTES_SETTINGS, patch);
     try {
       const created = await client.createNote(
         { path: SETTINGS_NOTE_PATH, content: "", metadata: { notes: initial } },
@@ -298,7 +299,7 @@ async function writeSettingsToVault(
 // deleted between fetches by POSTing a new one.
 async function patchWithRefetch(
   client: VaultClient,
-  patch: LensSettingsPatch,
+  patch: NotesSettingsPatch,
   signal?: AbortSignal,
 ): Promise<WriteSettingsResult> {
   let note: Note | null = null;
@@ -309,7 +310,7 @@ async function patchWithRefetch(
     note = null;
   }
   if (!note) {
-    const initial = applySettingsPatch(DEFAULT_LENS_SETTINGS, patch);
+    const initial = applySettingsPatch(DEFAULT_NOTES_SETTINGS, patch);
     const created = await client.createNote(
       { path: SETTINGS_NOTE_PATH, content: "", metadata: { notes: initial } },
       { signal },
@@ -320,7 +321,7 @@ async function patchWithRefetch(
       noteExists: true,
     };
   }
-  const server = extractLensSettings(note);
+  const server = extractNotesSettings(note);
   const merged = applySettingsPatch(server, patch);
   const baseline = note.updatedAt ?? note.createdAt;
   const updated = await client.updateNote(
@@ -351,8 +352,8 @@ function isPathTakenError(err: unknown): boolean {
 export type SettingsStatus = "loading" | "synced" | "queued" | "offline" | "conflict";
 
 export interface UseVaultSettingsResult {
-  settings: LensSettings;
-  update: (patch: LensSettingsPatch) => Promise<void>;
+  settings: NotesSettings;
+  update: (patch: NotesSettingsPatch) => Promise<void>;
   status: SettingsStatus;
 }
 
@@ -386,7 +387,7 @@ export function useVaultSettings(vaultId: string | null): UseVaultSettingsResult
         const note = await client!.getNote(SETTINGS_NOTE_PATH);
         if (note) {
           return {
-            server: extractLensSettings(note),
+            server: extractNotesSettings(note),
             serverUpdatedAt: note.updatedAt ?? note.createdAt ?? null,
             noteExists: true as const,
           };
@@ -394,22 +395,6 @@ export function useVaultSettings(vaultId: string | null): UseVaultSettingsResult
         return { server: null, serverUpdatedAt: null, noteExists: false as const };
       } catch (err) {
         if (!(err instanceof VaultNotFoundError)) throw err;
-        // New-path 404 → try the legacy Lens-branded path. If it exists, seed
-        // the server view from it but report `noteExists: false` so the next
-        // write POSTs a fresh note at the new path instead of PATCHing the
-        // legacy one. The legacy note stays in place as harmless dead data.
-        try {
-          const legacy = await client!.getNote(LEGACY_SETTINGS_NOTE_PATH);
-          if (legacy) {
-            return {
-              server: extractLensSettings(legacy),
-              serverUpdatedAt: null,
-              noteExists: false as const,
-            };
-          }
-        } catch (legacyErr) {
-          if (!(legacyErr instanceof VaultNotFoundError)) throw legacyErr;
-        }
         return { server: null, serverUpdatedAt: null, noteExists: false as const };
       }
     },
@@ -459,10 +444,7 @@ export function useVaultSettings(vaultId: string | null): UseVaultSettingsResult
       return;
     }
 
-    // No local pending change — trust the server. Respect `remote.noteExists`
-    // (not hardcoded true) because the legacy-path fallback loads server
-    // content from `.parachute/lens/settings` but reports `noteExists: false`
-    // so the next write POSTs at the new path rather than PATCHing the legacy.
+    // No local pending change — trust the server.
     const nextEntry: SettingsCacheEntry = remote.server
       ? {
           settings: remote.server,
@@ -488,11 +470,11 @@ export function useVaultSettings(vaultId: string | null): UseVaultSettingsResult
   }, [fetchQuery.isError]);
 
   const update = useCallback(
-    async (patch: LensSettingsPatch) => {
+    async (patch: NotesSettingsPatch) => {
       if (!vaultId) return;
       const nextDirty = mergeSettingsPatches(entry.dirtyPatch, patch);
       const nextSettings = applySettingsPatch(
-        entry.serverSettings ?? DEFAULT_LENS_SETTINGS,
+        entry.serverSettings ?? DEFAULT_NOTES_SETTINGS,
         nextDirty,
       );
 

@@ -5,14 +5,11 @@
 //
 // Storage: starting in v0.3.0-rc.2, tag roles live inside the vault settings
 // note (`.parachute/notes/settings`) so they sync across the same user's
-// devices. The prior release (the briefly-Lens-branded rc.1) wrote to
-// `.parachute/lens/settings`; `useVaultSettings` reads that path on 404
-// fallback to migrate. The older per-vault localStorage key
-// `lens:tag-roles:<vaultId>` is still read on first boot as a migration seed;
-// leave it in place one release cycle so a downgrade doesn't lose data. The
-// `useTagRoles` hook now lives in `./settings.ts` (delegating to
-// `useVaultSettings`) — keeping it out of this file breaks a tag-roles →
-// settings → tag-roles import cycle.
+// devices. The older per-vault localStorage key `lens:tag-roles:<vaultId>` is
+// still read on first boot as a migration seed; leave it in place one release
+// cycle so a downgrade doesn't lose data. The `useTagRoles` hook now lives in
+// `./settings.ts` (delegating to `useVaultSettings`) — keeping it out of this
+// file breaks a tag-roles → settings → tag-roles import cycle.
 //
 // Remapping a role never retags existing notes — the role just points at the
 // new tag going forward.
