@@ -1,5 +1,5 @@
 import type { CreateNotePayload, UpdateNotePayload } from "@/lib/vault/client";
-import type { LensSettingsPatch } from "@/lib/vault/settings";
+import type { NotesSettingsPatch } from "@/lib/vault/settings";
 
 // Shape of every row in the `pending` object store. Mutations flow through here
 // FIFO by autoincrement `seq`. `targetId` may be a local-only ID that needs
@@ -48,7 +48,7 @@ export interface PendingDeleteNote {
 export interface PendingUpdateSettings {
   kind: "update-settings";
   notePath: string;
-  patch: LensSettingsPatch;
+  patch: NotesSettingsPatch;
   // The serverUpdatedAt we last observed when the row was enqueued. Used as
   // the initial `if_updated_at`; stale by the time the drain runs, but the
   // drain refetches to recover a fresh baseline regardless.

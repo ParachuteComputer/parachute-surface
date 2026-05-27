@@ -1,16 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_LENS_SETTINGS,
-  LEGACY_SETTINGS_NOTE_PATH,
+  DEFAULT_NOTES_SETTINGS,
   SETTINGS_NOTE_PATH,
   SETTINGS_SCHEMA_VERSION,
   type SettingsCacheEntry,
   applySettingsPatch,
   deleteCachedSettings,
-  extractLensSettings,
+  extractNotesSettings,
   loadCachedSettings,
   mergeSettingsPatches,
-  normalizeLensSettings,
+  normalizeNotesSettings,
   saveCachedSettings,
 } from "./settings";
 import { DEFAULT_TAG_ROLES } from "./tag-roles";
@@ -22,30 +21,24 @@ describe("settings note path is stable", () => {
     // Bump schemaVersion and migrate instead if the shape needs to change.
     expect(SETTINGS_NOTE_PATH).toBe(".parachute/notes/settings");
   });
-
-  it("remembers the prior Lens-branded path for read-only fallback", () => {
-    // Aaron's running machine (and anyone who ran the brief Lens-branded
-    // window) has settings under the legacy path. We read but never write it.
-    expect(LEGACY_SETTINGS_NOTE_PATH).toBe(".parachute/lens/settings");
-  });
 });
 
-describe("normalizeLensSettings", () => {
+describe("normalizeNotesSettings", () => {
   it("returns defaults for null/undefined/non-object", () => {
-    expect(normalizeLensSettings(null)).toEqual(DEFAULT_LENS_SETTINGS);
-    expect(normalizeLensSettings(undefined)).toEqual(DEFAULT_LENS_SETTINGS);
-    expect(normalizeLensSettings("nope")).toEqual(DEFAULT_LENS_SETTINGS);
-    expect(normalizeLensSettings(42)).toEqual(DEFAULT_LENS_SETTINGS);
+    expect(normalizeNotesSettings(null)).toEqual(DEFAULT_NOTES_SETTINGS);
+    expect(normalizeNotesSettings(undefined)).toEqual(DEFAULT_NOTES_SETTINGS);
+    expect(normalizeNotesSettings("nope")).toEqual(DEFAULT_NOTES_SETTINGS);
+    expect(normalizeNotesSettings(42)).toEqual(DEFAULT_NOTES_SETTINGS);
   });
 
   it("fills missing tagRoles with defaults", () => {
-    const out = normalizeLensSettings({ schemaVersion: 1 });
+    const out = normalizeNotesSettings({ schemaVersion: 1 });
     expect(out.schemaVersion).toBe(1);
     expect(out.tagRoles).toEqual(DEFAULT_TAG_ROLES);
   });
 
   it("merges partial tagRoles over defaults", () => {
-    const out = normalizeLensSettings({
+    const out = normalizeNotesSettings({
       schemaVersion: 1,
       tagRoles: { pinned: "starred" },
     });
@@ -54,19 +47,19 @@ describe("normalizeLensSettings", () => {
   });
 
   it("defaults schemaVersion when missing", () => {
-    const out = normalizeLensSettings({ tagRoles: {} });
+    const out = normalizeNotesSettings({ tagRoles: {} });
     expect(out.schemaVersion).toBe(SETTINGS_SCHEMA_VERSION);
   });
 });
 
-describe("extractLensSettings", () => {
+describe("extractNotesSettings", () => {
   it("returns defaults for a null note", () => {
-    expect(extractLensSettings(null)).toEqual(DEFAULT_LENS_SETTINGS);
+    expect(extractNotesSettings(null)).toEqual(DEFAULT_NOTES_SETTINGS);
   });
 
   it("returns defaults when metadata is missing or non-object", () => {
     const note: Note = { id: "n1", createdAt: "2026-04-22T00:00:00Z" };
-    expect(extractLensSettings(note)).toEqual(DEFAULT_LENS_SETTINGS);
+    expect(extractNotesSettings(note)).toEqual(DEFAULT_NOTES_SETTINGS);
   });
 
   it("returns defaults when the notes/lens sub-object is missing", () => {
@@ -75,7 +68,7 @@ describe("extractLensSettings", () => {
       createdAt: "2026-04-22T00:00:00Z",
       metadata: { other: "value" },
     };
-    expect(extractLensSettings(note)).toEqual(DEFAULT_LENS_SETTINGS);
+    expect(extractNotesSettings(note)).toEqual(DEFAULT_NOTES_SETTINGS);
   });
 
   it("reads the notes sub-object from metadata", () => {
@@ -89,7 +82,7 @@ describe("extractLensSettings", () => {
         },
       },
     };
-    const out = extractLensSettings(note);
+    const out = extractNotesSettings(note);
     expect(out.tagRoles.pinned).toBe("favs");
     expect(out.tagRoles.archived).toBe("done");
     expect(out.tagRoles.captureVoice).toBe(DEFAULT_TAG_ROLES.captureVoice);
@@ -109,7 +102,7 @@ describe("extractLensSettings", () => {
         },
       },
     };
-    expect(extractLensSettings(note).tagRoles.pinned).toBe("legacy-fav");
+    expect(extractNotesSettings(note).tagRoles.pinned).toBe("legacy-fav");
   });
 
   it("prefers `notes` over `lens` when both are present", () => {
@@ -121,19 +114,19 @@ describe("extractLensSettings", () => {
         notes: { schemaVersion: 1, tagRoles: { pinned: "new" } },
       },
     };
-    expect(extractLensSettings(note).tagRoles.pinned).toBe("new");
+    expect(extractNotesSettings(note).tagRoles.pinned).toBe("new");
   });
 });
 
 describe("applySettingsPatch", () => {
   it("returns base unchanged for an empty patch", () => {
-    const out = applySettingsPatch(DEFAULT_LENS_SETTINGS, {});
-    expect(out).toEqual(DEFAULT_LENS_SETTINGS);
+    const out = applySettingsPatch(DEFAULT_NOTES_SETTINGS, {});
+    expect(out).toEqual(DEFAULT_NOTES_SETTINGS);
   });
 
   it("shallow-merges tagRoles onto the base", () => {
     const base = {
-      ...DEFAULT_LENS_SETTINGS,
+      ...DEFAULT_NOTES_SETTINGS,
       tagRoles: { ...DEFAULT_TAG_ROLES, pinned: "starred" },
     };
     const out = applySettingsPatch(base, {
@@ -146,7 +139,7 @@ describe("applySettingsPatch", () => {
   });
 
   it("normalizes incoming tagRoles (strips #, trims, falls back on blank)", () => {
-    const out = applySettingsPatch(DEFAULT_LENS_SETTINGS, {
+    const out = applySettingsPatch(DEFAULT_NOTES_SETTINGS, {
       tagRoles: { pinned: "  #fav  ", archived: "   " },
     });
     expect(out.tagRoles.pinned).toBe("fav");
@@ -154,7 +147,7 @@ describe("applySettingsPatch", () => {
   });
 
   it("updates schemaVersion when the patch names one", () => {
-    const out = applySettingsPatch(DEFAULT_LENS_SETTINGS, { schemaVersion: 2 });
+    const out = applySettingsPatch(DEFAULT_NOTES_SETTINGS, { schemaVersion: 2 });
     expect(out.schemaVersion).toBe(2);
   });
 });
@@ -202,11 +195,11 @@ describe("cache round-trip", () => {
   it("persists the full entry and reloads it verbatim", () => {
     const entry: SettingsCacheEntry = {
       settings: {
-        ...DEFAULT_LENS_SETTINGS,
+        ...DEFAULT_NOTES_SETTINGS,
         tagRoles: { ...DEFAULT_TAG_ROLES, pinned: "fav" },
       },
       serverSettings: {
-        ...DEFAULT_LENS_SETTINGS,
+        ...DEFAULT_NOTES_SETTINGS,
         tagRoles: { ...DEFAULT_TAG_ROLES, pinned: "fav" },
       },
       serverUpdatedAt: "2026-04-22T12:00:00Z",
@@ -220,7 +213,7 @@ describe("cache round-trip", () => {
 
   it("scopes by vaultId", () => {
     const e = (pinned: string): SettingsCacheEntry => ({
-      settings: { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES, pinned } },
+      settings: { ...DEFAULT_NOTES_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES, pinned } },
       serverSettings: null,
       serverUpdatedAt: null,
       noteExists: false,
@@ -233,13 +226,13 @@ describe("cache round-trip", () => {
   });
 
   it("returns null on malformed JSON", () => {
-    localStorage.setItem("lens:settings:v1", "not-json{");
+    localStorage.setItem("notes:settings:v1", "not-json{");
     expect(loadCachedSettings("v1")).toBeNull();
   });
 
   it("deleteCachedSettings removes the entry", () => {
     const entry: SettingsCacheEntry = {
-      settings: DEFAULT_LENS_SETTINGS,
+      settings: DEFAULT_NOTES_SETTINGS,
       serverSettings: null,
       serverUpdatedAt: null,
       noteExists: false,
@@ -255,8 +248,8 @@ describe("cache round-trip", () => {
     // reconstruct the same merged view on load so the UI doesn't flash
     // unpatched values before the write lands.
     const entry: SettingsCacheEntry = {
-      settings: { ...DEFAULT_LENS_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES, pinned: "dirty" } },
-      serverSettings: DEFAULT_LENS_SETTINGS,
+      settings: { ...DEFAULT_NOTES_SETTINGS, tagRoles: { ...DEFAULT_TAG_ROLES, pinned: "dirty" } },
+      serverSettings: DEFAULT_NOTES_SETTINGS,
       serverUpdatedAt: "2026-04-22T00:00:00Z",
       noteExists: true,
       dirtyPatch: { tagRoles: { pinned: "dirty" } },
@@ -275,7 +268,7 @@ describe("concurrent-write invariant (merge-on-409)", () => {
   // tagRoles.archived. The vault 409s. On refetch+merge, Device B must
   // preserve Device A's `pinned` change while landing its own `archived`.
   it("merges patches onto refetched server state instead of clobbering", async () => {
-    const base = DEFAULT_LENS_SETTINGS;
+    const base = DEFAULT_NOTES_SETTINGS;
     const sharedUpdatedAt = "2026-04-22T10:00:00Z";
 
     // Server state after Device A's write has landed.
@@ -294,7 +287,7 @@ describe("concurrent-write invariant (merge-on-409)", () => {
     // Helper: simulate what the 409-retry path does. Refetch, merge caller's
     // *patch* (not a pre-merged next) onto the server, then PATCH.
     function devicesBMerge() {
-      const server = extractLensSettings(serverAfterA);
+      const server = extractNotesSettings(serverAfterA);
       const devBPatch = { tagRoles: { archived: "B-archived" } };
       return applySettingsPatch(server, devBPatch);
     }

@@ -76,10 +76,10 @@ describe("Settings route", () => {
       fireEvent.click(within(section).getByRole("button", { name: /^save$/i }));
     });
     // Tag roles now live in the vault settings note; localStorage is the
-    // write-through cache under the new `lens:settings:<vaultId>` key. No
+    // write-through cache under the `notes:settings:<vaultId>` key. No
     // active client is mounted in the test, so update() takes the offline
     // path and leaves the change pinned in the cache as a dirtyPatch.
-    const stored = JSON.parse(localStorage.getItem("lens:settings:dev") ?? "{}") as {
+    const stored = JSON.parse(localStorage.getItem("notes:settings:dev") ?? "{}") as {
       settings?: { tagRoles?: { pinned?: string; archived?: string } };
       dirtyPatch?: { tagRoles?: { pinned?: string } } | null;
     };
@@ -110,7 +110,7 @@ describe("Settings route", () => {
     // Seed the settings cache directly — simulates a prior non-default
     // selection that rehydrates into the UI on mount.
     localStorage.setItem(
-      "lens:settings:dev",
+      "notes:settings:dev",
       JSON.stringify({
         settings: {
           schemaVersion: 1,
@@ -146,7 +146,7 @@ describe("Settings route", () => {
     await act(async () => {
       fireEvent.click(within(section).getByRole("button", { name: /reset to defaults/i }));
     });
-    const stored = JSON.parse(localStorage.getItem("lens:settings:dev") ?? "{}") as {
+    const stored = JSON.parse(localStorage.getItem("notes:settings:dev") ?? "{}") as {
       settings?: { tagRoles?: { pinned?: string } };
     };
     expect(stored.settings?.tagRoles?.pinned).toBe("pinned");
