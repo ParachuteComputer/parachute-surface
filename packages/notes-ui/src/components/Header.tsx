@@ -115,6 +115,9 @@ export function Header() {
               <Link to="/activity" className="py-1 text-sm text-fg hover:text-accent">
                 Activity
               </Link>
+              <Link to="/import" className="py-1 text-sm text-fg hover:text-accent">
+                Import
+              </Link>
               <div className="mt-1">
                 <span className="mb-1 block text-xs uppercase tracking-wider text-fg-dim">
                   Active vault

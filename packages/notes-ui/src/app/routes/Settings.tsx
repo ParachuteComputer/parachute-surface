@@ -47,11 +47,36 @@ export function Settings() {
       </header>
 
       <VaultSchemaSection vaultId={activeVault.id} />
+      <ImportSection />
       <TextSizeSection />
       <PathTreeSection vaultId={activeVault.id} />
       <TagRolesSection vaultId={activeVault.id} />
       <InstallStateSection />
     </div>
+  );
+}
+
+// One-line surfacing of the import route on Settings — the import surface
+// itself is a full page (`/import`), this just hands the user a discovery
+// path from the obvious place (vault settings is where "what can I do
+// with this vault?" affordances belong).
+function ImportSection() {
+  return (
+    <section className="mb-8 rounded-md border border-border bg-card p-4">
+      <h2 className="font-serif text-lg">Import notes</h2>
+      <p className="mt-1 text-sm text-fg-muted">
+        Bring in an Obsidian vault zip or a folder of markdown files. Parsed in your browser;
+        previewed before any note lands in the vault.
+      </p>
+      <div className="mt-3">
+        <Link
+          to="/import"
+          className="inline-block min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
+        >
+          Open importer
+        </Link>
+      </div>
+    </section>
   );
 }
 
