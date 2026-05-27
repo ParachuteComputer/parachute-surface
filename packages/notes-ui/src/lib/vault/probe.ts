@@ -1,3 +1,4 @@
+import { getHubOrigin } from "@openparachute/surface-client";
 import { useEffect, useState } from "react";
 import { discoverAuthServer } from "./discovery";
 import { useVaultStore } from "./store";
@@ -58,23 +59,39 @@ async function tryDiscoverAuthServer(
   }
 }
 
-// Try the same-origin probe first, then fall back to the canonical local hub.
-// The fallback covers the standalone-notes case (`parachute install notes` →
-// `http://localhost:1942/notes`): the static notes server doesn't serve
-// OAuth metadata, but the hub on 1939 does. We only attempt the fallback for
-// localhost-ish origins that aren't already on the hub port — never for
-// remote/tailscale origins, where reaching the user's loopback would be
-// nonsensical (and CORS would block it anyway).
+// Resolution order, in preference:
+//   1. `<meta name="parachute-hub">` — host (parachute-surface) explicitly
+//      tells the bundle which hub to OAuth against. Authoritative when
+//      present; covers the cross-origin bundled case (notes-ui served at
+//      notes.example.com with the hub at hub.example.com).
+//   2. Same-origin probe — when the bundle and the hub share an origin
+//      (the default localhost install, or single-origin Render deploys).
+//   3. Loopback fallback to `127.0.0.1:1939` — covers the standalone-notes
+//      case (`parachute install notes` → `http://localhost:1942/notes`):
+//      the static notes server doesn't serve OAuth metadata, but the hub
+//      on 1939 does. Only attempted for localhost-ish origins not already
+//      on the hub port (CORS would block it for remote origins anyway).
 //
-// CORS note: the fallback is cross-origin (1942 → 1939). The hub must serve
-// `Access-Control-Allow-Origin: *` on `/.well-known/oauth-authorization-server`
-// for the browser to expose the response body. If it doesn't, the fetch
-// rejects and we fall through to manual entry.
+// CORS note: the loopback fallback is cross-origin (1942 → 1939). The hub
+// must serve `Access-Control-Allow-Origin: *` on
+// `/.well-known/oauth-authorization-server` for the browser to expose the
+// response body. If it doesn't, the fetch rejects and we fall through to
+// manual entry.
 export async function probeForIssuer(
   pageOrigin: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   fetchImpl: typeof fetch = fetch.bind(globalThis),
+  hubMetaOrigin: string | null = readHubMetaOrigin(),
 ): Promise<string | null> {
+  if (hubMetaOrigin) {
+    const hub = await probeIssuerAtOrigin(hubMetaOrigin, timeoutMs, fetchImpl);
+    if (hub) return hub;
+    // Meta tag was present but didn't answer OAuth metadata — fall through
+    // to the page-origin and loopback fallbacks rather than failing closed.
+    // A misconfigured host should still let the operator enter a hub URL
+    // manually, not block the surface entirely.
+  }
+
   const sameOrigin = await probeIssuerAtOrigin(pageOrigin, timeoutMs, fetchImpl);
   if (sameOrigin) return sameOrigin;
 
@@ -84,6 +101,15 @@ export async function probeForIssuer(
   }
 
   return null;
+}
+
+// Read the runtime-tenancy `<meta name="parachute-hub">` tag injected by
+// parachute-surface. Returns null outside the DOM (SSR / tests without a
+// document) or when the host hasn't injected it. See
+// `parachute-patterns/patterns/runtime-tenancy-contract.md`.
+function readHubMetaOrigin(): string | null {
+  if (typeof document === "undefined") return null;
+  return getHubOrigin();
 }
 
 export function shouldTryLocalHubFallback(pageOrigin: string): boolean {

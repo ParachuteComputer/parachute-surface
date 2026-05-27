@@ -147,4 +147,44 @@ describe("probeForIssuer", () => {
     const result = await probeForIssuer("http://localhost:1942", 500, fetchImpl);
     expect(result).toBeNull();
   });
+
+  it("prefers the <meta name='parachute-hub'> origin when injected by the host", async () => {
+    // Bundled-notes case: parachute-surface serves notes-ui at notes.example.com
+    // with `<meta name="parachute-hub" content="https://hub.example.com">` in
+    // index.html. The page origin (notes.example.com) doesn't serve OAuth
+    // metadata; the meta-injected hub does. We must prefer the meta hub.
+    const fetchImpl = routedFetch({
+      "https://hub.example.com/.well-known/oauth-authorization-server": { json: validMetadata },
+    });
+    const result = await probeForIssuer(
+      "https://notes.example.com",
+      500,
+      fetchImpl,
+      "https://hub.example.com",
+    );
+    expect(result).toBe("https://hub.example.com");
+    const calls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    // Should not have probed the page origin at all — the meta hub answered.
+    expect(calls.some((u) => u.startsWith("https://notes.example.com"))).toBe(false);
+  });
+
+  it("falls through to same-origin/loopback when the meta hub is misconfigured", async () => {
+    // A misconfigured host should not block the surface. The meta hub doesn't
+    // answer; the local hub at 127.0.0.1:1939 does. Operator can still get in.
+    const fetchImpl = routedFetch({
+      "https://bad-hub.example.com/.well-known/oauth-authorization-server": {
+        ok: false,
+        status: 404,
+      },
+      "http://localhost:1942/.well-known/oauth-authorization-server": { ok: false, status: 404 },
+      "http://127.0.0.1:1939/.well-known/oauth-authorization-server": { json: validMetadata },
+    });
+    const result = await probeForIssuer(
+      "http://localhost:1942",
+      500,
+      fetchImpl,
+      "https://bad-hub.example.com",
+    );
+    expect(result).toBe("http://127.0.0.1:1939");
+  });
 });
