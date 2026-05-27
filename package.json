@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-monorepo",
-  "version": "0.2.1-rc.1",
+  "version": "0.2.2-rc.1",
   "private": true,
   "description": "Workspace root for parachute-surface \u2014 host module (@openparachute/surface) + shared client library (@openparachute/surface-client).",
   "license": "AGPL-3.0",
