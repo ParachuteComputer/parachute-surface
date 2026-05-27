@@ -6,8 +6,8 @@
  * the 401/403 responses. The single difference is the audience: `aud === "app"`.
  *
  * Two scopes apps defines:
- *   - `app:read`  — list UIs, read per-UI info. Read-only.
- *   - `app:admin` — add / remove / reload UIs + DCR registration on add.
+ *   - `surface:read`  — list UIs, read per-UI info. Read-only.
+ *   - `surface:admin` — add / remove / reload UIs + DCR registration on add.
  *
  * Endpoints that stay unauthenticated:
  *   - `/healthz`, `/surface/healthz` (liveness, hub probes)
@@ -18,8 +18,8 @@
  *   - `/surface/<name>/oauth-client` (UIs need this at page load before they
  *     have any token — public OAuth client_id is by definition public)
  *
- * Admin endpoints take `app:admin`. Read-only admin endpoints accept
- * `app:admin` OR `app:read` per design doc section 13.
+ * Admin endpoints take `surface:admin`. Read-only admin endpoints accept
+ * `surface:admin` OR `surface:read` per design doc section 13.
  *
  * Hub-origin resolution follows the same shape every other module uses:
  *   - `PARACHUTE_HUB_ORIGIN` env var when set
@@ -32,8 +32,8 @@
 
 import { HubJwtError, type ScopeGuard, createScopeGuard } from "@openparachute/scope-guard";
 
-export const SCOPE_ADMIN = "app:admin" as const;
-export const SCOPE_READ = "app:read" as const;
+export const SCOPE_ADMIN = "surface:admin" as const;
+export const SCOPE_READ = "surface:read" as const;
 
 /** Hub loopback for v0.6 single-container; deploys override via env. */
 const DEFAULT_HUB_LOOPBACK = "http://127.0.0.1:1939";
@@ -109,7 +109,7 @@ export type AuthResult =
  *
  * `aud === "app"` enforced via `expectedAudience` — a token minted for a
  * different module can't reach our admin surface even if its bearer carries
- * `app:admin` (which it can't, but defense-in-depth).
+ * `surface:admin` (which it can't, but defense-in-depth).
  */
 export async function validateBearer(
   token: string | undefined,
@@ -167,9 +167,9 @@ export function hasScope(granted: readonly string[], required: string): boolean 
 }
 
 /**
- * Pass-through scope check that treats `app:admin` as implying `app:read`.
+ * Pass-through scope check that treats `surface:admin` as implying `surface:read`.
  * Read-only admin endpoints (GET /surface/list, GET /surface/<name>/info) accept
- * either scope; admin endpoints (add/remove/reload) require `app:admin`
+ * either scope; admin endpoints (add/remove/reload) require `surface:admin`
  * exactly.
  */
 export function hasReadAccess(granted: readonly string[]): boolean {
@@ -181,8 +181,8 @@ export function hasReadAccess(granted: readonly string[]): boolean {
  * the granted scopes for the caller to use in finer-grained checks.
  *
  * `requiredScope` is one of:
- *   - `app:admin` — exact match required
- *   - `app:read`  — accepts `app:read` OR `app:admin` (admin implies read)
+ *   - `surface:admin` — exact match required
+ *   - `surface:read`  — accepts `surface:read` OR `surface:admin` (admin implies read)
  */
 export async function enforceScope(
   req: Request,

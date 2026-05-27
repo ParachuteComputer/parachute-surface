@@ -57,12 +57,12 @@ describe("extractBearer", () => {
 
 describe("hasScope + hasReadAccess", () => {
   test("hasScope exact match", () => {
-    expect(hasScope(["app:admin"], "app:admin")).toBe(true);
-    expect(hasScope(["app:read"], "app:admin")).toBe(false);
+    expect(hasScope(["surface:admin"], "surface:admin")).toBe(true);
+    expect(hasScope(["surface:read"], "surface:admin")).toBe(false);
   });
   test("hasReadAccess accepts read OR admin", () => {
-    expect(hasReadAccess(["app:read"])).toBe(true);
-    expect(hasReadAccess(["app:admin"])).toBe(true);
+    expect(hasReadAccess(["surface:read"])).toBe(true);
+    expect(hasReadAccess(["surface:admin"])).toBe(true);
     expect(hasReadAccess(["vault:default:read"])).toBe(false);
     expect(hasReadAccess([])).toBe(false);
   });
@@ -106,10 +106,10 @@ describe("validateBearer", () => {
 });
 
 describe("scope constants", () => {
-  test("SCOPE_ADMIN is `app:admin`", () => {
-    expect(SCOPE_ADMIN).toBe("app:admin");
+  test("SCOPE_ADMIN is `surface:admin`", () => {
+    expect(SCOPE_ADMIN).toBe("surface:admin");
   });
-  test("SCOPE_READ is `app:read`", () => {
-    expect(SCOPE_READ).toBe("app:read");
+  test("SCOPE_READ is `surface:read`", () => {
+    expect(SCOPE_READ).toBe("surface:read");
   });
 });

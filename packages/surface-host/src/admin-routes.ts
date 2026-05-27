@@ -24,7 +24,7 @@
  * in discovery on the next request.
  *
  * Auth model:
- *   - `app:read` ≤ `app:admin` (admin implies read). Enforced in `auth.ts`.
+ *   - `surface:read` ≤ `surface:admin` (admin implies read). Enforced in `auth.ts`.
  *   - `oauth-client` is unauthenticated by design — the UI's JS reads it at
  *     page load before any token exists. The `client_id` is public OAuth
  *     metadata (RFC 7591 public client + PKCE).
@@ -73,7 +73,7 @@ export type AdminMutableState = Pick<AppState, "config" | "registeredUis" | "ski
  */
 export type EnforceScopeFn = (
   req: Request,
-  requiredScope: "app:admin" | "app:read",
+  requiredScope: "surface:admin" | "surface:read",
 ) => Promise<Response | { scopes: readonly string[] }>;
 
 export type AdminHandlerOpts = {

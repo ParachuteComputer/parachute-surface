@@ -140,7 +140,7 @@ export async function cleanupStaleServiceWorker(
       // recognise — be conservative about clobbering unrelated SWs on
       // the same origin.
       const looksLikeParachuteMount =
-        /^\/notes$/.test(scopePath) || /^\/app\/[a-z0-9][a-z0-9_-]*$/.test(scopePath);
+        /^\/notes$/.test(scopePath) || /^\/surface\/[a-z0-9][a-z0-9_-]*$/.test(scopePath);
       if (!looksLikeParachuteMount) continue;
       await registration.unregister();
       unregistered += 1;

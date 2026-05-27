@@ -24,7 +24,7 @@ import { startHttpServer } from "../http-server.ts";
 import { scanUis } from "../ui-registry.ts";
 
 const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
-const allowAdmin: EnforceScopeFn = async () => ({ scopes: ["app:admin"] });
+const allowAdmin: EnforceScopeFn = async () => ({ scopes: ["surface:admin"] });
 
 let tmpDir: string;
 let uisDir: string;

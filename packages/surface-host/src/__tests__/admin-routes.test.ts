@@ -99,7 +99,7 @@ function seedLocalSource(localName: string, files: Record<string, string>): stri
 }
 
 /** Allow-all auth shim for tests. */
-const allowAdmin: EnforceScopeFn = async () => ({ scopes: ["app:admin"] });
+const allowAdmin: EnforceScopeFn = async () => ({ scopes: ["surface:admin"] });
 
 async function dispatch(
   req: Request,

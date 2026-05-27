@@ -29,7 +29,7 @@
     "access": "public"
   },
   "scripts": {
-    "start": "bun run bin/parachute-app.ts serve",
+    "start": "bun run bin/parachute-surface.ts serve",
     "build": "cd ../../web/admin && bun install --frozen-lockfile && bun run build",
     "build:admin": "cd ../../web/admin && bun run build",
     "test": "bun test src/",
@@ -51,6 +51,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ParachuteComputer/parachute-app.git",
-    "directory": "packages/app-host"
+    "directory": "packages/surface-host"
   }
 }

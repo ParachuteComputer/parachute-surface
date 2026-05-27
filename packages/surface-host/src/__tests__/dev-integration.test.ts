@@ -74,7 +74,7 @@ function makeState(uis: RegisteredUi[] = []): AppState {
   };
 }
 
-const allowAll = async (_req: Request, scope: "app:admin" | "app:read") => ({
+const allowAll = async (_req: Request, scope: "surface:admin" | "surface:read") => ({
   scopes: [scope],
 });
 
