@@ -7,7 +7,7 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ParachuteComputer/parachute-app.git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
     "directory": "packages/notes-ui"
   },
   "files": [
