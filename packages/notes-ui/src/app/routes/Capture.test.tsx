@@ -645,7 +645,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
     });
 
     const textarea = screen.getByLabelText(/capture content/i) as HTMLTextAreaElement;
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     const summaryInput = screen.getByLabelText(/^summary$/i) as HTMLInputElement;
 
     await act(async () => {
@@ -689,7 +689,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
     });
 
     const textarea = screen.getByLabelText(/capture content/i) as HTMLTextAreaElement;
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     const generated = pathInput.value;
     expect(generated).toMatch(/^Notes\/\d{4}\/\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/);
 
@@ -726,7 +726,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
     });
 
     // Set path override BEFORE recording so it sticks through the save flow.
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     await act(async () => {
       fireEvent.change(pathInput, { target: { value: "Recordings/2026/may" } });
     });
@@ -772,7 +772,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
       detailsEl.dispatchEvent(new Event("toggle"));
     });
 
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     // Pre-fill is non-empty and matches the quickPath shape.
     expect(pathInput.value).toMatch(/^Notes\/\d{4}\/\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/);
 
@@ -813,7 +813,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
       detailsEl.dispatchEvent(new Event("toggle"));
     });
 
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     const generated = pathInput.value;
     expect(generated).toMatch(/^Notes\/\d{4}\/\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/);
 
@@ -869,7 +869,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
         detailsEl.dispatchEvent(new Event("toggle"));
       });
 
-      const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+      const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
       const first = pathInput.value;
       expect(first).toBe("Notes/2026/05-12/14-30-05");
 
@@ -913,7 +913,7 @@ describe("Capture — More fields panel (path + summary overrides)", () => {
       detailsEl.dispatchEvent(new Event("toggle"));
     });
 
-    const pathInput = screen.getByLabelText(/path override/i) as HTMLInputElement;
+    const pathInput = screen.getByLabelText(/title override/i) as HTMLInputElement;
     const userPath = "Daily/2026-05-12";
     await act(async () => {
       fireEvent.change(pathInput, { target: { value: userPath } });

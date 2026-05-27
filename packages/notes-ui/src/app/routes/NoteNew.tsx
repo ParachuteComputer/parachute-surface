@@ -174,7 +174,7 @@ export function NoteNew() {
 
           <div className="mt-3 flex flex-col gap-2">
             <label className="flex items-baseline gap-3 text-sm">
-              <span className="shrink-0 text-xs uppercase tracking-wider text-fg-dim">Path</span>
+              <span className="shrink-0 text-xs uppercase tracking-wider text-fg-dim">Title</span>
               <input
                 type="text"
                 value={draft.path}
