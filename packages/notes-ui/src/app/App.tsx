@@ -28,6 +28,7 @@ const Activity = lazy(() => import("./routes/Activity").then((m) => ({ default: 
 const AddVault = lazy(() => import("./routes/AddVault").then((m) => ({ default: m.AddVault })));
 const Calendar = lazy(() => import("./routes/Calendar").then((m) => ({ default: m.Calendar })));
 const Capture = lazy(() => import("./routes/Capture").then((m) => ({ default: m.Capture })));
+const Import = lazy(() => import("./routes/Import").then((m) => ({ default: m.Import })));
 const NoteEditor = lazy(() =>
   import("./routes/NoteEditor").then((m) => ({ default: m.NoteEditor })),
 );
@@ -138,6 +139,7 @@ export function App() {
                   <Route path="/tags" element={<Tags />} />
                   <Route path="/new" element={<NoteNew />} />
                   <Route path="/capture" element={<Capture />} />
+                  <Route path="/import" element={<Import />} />
                   <Route path="/graph" element={<VaultGraph />} />
                   <Route path="/today" element={<Today />} />
                   <Route path="/calendar" element={<Calendar />} />
