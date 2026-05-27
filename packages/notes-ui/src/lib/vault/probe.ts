@@ -81,7 +81,10 @@ export async function probeForIssuer(
   pageOrigin: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   fetchImpl: typeof fetch = fetch.bind(globalThis),
-  hubMetaOrigin: string | null = readHubMetaOrigin(),
+  // `getHubOrigin()` is SSR-safe (returns null when document is undefined);
+  // called as a default arg so tests can inject a specific value positionally
+  // while production calls read the live `<meta name="parachute-hub">` tag.
+  hubMetaOrigin: string | null = getHubOrigin(),
 ): Promise<string | null> {
   if (hubMetaOrigin) {
     const hub = await probeIssuerAtOrigin(hubMetaOrigin, timeoutMs, fetchImpl);
@@ -101,15 +104,6 @@ export async function probeForIssuer(
   }
 
   return null;
-}
-
-// Read the runtime-tenancy `<meta name="parachute-hub">` tag injected by
-// parachute-surface. Returns null outside the DOM (SSR / tests without a
-// document) or when the host hasn't injected it. See
-// `parachute-patterns/patterns/runtime-tenancy-contract.md`.
-function readHubMetaOrigin(): string | null {
-  if (typeof document === "undefined") return null;
-  return getHubOrigin();
 }
 
 export function shouldTryLocalHubFallback(pageOrigin: string): boolean {

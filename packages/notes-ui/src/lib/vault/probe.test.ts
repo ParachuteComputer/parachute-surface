@@ -163,9 +163,12 @@ describe("probeForIssuer", () => {
       "https://hub.example.com",
     );
     expect(result).toBe("https://hub.example.com");
+    // Exactly one probe (the meta hub), in that order. The mock would throw
+    // on any other URL, but asserting count locks in "no extra probes" so a
+    // future refactor that probes everything-and-races can't slip past.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     const calls = fetchImpl.mock.calls.map((c) => String(c[0]));
-    // Should not have probed the page origin at all — the meta hub answered.
-    expect(calls.some((u) => u.startsWith("https://notes.example.com"))).toBe(false);
+    expect(calls[0]).toContain("https://hub.example.com");
   });
 
   it("falls through to same-origin/loopback when the meta hub is misconfigured", async () => {
