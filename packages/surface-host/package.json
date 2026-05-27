@@ -50,7 +50,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ParachuteComputer/parachute-app.git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
     "directory": "packages/surface-host"
   }
 }
