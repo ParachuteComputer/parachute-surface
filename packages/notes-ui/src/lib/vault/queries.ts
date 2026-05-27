@@ -17,7 +17,7 @@ import { useVaultReachabilityStore } from "./reachability-store";
 import { forceRefresh } from "./refresh";
 import { loadToken } from "./storage";
 import { useVaultStore } from "./store";
-import type { Note, NoteAttachment } from "./types";
+import type { Note, NoteAttachment, TagRecord, TagUpsertPayload } from "./types";
 
 export function useActiveVaultClient(): VaultClient | null {
   const vault = useVaultStore((s) => s.getActiveVault());
@@ -160,6 +160,71 @@ export function useTags() {
     enabled: !!client,
     queryFn: () => client!.listTags(),
     staleTime: 60_000,
+  });
+}
+
+// Same source as `useTags()` but returns the joined TagRecord[] shape with
+// description / fields / parent_names / relationships per tag. Vault's
+// `GET /api/tags?include_schema=true` returns a single envelope so this is
+// one request, not N. Used by the Notes UI tag viewer (notes-ui,
+// 2026-05-27 unified create + tag schemas pass) so the row UI can show
+// "fields: a, b, c" inline without a waterfall.
+//
+// Separate hook (not an overload of `useTags`) so the cache key is
+// distinct — the cheap listing and the schema-bearing listing are
+// different queries with different invalidation lifetimes.
+export function useTagsWithSchema() {
+  const client = useActiveVaultClient();
+  const activeId = useVaultStore((s) => s.activeVaultId);
+
+  return useQuery({
+    queryKey: ["tags", activeId, "with-schema"],
+    enabled: !!client,
+    queryFn: () => client!.listTags({ includeSchema: true }),
+    staleTime: 60_000,
+  });
+}
+
+// Single-tag identity row (description, fields, parent_names, relationships).
+// Used by the Tags page schema editor (notes-ui, 2026-05-27). VaultClient
+// resolves a 404 to `null`, so consumers can treat "no schema yet" as the
+// data shape without forking on error.
+export function useTag(name: string | null) {
+  const client = useActiveVaultClient();
+  const activeId = useVaultStore((s) => s.activeVaultId);
+  return useQuery({
+    queryKey: ["tag", activeId, name],
+    enabled: !!client && !!name,
+    queryFn: () => client!.getTag(name!),
+    staleTime: 30_000,
+  });
+}
+
+// Upsert a tag's identity row — description, fields, parent_names. Vault's
+// PUT /api/tags/:name is merge-on-write at the row level (omitted keys
+// preserved, explicit null clears). The mutation invalidates both the
+// single-tag cache and the list so the Tags page UI reflects the change.
+//
+// Important: vault DOES NOT backfill schemas onto notes already carrying
+// the tag. The PUT only touches the tag-identity row; existing notes keep
+// whatever metadata shape they already had. The Tags UI surfaces a warning
+// to that effect when the operator edits a schema.
+export function useUpdateTag() {
+  const client = useActiveVaultClient();
+  const activeId = useVaultStore((s) => s.activeVaultId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      name: string;
+      payload: TagUpsertPayload;
+    }): Promise<TagRecord> => {
+      if (!client) throw new Error("No active vault");
+      return client.updateTag(args.name, args.payload);
+    },
+    onSuccess: (rec, args) => {
+      qc.setQueryData(["tag", activeId, args.name], rec);
+      qc.invalidateQueries({ queryKey: ["tags", activeId] });
+    },
   });
 }
 

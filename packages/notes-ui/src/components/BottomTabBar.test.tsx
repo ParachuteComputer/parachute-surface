@@ -43,12 +43,15 @@ describe("BottomTabBar", () => {
     useQuickSwitchOpen.setState({ open: false });
   });
 
-  it("renders Home, Tags, Capture, Search, Settings tabs when a vault is active", () => {
+  it("renders Home, Tags, New, Search, Settings tabs when a vault is active", () => {
     renderAt("/");
     const nav = screen.getByRole("navigation", { name: /primary/i });
     expect(within(nav).getByLabelText(/home/i)).toBeInTheDocument();
     expect(within(nav).getByLabelText(/^tags$/i)).toBeInTheDocument();
-    expect(within(nav).getByLabelText(/capture/i)).toBeInTheDocument();
+    // The "+ Capture" / "+ New" tab is the unified create entry point —
+    // labeled "New" since 2026-05-27 (notes-ui unified create + tag
+    // schemas pass).
+    expect(within(nav).getByLabelText(/^new$/i)).toBeInTheDocument();
     expect(within(nav).getByLabelText(/search/i)).toBeInTheDocument();
     expect(within(nav).getByLabelText(/settings/i)).toBeInTheDocument();
   });
@@ -94,9 +97,9 @@ describe("BottomTabBar", () => {
     expect(useQuickSwitchOpen.getState().open).toBe(true);
   });
 
-  it("Capture tab navigates to /capture", () => {
+  it("New tab navigates to /new (the unified create surface)", () => {
     renderAt("/");
-    const capture = screen.getByLabelText(/capture/i);
-    expect(capture).toHaveAttribute("href", "/capture");
+    const newTab = screen.getByLabelText(/^new$/i);
+    expect(newTab).toHaveAttribute("href", "/new");
   });
 });

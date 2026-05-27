@@ -10,13 +10,7 @@
     "url": "https://github.com/ParachuteComputer/parachute-surface.git",
     "directory": "packages/notes-ui"
   },
-  "files": [
-    "dist",
-    "meta.json",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
-  ],
+  "files": ["dist", "meta.json", "README.md", "LICENSE", "CHANGELOG.md"],
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

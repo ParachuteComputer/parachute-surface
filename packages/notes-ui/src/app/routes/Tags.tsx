@@ -1,7 +1,14 @@
 import { TagRenameDialog } from "@/components/TagRenameDialog";
-import { useMergeTags, usePinnedTags, useRenameTag, useTags, useVaultStore } from "@/lib/vault";
+import { TagSchemaEditor } from "@/components/TagSchemaEditor";
+import {
+  useMergeTags,
+  usePinnedTags,
+  useRenameTag,
+  useTagsWithSchema,
+  useVaultStore,
+} from "@/lib/vault";
 import { VaultAuthError } from "@/lib/vault/client";
-import type { TagSummary } from "@/lib/vault/types";
+import type { TagRecord } from "@/lib/vault/types";
 import { useSync } from "@/providers/SyncProvider";
 import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router";
@@ -10,7 +17,10 @@ type SortMode = "count" | "alpha";
 
 export function Tags() {
   const activeVault = useVaultStore((s) => s.getActiveVault());
-  const tags = useTags();
+  // Schema-bearing tag listing — single round-trip, one query. The viewer
+  // wants schema info per row anyway, so pulling it eagerly here is cheaper
+  // than per-row waterfall queries.
+  const tags = useTagsWithSchema();
   const { isOnline } = useSync();
   const { isPinned, togglePin } = usePinnedTags(activeVault?.id ?? null);
   const [search, setSearch] = useState("");
@@ -18,6 +28,7 @@ export function Tags() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [schemaTarget, setSchemaTarget] = useState<string | null>(null);
 
   const renameMut = useRenameTag();
   const mergeMut = useMergeTags();
@@ -114,6 +125,7 @@ export function Tags() {
               selected={selected.has(t.name)}
               onToggle={() => toggleSelected(t.name)}
               onRename={() => setRenameTarget(t.name)}
+              onEditSchema={() => setSchemaTarget(t.name)}
               pinned={isPinned(t.name)}
               onTogglePin={() => togglePin(t.name)}
               offline={offline}
@@ -159,6 +171,10 @@ export function Tags() {
           }}
         />
       ) : null}
+
+      {schemaTarget !== null ? (
+        <TagSchemaEditor tagName={schemaTarget} onClose={() => setSchemaTarget(null)} />
+      ) : null}
     </div>
   );
 }
@@ -168,69 +184,113 @@ function TagRow({
   selected,
   onToggle,
   onRename,
+  onEditSchema,
   pinned,
   onTogglePin,
   offline,
 }: {
-  tag: TagSummary;
+  tag: TagRecord;
   selected: boolean;
   onToggle(): void;
   onRename(): void;
+  onEditSchema(): void;
   pinned: boolean;
   onTogglePin(): void;
   offline: boolean;
 }) {
+  const fieldNames = tag.fields ? Object.keys(tag.fields) : [];
+  const parents = tag.parent_names ?? [];
+  const hasSchemaSignal = !!tag.description || fieldNames.length > 0 || parents.length > 0;
+
   return (
-    <li className="flex items-center gap-3 px-3 py-2 text-sm">
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggle}
-        aria-label={`Select tag ${tag.name}`}
-        className="accent-accent"
-      />
-      <Link
-        to={`/?tag=${encodeURIComponent(tag.name)}`}
-        className="flex flex-1 items-baseline gap-2 text-fg hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <span className="font-mono">#{tag.name}</span>
-        <span className="text-xs text-fg-dim">{tag.count}</span>
-      </Link>
-      <button
-        type="button"
-        onClick={onTogglePin}
-        className={
-          pinned
-            ? "text-xs font-medium text-accent hover:text-accent-hover"
-            : "text-xs text-fg-muted hover:text-accent"
-        }
-        aria-label={pinned ? `Unpin tag ${tag.name}` : `Pin tag ${tag.name}`}
-        aria-pressed={pinned}
-        title={pinned ? "Pinned to home strip — click to unpin" : "Pin to home strip"}
-      >
-        {pinned ? "★ Pinned" : "☆ Pin"}
-      </button>
-      <button
-        type="button"
-        onClick={onRename}
-        disabled={offline}
-        className="text-xs text-fg-muted hover:text-accent disabled:opacity-40"
-        aria-label={`Rename tag ${tag.name}`}
-      >
-        Rename
-      </button>
+    <li className="flex flex-col gap-1 px-3 py-2 text-sm">
+      <div className="flex items-center gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          aria-label={`Select tag ${tag.name}`}
+          className="accent-accent"
+        />
+        <Link
+          to={`/?tag=${encodeURIComponent(tag.name)}`}
+          className="flex flex-1 items-baseline gap-2 text-fg hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <span className="font-mono">#{tag.name}</span>
+          <span className="text-xs text-fg-dim">{tag.count ?? 0}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={onTogglePin}
+          className={
+            pinned
+              ? "text-xs font-medium text-accent hover:text-accent-hover"
+              : "text-xs text-fg-muted hover:text-accent"
+          }
+          aria-label={pinned ? `Unpin tag ${tag.name}` : `Pin tag ${tag.name}`}
+          aria-pressed={pinned}
+          title={pinned ? "Pinned to home strip — click to unpin" : "Pin to home strip"}
+        >
+          {pinned ? "★ Pinned" : "☆ Pin"}
+        </button>
+        <button
+          type="button"
+          onClick={onEditSchema}
+          disabled={offline}
+          className="text-xs text-fg-muted hover:text-accent disabled:opacity-40"
+          aria-label={`Edit schema for tag ${tag.name}`}
+        >
+          {hasSchemaSignal ? "Schema" : "+ Schema"}
+        </button>
+        <button
+          type="button"
+          onClick={onRename}
+          disabled={offline}
+          className="text-xs text-fg-muted hover:text-accent disabled:opacity-40"
+          aria-label={`Rename tag ${tag.name}`}
+        >
+          Rename
+        </button>
+      </div>
+      {hasSchemaSignal ? (
+        <dl
+          className="ml-7 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-fg-dim"
+          aria-label={`Schema for ${tag.name}`}
+        >
+          {tag.description ? (
+            <div className="flex w-full items-baseline gap-1.5">
+              <dt className="sr-only">Description</dt>
+              <dd className="italic">{tag.description}</dd>
+            </div>
+          ) : null}
+          {fieldNames.length > 0 ? (
+            <div className="flex items-baseline gap-1.5">
+              <dt className="uppercase tracking-wider">Fields</dt>
+              <dd className="font-mono text-fg-muted">
+                {fieldNames.map((n) => `${n}: ${tag.fields?.[n]?.type ?? "?"}`).join(", ")}
+              </dd>
+            </div>
+          ) : null}
+          {parents.length > 0 ? (
+            <div className="flex items-baseline gap-1.5">
+              <dt className="uppercase tracking-wider">Parents</dt>
+              <dd className="font-mono text-fg-muted">{parents.join(", ")}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
     </li>
   );
 }
 
-function filterAndSort(tags: TagSummary[], search: string, sort: SortMode): TagSummary[] {
+function filterAndSort(tags: TagRecord[], search: string, sort: SortMode): TagRecord[] {
   const needle = search.trim().toLowerCase();
   const filtered = needle ? tags.filter((t) => t.name.toLowerCase().includes(needle)) : tags;
   const sorted = [...filtered];
   if (sort === "alpha") {
     sorted.sort((a, b) => a.name.localeCompare(b.name));
   } else {
-    sorted.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    sorted.sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.name.localeCompare(b.name));
   }
   return sorted;
 }

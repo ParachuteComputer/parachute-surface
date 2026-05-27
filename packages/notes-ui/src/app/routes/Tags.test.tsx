@@ -165,7 +165,10 @@ describe("Tags route", () => {
       const method = init?.method ?? "GET";
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
       calls.push({ url, method, body });
-      if (url.endsWith("/api/tags") && method === "GET") {
+      // Match the schema-bearing list URL (`?include_schema=true`) and the
+      // bare list URL — Tags now lists via the schema variant; other tests
+      // in this file use the bare endpoint via `installFetch()`.
+      if (url.includes("/api/tags") && !url.includes("/rename") && method === "GET") {
         return {
           ok: true,
           status: 200,

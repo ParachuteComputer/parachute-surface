@@ -1,6 +1,6 @@
-import { VaultAuthError, VaultUnreachableError } from "@openparachute/surface-client";
 import { useVaultReachabilityStore } from "@/lib/vault/reachability-store";
 import { useVaultStore } from "@/lib/vault/store";
+import { VaultAuthError, VaultUnreachableError } from "@openparachute/surface-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 

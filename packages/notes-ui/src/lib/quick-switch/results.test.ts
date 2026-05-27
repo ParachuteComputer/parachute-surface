@@ -25,7 +25,9 @@ describe("computeResults", () => {
       .filter((r) => r.kind === "command")
       .map((r) => (r.kind === "command" ? r.id : null));
     expect(commandIds).toContain("new");
-    expect(commandIds).toContain("capture");
+    // `capture` entry retired in #53 — voice capture is now part of /new.
+    // The `new` entry's keywords include "capture" / "voice" for search.
+    expect(commandIds).not.toContain("capture");
   });
 
   it("drops recent ids whose notes are no longer in the vault", () => {
@@ -124,7 +126,6 @@ describe("computeResults", () => {
   it("exposes the static command list so tests can drive by id", () => {
     expect(COMMANDS.map((c) => c.id)).toEqual([
       "new",
-      "capture",
       "graph",
       "today",
       "calendar",

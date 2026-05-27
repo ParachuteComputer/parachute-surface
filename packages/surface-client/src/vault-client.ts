@@ -690,7 +690,27 @@ export class VaultClient {
 
   // ---------- tags ----------
 
-  async listTags(): Promise<TagSummary[]> {
+  async listTags(): Promise<TagSummary[]>;
+  async listTags(opts: { includeSchema: true }): Promise<TagRecord[]>;
+  async listTags(opts: { includeSchema: false }): Promise<TagSummary[]>;
+  /**
+   * List every tag in the vault.
+   *
+   * - Default: returns `{name, count}` rows — the cheap path for tag
+   *   pickers, autocomplete, and home-strip pin lookups.
+   * - `{ includeSchema: true }`: returns full `TagRecord[]` per tag —
+   *   description, fields, parent_names, relationships, timestamps —
+   *   in a single round-trip. Vault joins from `tag_identity` rows
+   *   internally so this is one query, not N. Used by the Notes UI
+   *   tag schema viewer (notes-ui, 2026-05-27).
+   *
+   * Vault's `GET /api/tags?include_schema=true` returns the joined shape
+   * envelope; the non-overloaded `await listTags()` keeps the old shape.
+   */
+  async listTags(opts?: { includeSchema?: boolean }): Promise<TagSummary[] | TagRecord[]> {
+    if (opts?.includeSchema) {
+      return this.request<TagRecord[]>("/api/tags?include_schema=true");
+    }
     return this.request<TagSummary[]>("/api/tags");
   }
 

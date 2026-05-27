@@ -35,16 +35,9 @@ export const COMMANDS: Array<{
   {
     id: "new",
     label: "New note",
-    description: "Open the note editor",
-    keywords: ["new", "create", "compose"],
+    description: "Open the unified create surface (text + voice)",
+    keywords: ["new", "create", "compose", "capture", "voice", "memo"],
     action: { type: "navigate", to: "/new" },
-  },
-  {
-    id: "capture",
-    label: "Capture",
-    description: "Voice or typed quick note",
-    keywords: ["capture", "voice", "memo"],
-    action: { type: "navigate", to: "/capture" },
   },
   {
     id: "graph",
