@@ -401,7 +401,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
             <div className="flex flex-wrap items-start gap-3">
               <input
                 type="text"
-                placeholder="Path starts with…"
+                placeholder="Title starts with…"
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
                 className="flex-1 min-w-48 rounded-md border border-border bg-card px-3 py-2 font-mono text-sm text-fg focus:border-accent focus:outline-none"

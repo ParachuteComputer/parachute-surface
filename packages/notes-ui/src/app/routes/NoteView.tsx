@@ -136,7 +136,7 @@ function MetadataPanel({ note }: { note: Note }) {
       <dl className="space-y-1.5 text-sm">
         {note.path ? (
           <Row
-            label="Path"
+            label="Title"
             value={<span className="font-mono text-xs break-all">{note.path}</span>}
           />
         ) : null}

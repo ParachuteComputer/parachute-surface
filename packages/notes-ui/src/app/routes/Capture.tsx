@@ -803,13 +803,13 @@ export function Capture({
           </summary>
           <div className="space-y-3 px-3 pb-3 pt-1">
             <label className="flex flex-col gap-1 text-xs">
-              <span className="text-fg-dim">Path</span>
+              <span className="text-fg-dim">Title</span>
               <input
                 type="text"
                 value={pathOverride}
                 onChange={(e) => setPathOverride(e.target.value)}
-                placeholder="(blank → uses generated path)"
-                aria-label="Path override"
+                placeholder="(blank → auto-generated)"
+                aria-label="Title override"
                 className="rounded-md border border-border bg-card px-2.5 py-1.5 font-mono text-xs text-fg focus:border-accent focus:outline-none"
               />
             </label>
