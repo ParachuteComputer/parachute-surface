@@ -156,7 +156,7 @@ export function Modules() {
         <div className="page-header__title">
           <h1>Installed UIs</h1>
           <p className="page-header__sub">
-            UIs hosted by this <code>parachute-app</code> instance.
+            UIs hosted by this <code>parachute-surface</code> instance.
             {data && data.uis.length > 0 && (
               <>
                 {" "}

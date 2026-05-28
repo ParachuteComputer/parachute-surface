@@ -1,5 +1,5 @@
 /**
- * parachute-app admin SPA.
+ * parachute-surface admin SPA.
  *
  * Three routes:
  *   - `/`         — Modules (list installed UIs)
@@ -53,8 +53,8 @@ export function App() {
 
       <footer className="app-footer">
         <small>
-          <code>parachute-app</code> · UI host module ·{" "}
-          <a href="https://github.com/ParachuteComputer/parachute-app">source</a>
+          <code>parachute-surface</code> · UI host module ·{" "}
+          <a href="https://github.com/ParachuteComputer/parachute-surface">source</a>
         </small>
       </footer>
     </div>
