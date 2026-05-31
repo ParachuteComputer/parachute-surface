@@ -1,4 +1,5 @@
 import { AddVault } from "@/app/routes/AddVault";
+import { loadPendingOAuth } from "@/lib/vault/storage";
 import { useVaultStore } from "@/lib/vault/store";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -88,6 +89,84 @@ describe("AddVault URL prefill", () => {
 // generic "Connection failed" red strip — that's what tells the operator
 // the failure mode is "your browser refuses Web Crypto here," not "your
 // hub is down."
+// notes#63 — the hub `/account` "Import notes" deep-link forwards a
+// first-time user through `/add?url=…&redirect=/import`. AddVault must pass
+// that sanitized `redirect` into beginOAuth so it round-trips on the pending
+// OAuth state (sessionStorage) and OAuthCallback can land the user on
+// /import post-connect. A missing or off-origin `redirect` must not persist.
+//
+// Asserted via the observable end-to-end outcome (the persisted
+// PendingOAuthState) rather than a spy: stub fetch through discovery + DCR so
+// the real beginOAuth reaches savePendingOAuth, then read it back.
+describe("AddVault post-connect redirect plumbing (notes#63)", () => {
+  function mockDiscoveryAndDcr() {
+    const impl = vi.fn<typeof fetch>(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => validMetadata,
+          text: async () => JSON.stringify(validMetadata),
+        } as Response;
+      }
+      if (url.endsWith("/oauth/register")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ client_id: "test-client" }),
+          text: async () => "",
+        } as Response;
+      }
+      // Origin-probe + anything else: harmless empty 200.
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as Response;
+    });
+    vi.stubGlobal("fetch", impl);
+    return impl;
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    // AddVault calls window.location.assign after beginOAuth succeeds;
+    // jsdom's default throws "Not implemented: navigation".
+    vi.stubGlobal("location", { ...window.location, assign: vi.fn() });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    sessionStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+  });
+
+  it("persists a safe redirect from ?redirect= onto the pending OAuth state", async () => {
+    mockDiscoveryAndDcr();
+    renderAddVault("/add?url=http%3A%2F%2Fhub.example&redirect=%2Fimport");
+    const input = screen.getByLabelText(/hub url/i) as HTMLInputElement;
+    expect(input.value).toBe("http://hub.example");
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(loadPendingOAuth()?.redirect).toBe("/import");
+    });
+  });
+
+  it("omits redirect from the pending state when ?redirect= is off-origin", async () => {
+    mockDiscoveryAndDcr();
+    renderAddVault("/add?url=http%3A%2F%2Fhub.example&redirect=https%3A%2F%2Fevil.example");
+    const input = screen.getByLabelText(/hub url/i) as HTMLInputElement;
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      // The flow ran (pending state exists) but the off-origin redirect was
+      // sanitized away — never persisted.
+      expect(loadPendingOAuth()).not.toBeNull();
+    });
+    expect(loadPendingOAuth()?.redirect).toBeUndefined();
+  });
+});
+
 describe("AddVault insecure-context handling", () => {
   beforeEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });

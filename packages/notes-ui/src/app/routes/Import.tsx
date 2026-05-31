@@ -13,7 +13,7 @@ import { useToastStore } from "@/lib/toast/store";
 import { useVaultStore } from "@/lib/vault";
 import { useActiveVaultClient } from "@/lib/vault/queries";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 
 type Stage =
   | { kind: "pick" }
@@ -39,6 +39,7 @@ export function Import() {
   const activeVault = useVaultStore((s) => s.getActiveVault());
   const client = useActiveVaultClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const pushToast = useToastStore((s) => s.push);
   const [stage, setStage] = useState<Stage>({ kind: "pick" });
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +48,21 @@ export function Import() {
   // worker reads it.
   const abortRef = useRef<AbortController | null>(null);
 
-  if (!activeVault) return <Navigate to="/" replace />;
+  if (!activeVault) {
+    // The hub `/account` "Import notes" deep-link arrives as
+    // `/import?url=<hubOrigin>/vault/<name>`. A first-time user (no vault
+    // connected yet) would otherwise lose the `?url=` and land on the home
+    // screen (notes#63). Forward into the connect flow carrying the url AND
+    // a post-connect redirect back here, so they land on import once the
+    // vault is connected. The `?url=` value is opaque user-supplied input —
+    // /add validates it via normalizeVaultUrl before any OAuth runs.
+    const urlParam = searchParams.get("url");
+    if (urlParam) {
+      const target = `/add?url=${encodeURIComponent(urlParam)}&redirect=${encodeURIComponent("/import")}`;
+      return <Navigate to={target} replace />;
+    }
+    return <Navigate to="/" replace />;
+  }
 
   const onFilesSelected = useCallback(
     async (files: File[]) => {

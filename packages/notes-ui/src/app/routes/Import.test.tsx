@@ -4,7 +4,7 @@ import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useSearchParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface FetchEntry {
@@ -77,15 +77,35 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-function renderRoute() {
+function renderRoute(initialPath = "/import") {
   return render(
-    <MemoryRouter initialEntries={["/import"]}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/import" element={<Import />} />
         <Route path="/" element={<div>HomePage</div>} />
+        {/* The connect-flow target — render its search string so the
+            forwarding test can assert the url + redirect params survived. */}
+        <Route path="/add" element={<AddVaultProbe />} />
       </Routes>
     </MemoryRouter>,
     { wrapper: Wrapper },
+  );
+}
+
+// Lightweight stand-in for the real AddVault route. Exposes the live search
+// params as data-attributes so the forwarding test can assert the deep-link
+// `?url=` + post-connect `redirect=` rode through intact, without dragging in
+// AddVault's OAuth/probe machinery.
+function AddVaultProbe() {
+  const [params] = useSearchParams();
+  return (
+    <div
+      data-testid="add-vault-page"
+      data-url={params.get("url") ?? ""}
+      data-redirect={params.get("redirect") ?? ""}
+    >
+      AddVaultPage
+    </div>
   );
 }
 
@@ -113,10 +133,37 @@ describe("Import route", () => {
     expect(document.querySelector('input[type="file"]')).toBeInTheDocument();
   });
 
-  it("redirects home when no vault is active", () => {
+  it("redirects home when no vault is active and no ?url= is present", () => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     renderRoute();
     expect(screen.getByText("HomePage")).toBeInTheDocument();
+  });
+
+  // notes#63 — the hub `/account` "Import notes" deep-link is
+  // `/import?url=<hubOrigin>/vault/<name>`. A first-time user (no vault yet)
+  // must not lose the param: forward into the connect flow carrying the url
+  // AND a post-connect redirect back to /import, rather than silently
+  // bouncing to the home screen.
+  it("forwards ?url= into /add (with redirect=/import) when no vault is active", () => {
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    renderRoute("/import?url=https%3A%2F%2Fhub.example%2Fvault%2Fdefault");
+    const addPage = screen.getByTestId("add-vault-page");
+    expect(addPage).toBeInTheDocument();
+    // The hub origin/vault URL rode through to /add's ?url= intact…
+    expect(addPage).toHaveAttribute("data-url", "https://hub.example/vault/default");
+    // …alongside the post-connect redirect that lands the user back on import.
+    expect(addPage).toHaveAttribute("data-redirect", "/import");
+    // Must NOT have fallen through to the home screen (the pre-fix behavior).
+    expect(screen.queryByText("HomePage")).not.toBeInTheDocument();
+  });
+
+  it("renders the import picker (not the connect flow) when a vault IS connected, even with ?url=", () => {
+    // Already-connected path is unchanged: the deep-link still lands on the
+    // import surface for the active vault, ignoring ?url=.
+    renderRoute("/import?url=https%3A%2F%2Fhub.example%2Fvault%2Fdefault");
+    expect(screen.getByText(/Import notes into/i)).toBeInTheDocument();
+    expect(screen.getByText("dev")).toBeInTheDocument();
+    expect(screen.queryByTestId("add-vault-page")).not.toBeInTheDocument();
   });
 
   it("parses loose markdown, shows dry-run, then imports on confirm", async () => {

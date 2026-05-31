@@ -102,6 +102,15 @@ export interface BeginOAuthOptions {
    * PendingOAuthState; OAuthCallback consumes it.
    */
   priorHaltedVaultId?: string;
+  /**
+   * In-app path to land on after a successful connect, replacing the
+   * default `/` (notes#63). The hub `/account` "Import notes" deep-link
+   * rides it through `/add?url=…&redirect=/import` so a first-time user
+   * lands on the import screen post-connect. Round-trips via sessionStorage
+   * on the PendingOAuthState; OAuthCallback consumes it. Callers must pass a
+   * sanitized same-origin path (see `safeInternalRedirect`).
+   */
+  redirect?: string;
 }
 
 /**
@@ -152,6 +161,7 @@ export async function beginOAuth(
     scope,
     startedAt: new Date().toISOString(),
     ...(options.priorHaltedVaultId ? { priorHaltedVaultId: options.priorHaltedVaultId } : {}),
+    ...(options.redirect ? { redirect: options.redirect } : {}),
   };
   savePendingOAuth(pending);
 
