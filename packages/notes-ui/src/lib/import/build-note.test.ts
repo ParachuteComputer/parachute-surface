@@ -240,6 +240,16 @@ describe("alignment contract fixtures — parse tier (build-note)", () => {
     expect(note.metadata).toEqual({});
   });
 
+  it("FX-PATH-OVERRIDE-EXT — frontmatter path: ending in .md is extension-stripped", () => {
+    const note = buildParsedNote({
+      sourcePath: "deep/orig.md",
+      raw: "---\npath: My/Note.md\n---\nbody",
+    });
+    expect(note.path).toBe("My/Note");
+    expect(note.content).toBe("body");
+    expect(note.metadata).toEqual({});
+  });
+
   it("FX-PATH-NORMALIZE — backslash + collapse + trim, case preserved", () => {
     const note = buildParsedNote({
       sourcePath: "X.md",

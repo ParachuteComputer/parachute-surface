@@ -75,7 +75,12 @@ export function buildParsedNote(args: {
 
 function pickPath(frontmatter: Record<string, unknown>, sourcePath: string): string {
   const fmPath = pickStringField(frontmatter, "path");
-  if (fmPath) return normalizePath(fmPath);
+  // Strip a trailing `.md`/`.markdown` on BOTH branches — a frontmatter
+  // `path: My/Note.md` override must normalize to `My/Note`, matching the
+  // CLI's `normalizeImportPath` (alignment contract §1.8). Without this the
+  // web yields `My/Note.md` while the CLI yields `My/Note`, causing a 409 +
+  // broken wikilinks on re-import.
+  if (fmPath) return normalizePath(stripExtension(fmPath));
   return normalizePath(stripExtension(sourcePath));
 }
 
