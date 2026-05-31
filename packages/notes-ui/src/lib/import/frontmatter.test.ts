@@ -78,9 +78,13 @@ describe("parseFrontmatter", () => {
   });
 
   it("handles CRLF line endings (Windows-authored Obsidian zips)", () => {
+    // The canonical line-scan (alignment contract §1.1) splits on /\r?\n/
+    // and rejoins the body with `\n`, so a CRLF body normalizes to LF.
+    // This matches the vault CLI's body join exactly — required for zero
+    // parse-tier drift between the two importers.
     const out = parseFrontmatter("---\r\nid: w1\r\ntags: [a]\r\n---\r\nbody\r\nline2");
     expect(out.data).toEqual({ id: "w1", tags: ["a"] });
-    expect(out.content).toBe("body\r\nline2");
+    expect(out.content).toBe("body\nline2");
   });
 
   it("skips comments and blank lines inside the frontmatter block", () => {
@@ -102,5 +106,62 @@ describe("parseFrontmatter", () => {
     // user-authored blank line after that as part of the body.
     const out = parseFrontmatter("---\nid: a\n---\n\nbody with leading blank");
     expect(out.content).toBe("\nbody with leading blank");
+  });
+});
+
+/**
+ * Obsidian alignment contract — frontmatter-tier canonical fixtures (§3).
+ * Same inputs + expected values the vault CLI parser asserts, proving
+ * convergence on the fence-scan + YAML-subset layer.
+ */
+describe("alignment contract fixtures — frontmatter tier", () => {
+  it("FX-FENCE-BOM — strips a leading UTF-8 BOM before matching the open fence", () => {
+    const out = parseFrontmatter("﻿---\nid: bom1\ntags: [a]\n---\nhello");
+    expect(out.data).toEqual({ id: "bom1", tags: ["a"] });
+    expect(out.content).toBe("hello");
+  });
+
+  it("FX-FENCE-FOURDASH — `----` body line is not the close fence", () => {
+    const out = parseFrontmatter("---\nid: x9\n---\nbefore\n----\nafter");
+    expect(out.data).toEqual({ id: "x9" });
+    expect(out.content).toBe("before\n----\nafter");
+  });
+
+  it("FX-FENCE-FOURDASH-OPEN — `----` after open with no real close → unclosed", () => {
+    const raw = "---\nid: y\n----\nbody text";
+    const out = parseFrontmatter(raw);
+    expect(out.data).toEqual({});
+    expect(out.content).toBe(raw);
+  });
+
+  it("FX-FENCE-UNCLOSED — open, never closed → whole file is content", () => {
+    const raw = "---\nid: z\nbody no close";
+    const out = parseFrontmatter(raw);
+    expect(out.data).toEqual({});
+    expect(out.content).toBe(raw);
+  });
+
+  it("FX-INLINE-ARRAY — quote-aware split keeps the quoted comma as one item", () => {
+    const out = parseFrontmatter('---\nkeywords: ["a, b", c]\n---\nx');
+    expect(out.data).toEqual({ keywords: ["a, b", "c"] });
+    expect(out.content).toBe("x");
+  });
+
+  it("FX-CRLF — CRLF frontmatter parses and the body keeps its endings", () => {
+    const out = parseFrontmatter("---\r\nid: cr1\r\ntags: [a]\r\n---\r\nbody");
+    expect(out.data).toEqual({ id: "cr1", tags: ["a"] });
+    expect(out.content).toBe("body");
+  });
+
+  it("FX-DOTTED-KEY — dotted frontmatter key accepted, not confused with created_at", () => {
+    const out = parseFrontmatter("---\ncreated.at: 2024\nid: dk1\n---\nx");
+    expect(out.data).toEqual({ "created.at": 2024, id: "dk1" });
+    expect(out.content).toBe("x");
+  });
+
+  it("FX-COMMENT-LINE — `#`-comment inside the block is skipped", () => {
+    const out = parseFrontmatter("---\n# a yaml comment\nid: cm1\n---\nbody");
+    expect(out.data).toEqual({ id: "cm1" });
+    expect(out.content).toBe("body");
   });
 });
