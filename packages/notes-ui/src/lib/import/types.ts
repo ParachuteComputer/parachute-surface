@@ -44,8 +44,16 @@ export interface ParsedNote {
   /** Frontmatter `created_at` / `createdAt` if present (ISO 8601). */
   createdAt?: string;
   /**
+   * Frontmatter `updated_at` / `updatedAt` if present (ISO 8601). Hoisted
+   * for parse-tier parity with the vault CLI importer; the web runner
+   * currently carries-but-drops it (vault's create path doesn't accept a
+   * client `updated_at`).
+   */
+  updatedAt?: string;
+  /**
    * Frontmatter bag minus the keys we hoisted (id, path, tags,
-   * created_at). Stamped onto the note's metadata column.
+   * created_at/createdAt, updated_at/updatedAt). Stamped onto the note's
+   * metadata column.
    */
   metadata: Record<string, unknown>;
 }

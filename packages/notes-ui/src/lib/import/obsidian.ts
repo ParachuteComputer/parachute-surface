@@ -6,14 +6,17 @@ import type { ParseError, ParsedImport, ParsedNote } from "./types";
  * Parse an Obsidian vault delivered as a `.zip`.
  *
  * Walks every entry in the archive, picks the `.md` / `.markdown` files,
- * decodes their text, and produces one `ParsedNote` per source file. Two
- * Obsidian-specific filters apply:
+ * decodes their text, and produces one `ParsedNote` per source file.
+ * Intake exclusion (`isExcludedPath`, shared with the vault CLI per the
+ * alignment contract §1.9) skips:
  *
- *   - Skip `.obsidian/` (the workspace config — every Obsidian vault
- *     ships one and importing it as notes would create dozens of
- *     useless JSON-shaped junk paths).
- *   - Skip `.trash/` (Obsidian's "deleted notes" holding area — if
- *     they're there the user threw them away on purpose).
+ *   - `.obsidian/` (the workspace config — every Obsidian vault ships one
+ *     and importing it as notes would create dozens of useless
+ *     JSON-shaped junk paths).
+ *   - `.trash/` (Obsidian's "deleted notes" holding area — if they're
+ *     there the user threw them away on purpose).
+ *   - `.git/`, `.parachute/`, `__MACOSX/`, `node_modules/`, and any
+ *     other dot-prefixed segment (generic dotfile/dotdir rule).
  *
  * Non-markdown entries (images, PDFs, JSON, etc.) aren't surfaced as
  * errors — they're a routine part of an Obsidian vault and the import
@@ -59,7 +62,7 @@ export async function parseObsidianZip(file: File): Promise<ParsedImport> {
 
   for (const { path, obj } of entries) {
     if (obj.dir) continue;
-    if (isObsidianInternal(path)) continue;
+    if (isExcludedPath(path)) continue;
     if (!isMarkdownEntry(path)) continue;
     try {
       const raw = await obj.async("string");
@@ -88,12 +91,34 @@ export async function parseObsidianZip(file: File): Promise<ParsedImport> {
   };
 }
 
-function isObsidianInternal(path: string): boolean {
-  // After potential root-stripping the path looks like `<vault>/.obsidian/...`
-  // OR `.obsidian/...` if no root wraps; cover both shapes by checking
-  // every path segment.
+/**
+ * Named internal/tooling segments excluded regardless of the generic
+ * dotfile rule. The dot-prefixed ones (`.obsidian`, `.trash`, `.git`,
+ * `.parachute`) are also caught by the generic `startsWith(".")` check
+ * below; they're kept explicit for readability. `__MACOSX` and
+ * `node_modules` don't start with `.`, so they need the named set.
+ */
+const EXCLUDED_SEGMENTS = new Set([
+  ".obsidian",
+  ".trash",
+  ".git",
+  ".parachute",
+  "__MACOSX",
+  "node_modules",
+]);
+
+/**
+ * Intake (file-selection) exclusion — applied identically by both the
+ * vault CLI and this web importer per the alignment contract §1.9.
+ *
+ * Exclude (return true) if ANY path segment is in the named set above OR
+ * starts with `.` (generic dotfile/dotdir). The generic dot rule means a
+ * legit dot-prefixed user note like `.daily-note.md` is also excluded —
+ * documented, chosen behavior matching the CLI's long-standing skip.
+ */
+export function isExcludedPath(path: string): boolean {
   const segments = path.split("/");
-  return segments.some((seg) => seg === ".obsidian" || seg === ".trash" || seg === "__MACOSX");
+  return segments.some((seg) => EXCLUDED_SEGMENTS.has(seg) || seg.startsWith("."));
 }
 
 function isMarkdownEntry(path: string): boolean {
@@ -126,7 +151,7 @@ function stripCommonRoot(path: string, entries: Array<{ path: string }>): string
   if (!firstSegment) return path;
   let commonRoot: string | null = firstSegment;
   for (const e of entries) {
-    if (isObsidianInternal(e.path)) continue;
+    if (isExcludedPath(e.path)) continue;
     if (!isMarkdownEntry(e.path)) continue;
     const seg = e.path.split("/")[0];
     if (seg !== commonRoot) {

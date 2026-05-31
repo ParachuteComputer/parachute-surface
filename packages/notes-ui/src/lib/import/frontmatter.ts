@@ -30,33 +30,56 @@ export interface ParsedFrontmatter {
   content: string;
 }
 
-const FRONTMATTER_OPEN = /^---\r?\n/;
-
 /**
  * Strip frontmatter from a markdown source and parse the YAML block.
  * Returns `{ data: {}, content: raw }` when the source doesn't open with
  * a `---` fence — i.e. plain markdown passes through unchanged.
+ *
+ * Algorithm (kept byte-for-byte identical to the vault CLI's
+ * `parseFrontmatter` so the two importers never diverge — see the
+ * Obsidian alignment contract §1.1):
+ *
+ *   1. Strip a leading UTF-8 BOM (U+FEFF). Without this a BOM-prefixed
+ *      file silently loses its frontmatter — the opening `﻿---`
+ *      doesn't match an exact-`---` line. (Headline W1 fix.)
+ *   2. Split on /\r?\n/ (CRLF-aware) into lines.
+ *   3. If line[0] is not EXACTLY `---` → no frontmatter; return the
+ *      BOM-stripped source as content.
+ *   4. The closing fence is the FIRST subsequent line that is EXACTLY
+ *      `---` — not `----`, not `---more`, not `  ---`. This line-scan
+ *      replaces the older close regex; the regex already rejected
+ *      `----`/`---more` correctly, but the line-scan removes any drift
+ *      risk against the CLI on pathological "open, then `----`, then a
+ *      real `---` close later" inputs.
+ *   5. No exact-`---` close → unclosed; return the whole BOM-stripped
+ *      source as content (never swallow the file).
  */
 export function parseFrontmatter(raw: string): ParsedFrontmatter {
-  if (!FRONTMATTER_OPEN.test(raw)) return { data: {}, content: raw };
-  // Strip the opening fence + its newline before searching for the close
-  // — otherwise a frontmatter block that opens *and* closes with `---`
-  // at the very top would falsely match index 0.
-  const afterOpen = raw.replace(FRONTMATTER_OPEN, "");
-  const closeIdx = afterOpen.search(/\r?\n---\r?\n|\r?\n---$/);
-  if (closeIdx === -1) {
-    // Unclosed frontmatter — treat the whole thing as content rather than
-    // silently swallowing the file. Better to import a slightly-ugly note
-    // than to lose it.
-    return { data: {}, content: raw };
+  // 1. Strip a leading UTF-8 BOM before any fence matching.
+  const source = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+
+  // 2. CRLF-aware line split.
+  const lines = source.split(/\r?\n/);
+
+  // 3. Opening fence must be EXACTLY `---`.
+  if (lines[0] !== "---") return { data: {}, content: source };
+
+  // 4. Closing fence = first subsequent line that is EXACTLY `---`.
+  let closeIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === "---") {
+      closeIdx = i;
+      break;
+    }
   }
-  const yamlBlock = afterOpen.slice(0, closeIdx);
-  // Skip past the closing fence + its trailing newline (if any). The
-  // search regex captures `\n---\n` or `\n---$`, both end at index
-  // closeIdx; the close fence itself is 3 chars (`---`) plus the
-  // leading newline (1-2 chars depending on line endings).
-  const afterClose = afterOpen.slice(closeIdx).replace(/^\r?\n---\r?\n?/, "");
-  return { data: parseBlock(yamlBlock), content: afterClose };
+
+  // 5. Unclosed — treat the whole thing as content rather than silently
+  // swallowing the file. Better to import a slightly-ugly note than lose it.
+  if (closeIdx === -1) return { data: {}, content: source };
+
+  const yamlBlock = lines.slice(1, closeIdx).join("\n");
+  const body = lines.slice(closeIdx + 1).join("\n");
+  return { data: parseBlock(yamlBlock), content: body };
 }
 
 function parseBlock(text: string): Record<string, unknown> {
