@@ -165,6 +165,20 @@ describe("AddVault post-connect redirect plumbing (notes#63)", () => {
     });
     expect(loadPendingOAuth()?.redirect).toBeUndefined();
   });
+
+  it("omits redirect from the pending state for the `/\\` backslash-authority bypass", async () => {
+    // `%2F%5Cevil.com` decodes to `/\evil.com`, which the WHATWG URL parser
+    // resolves to `http://evil.com/`. Must be sanitized away just like `//`.
+    mockDiscoveryAndDcr();
+    renderAddVault("/add?url=http%3A%2F%2Fhub.example&redirect=%2F%5Cevil.com");
+    const input = screen.getByLabelText(/hub url/i) as HTMLInputElement;
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(loadPendingOAuth()).not.toBeNull();
+    });
+    expect(loadPendingOAuth()?.redirect).toBeUndefined();
+  });
 });
 
 describe("AddVault insecure-context handling", () => {

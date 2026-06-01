@@ -26,6 +26,24 @@ describe("safeInternalRedirect", () => {
     expect(safeInternalRedirect("//evil.example")).toBeUndefined();
   });
 
+  it("rejects a backslash-authority form (`/\\` open-redirect bypass)", () => {
+    // The WHATWG URL parser normalizes a backslash to a forward slash, so
+    // `new URL('/\\evil.com', base)` resolves to `http://evil.com/`. A naive
+    // `//`-only guard would let this through — pin it as rejected.
+    expect(safeInternalRedirect("/\\evil.com")).toBeUndefined();
+    expect(safeInternalRedirect("/\\evil.com/path")).toBeUndefined();
+  });
+
+  it("blocks the encoded `//` form after searchParams decoding", () => {
+    // The redirect arrives as a URLSearchParams value, which is
+    // percent-decoded before it reaches this guard. `%2F%2Fevil.com` decodes
+    // to `//evil.com` — document that the decoded value is what's checked, so
+    // a future change can't regress into checking the raw encoded string.
+    const decoded = new URLSearchParams("redirect=%2F%2Fevil.com").get("redirect");
+    expect(decoded).toBe("//evil.com");
+    expect(safeInternalRedirect(decoded)).toBeUndefined();
+  });
+
   it("rejects a non-http(s) scheme", () => {
     expect(safeInternalRedirect("javascript:alert(1)")).toBeUndefined();
   });
