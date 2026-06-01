@@ -1,12 +1,18 @@
 import { InsecureContextBanner } from "@/components/InsecureContextBanner";
 import { beginOAuth, normalizeVaultUrl, useOriginVaultProbe } from "@/lib/vault";
 import { InsecureContextError } from "@/lib/vault/pkce";
+import { safeInternalRedirect } from "@/lib/vault/url";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 
 export function AddVault() {
   const [searchParams] = useSearchParams();
   const queryUrl = searchParams.get("url") ?? "";
+  // Post-connect landing path (notes#63) — the hub `/account` "Import notes"
+  // deep-link arrives as `/add?url=…&redirect=/import`. Sanitized to an
+  // in-app same-origin path so it can never become an open redirect; an
+  // invalid value falls back to the default `/` landing in OAuthCallback.
+  const redirect = safeInternalRedirect(searchParams.get("redirect"));
   const [url, setUrl] = useState(queryUrl);
   const [error, setError] = useState<string | null>(null);
   const [insecureContext, setInsecureContext] = useState(false);
@@ -46,7 +52,9 @@ export function AddVault() {
 
     setSubmitting(true);
     try {
-      const { authorizeUrl } = await beginOAuth(normalized);
+      const { authorizeUrl } = await beginOAuth(normalized, undefined, undefined, {
+        ...(redirect ? { redirect } : {}),
+      });
       window.location.assign(authorizeUrl);
     } catch (err) {
       // Web Crypto isn't available on non-HTTPS / non-localhost origins,

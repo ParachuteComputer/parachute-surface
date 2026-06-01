@@ -233,6 +233,79 @@ describe("OAuthCallback vault URL resolution (notes#121)", () => {
   });
 });
 
+// notes#63 — the connect flow can carry a post-connect `redirect` (the hub
+// `/account` "Import notes" deep-link rides it through
+// `/add?url=…&redirect=/import` → beginOAuth → PendingOAuthState). On a
+// successful exchange OAuthCallback must navigate to that path instead of the
+// default `/`, and must reject any non-same-origin value defensively.
+describe("OAuthCallback post-connect redirect (notes#63)", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+  });
+
+  function renderCallbackWithImport() {
+    return render(
+      <MemoryRouter initialEntries={["/oauth/callback?code=auth-code&state=state-xyz"]}>
+        <Routes>
+          <Route path="/oauth/callback" element={<OAuthCallback />} />
+          <Route path="/import" element={<div>Import page</div>} />
+          <Route path="/" element={<div>Home page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("navigates to pending.redirect on success when it's a safe in-app path", async () => {
+    savePendingOAuth({ ...pending, redirect: "/import" });
+    mockSuccessfulTokenResponse({
+      vault: "default",
+      services: { vault: { url: "http://hub.example/vault/default" } },
+    });
+
+    renderCallbackWithImport();
+
+    await waitFor(() => {
+      expect(screen.getByText("Import page")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Home page")).not.toBeInTheDocument();
+  });
+
+  it("falls back to / when pending.redirect is an off-origin URL (open-redirect guard)", async () => {
+    savePendingOAuth({ ...pending, redirect: "https://evil.example/phish" });
+    mockSuccessfulTokenResponse({
+      vault: "default",
+      services: { vault: { url: "http://hub.example/vault/default" } },
+    });
+
+    renderCallbackWithImport();
+
+    await waitFor(() => {
+      expect(screen.getByText("Home page")).toBeInTheDocument();
+    });
+  });
+
+  it("navigates to / on success when no redirect is set (default landing unchanged)", async () => {
+    savePendingOAuth(pending);
+    mockSuccessfulTokenResponse({
+      vault: "default",
+      services: { vault: { url: "http://hub.example/vault/default" } },
+    });
+
+    renderCallbackWithImport();
+
+    await waitFor(() => {
+      expect(screen.getByText("Home page")).toBeInTheDocument();
+    });
+  });
+});
+
 // notes#148 — the OAuth reconnect path must clear the halt for BOTH the
 // new vault id AND the originally-halted vault id when the two differ. The
 // hub's token catalog can resolve a vault to a different URL than what's

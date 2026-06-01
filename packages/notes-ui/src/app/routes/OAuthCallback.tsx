@@ -6,6 +6,7 @@ import {
   useVaultStore,
 } from "@/lib/vault";
 import { useAuthHaltStore } from "@/lib/vault/auth-halt-store";
+import { safeInternalRedirect } from "@/lib/vault/url";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -87,7 +88,14 @@ export function OAuthCallback() {
         if (pending.priorHaltedVaultId && pending.priorHaltedVaultId !== id) {
           halt.clearHalt(pending.priorHaltedVaultId);
         }
-        navigate("/", { replace: true });
+        // Honor a post-connect redirect carried through the connect flow
+        // (notes#63) — e.g. the hub `/account` "Import notes" deep-link
+        // lands a first-time user on `/import` after connecting. Re-sanitize
+        // defensively even though `/add` already filtered it: the pending
+        // state rode through sessionStorage and an attacker who can plant
+        // there must never steer navigate() off-origin. Falls back to `/`.
+        const dest = safeInternalRedirect(pending.redirect) ?? "/";
+        navigate(dest, { replace: true });
       } catch (err) {
         if (err instanceof PendingApprovalError) {
           setStatus({

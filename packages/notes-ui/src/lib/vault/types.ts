@@ -75,9 +75,16 @@ export interface VaultRecord {
  * (different vaultIdFromUrl) — which would otherwise leave the original
  * halt orphaned in localStorage and the banner stuck on the next active
  * vault switch. Omitted for the cold connect flow from /add.
+ *
+ * `redirect` (notes#63) is the in-app path to land on after a successful
+ * connect, replacing the default `/`. The hub `/account` "Import notes"
+ * deep-link rides it through `/add?url=…&redirect=/import` so a first-time
+ * user lands on the import screen with the freshly-connected vault. Always
+ * a sanitized same-origin path (see `safeInternalRedirect`).
  */
 export interface PendingOAuthState extends BasePendingOAuthState {
   priorHaltedVaultId?: string;
+  redirect?: string;
 }
 
 // Vault PR 7 moved every endpoint under `/vault/<name>/`. Older stored
