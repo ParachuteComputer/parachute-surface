@@ -93,7 +93,7 @@
       "name": "@openparachute/surface-render",
       "version": "0.1.0",
       "dependencies": {
-        "@openparachute/surface-client": "workspace:^",
+        "@openparachute/surface-client": "^0.2.0",
       },
       "devDependencies": {
         "@testing-library/dom": "^10.4.0",

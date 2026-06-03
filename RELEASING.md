@@ -109,7 +109,7 @@ Before the workflow can publish, this repo needs **npm Trusted Publisher rules �
 3. Same for `@openparachute/surface-render` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-app`, workflow `release.yml`, env blank) before the first `render-v...` tag is pushed, or the publish job will fail with 403.
 4. Same for `@openparachute/notes-ui` — **this rule may currently be configured against `parachute-notes` from before the migration** (notes-ui's prior home). Update it to point at `parachute-app` per the values above. The publisher rule verifies `workflow_ref`, so a mismatched repo/workflow combo will fail with 403 on tag push.
 
-All three packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
+All four packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
 
 No `NPM_TOKEN` secret needed — the workflow uses OIDC.
 
@@ -133,7 +133,7 @@ There's no "unpublish" path on npm (the strict 72-hour unpublish policy is for e
 
 ## Troubleshooting
 
-- **Workflow doesn't trigger**: confirm the tag matches one of the patterns (`v[0-9]+...` for app, `client-v[0-9]+...` for app-client).
+- **Workflow doesn't trigger**: confirm the tag matches one of the patterns (`v[0-9]+...` for app, `client-v[0-9]+...` for app-client, `render-v[0-9]+...` for surface-render, `notes-ui-v[0-9]+...` for notes-ui).
 - **`version mismatch` error**: the relevant `package.json` version differs from the tag. Re-tag the correct commit, or fix the version.
 - **`npm ERR! 403 You do not have permission to publish`**: Trusted Publisher rule on npm doesn't match this workflow. Verify org/repo/workflow filename are `ParachuteComputer` / `parachute-app` / `release.yml`.
 - **`npm ERR! 401 Unauthorized` with no OIDC token**: the workflow is missing `permissions: id-token: write` at the job level.
