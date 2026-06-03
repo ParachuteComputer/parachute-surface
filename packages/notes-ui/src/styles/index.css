@@ -264,6 +264,14 @@ body {
   background: rgb(228 224 216 / 0.4);
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vault-media-loading {
+    background: rgb(51 49 45 / 0.4);
+  }
+}
+:root[data-theme="dark"] .vault-media-loading {
+  background: rgb(51 49 45 / 0.4);
+}
 @keyframes pulse {
   0%,
   100% {

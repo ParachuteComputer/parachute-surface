@@ -43,7 +43,7 @@ export function NoteRenderer({
         // image fetcher; route the markdown branch through it rather than the
         // shared default.
         markdown: ({ content, resolve: r, className: c }) => (
-          <MarkdownView content={content} resolve={r as WikilinkResolver} className={c} />
+          <MarkdownView content={content} resolve={r} className={c} />
         ),
       }}
     />

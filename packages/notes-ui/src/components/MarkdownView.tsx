@@ -82,7 +82,12 @@ export function MarkdownView({
   className,
 }: {
   content: string;
-  resolve: WikilinkResolver;
+  // Optional to match surface-render's MarkdownViewProps — the markdown branch
+  // of <NoteRenderer> forwards the override props straight through, and the
+  // shared layer leaves `resolve` optional (markdown without wikilinks needs
+  // none). notes-ui's call sites all pass one; surface-render no-ops cleanly
+  // when absent.
+  resolve?: WikilinkResolver;
   className?: string;
 }) {
   const client = useActiveVaultClient();
