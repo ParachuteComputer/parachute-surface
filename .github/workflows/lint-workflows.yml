@@ -1,0 +1,67 @@
+name: Lint workflows
+
+# Mechanical guard against a malformed workflow file silently breaking CI.
+#
+# On 2026-06-03 an unquoted colon in a step `name:` in release.yml turned the
+# whole workflow into a GitHub Actions **startup_failure**: runs completed with
+# conclusion=failure but ZERO jobs and NO logs. Because release.yml is
+# tag-triggered, every publish silently no-op'd for hours (surface-client@0.2.0
+# never reached npm) — nothing surfaced an error. A human reviewer can't
+# reliably eyeball YAML validity, so this needs to be mechanical. See #72.
+#
+# Two layers, cheapest-and-most-robust first:
+#   1. A dependency-free `yaml.safe_load` over every workflow file. This is the
+#      exact check that pinpointed the original ScannerError; it has no external
+#      surface and cannot itself startup-fail on a third-party download.
+#   2. actionlint (pinned) for GitHub Actions schema + ${{ }} expression errors
+#      that a plain YAML parse won't catch.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  lint-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Layer 1 — parse every workflow file. Catches the unquoted-colon /
+      # ScannerError class that caused the silent release failure.
+      - name: YAML-parse every workflow file
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          failed = False
+          files = sorted(glob.glob(".github/workflows/*.yml") + glob.glob(".github/workflows/*.yaml"))
+          if not files:
+              print("no workflow files found", file=sys.stderr)
+              sys.exit(1)
+          for path in files:
+              try:
+                  with open(path) as fh:
+                      yaml.safe_load(fh)
+                  print(f"ok: {path}")
+              except yaml.YAMLError as exc:
+                  failed = True
+                  print(f"FAIL: {path}\n{exc}", file=sys.stderr)
+          sys.exit(1 if failed else 0)
+          PY
+
+      # Layer 2 — actionlint for schema + expression errors. Pinned by version;
+      # if the download flakes, layer 1 has already run.
+      - name: Run actionlint
+        run: |
+          ACTIONLINT_VERSION=1.7.7
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz actionlint
+          ./actionlint -color
