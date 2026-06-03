@@ -223,6 +223,57 @@ body {
   margin-right: 0.4em;
 }
 
+/* --- @openparachute/surface-render class-contract reconciliation ---
+   The shared render primitives emit plain semantic class names (no Tailwind);
+   these rules reproduce the visual treatment the local renderers carried as
+   inline Tailwind utilities before the Phase 4 migration. Match the prior
+   look so styling doesn't regress. */
+
+/* <CsvRenderer>: was `overflow-x-auto` (table scroll) + an amber warning box. */
+.csv-scroll {
+  overflow-x: auto;
+}
+.csv-warning {
+  margin-bottom: 0.5rem;
+  border: 1px solid rgb(245 158 11 / 0.3);
+  background: rgb(245 158 11 / 0.1);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: #b45309;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .csv-warning {
+    color: #fcd34d;
+  }
+}
+:root[data-theme="dark"] .csv-warning {
+  color: #fcd34d;
+}
+
+/* <VaultImage>: was a red error span + a pulsing skeleton placeholder. */
+.vault-media-error {
+  font-size: 0.75rem;
+  color: #f87171;
+}
+.vault-media-loading {
+  display: inline-block;
+  height: 6rem;
+  width: 10rem;
+  border-radius: 6px;
+  background: rgb(228 224 216 / 0.4);
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .prose-note code,
   :root:not([data-theme="light"]) .prose-note pre {
