@@ -20,8 +20,8 @@
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.41.1",
         "@lezer/highlight": "^1.2.3",
-        "@openparachute/surface-client": "^0.1.0",
-        "@openparachute/surface-render": "^0.1.0",
+        "@openparachute/surface-client": "^0.2.0",
+        "@openparachute/surface-render": "^0.2.0",
         "@tanstack/react-query": "^5",
         "highlight.js": "^11.11.1",
         "idb": "^8.0.3",
@@ -92,7 +92,7 @@
     },
     "packages/surface-render": {
       "name": "@openparachute/surface-render",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@openparachute/surface-client": "^0.2.0",
       },
@@ -1698,8 +1698,6 @@
     "@babel/helper-create-regexp-features-plugin/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
     "@babel/preset-env/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
-
-    "@openparachute/notes-ui/@openparachute/surface-client": ["@openparachute/surface-client@0.1.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-X929FaVXFRwwirLTSKsZFMbsG9+adsONsOO/aWjUmwKs+kpwsDIiExioG/c/gGPj5vFtTy3VVayZz03Q2YM7Rg=="],
 
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
 
