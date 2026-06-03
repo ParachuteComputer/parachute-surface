@@ -39,6 +39,8 @@
     "access": "public"
   },
   "scripts": {
+    "gen-version": "bun scripts/gen-version.ts",
+    "prebuild": "bun scripts/gen-version.ts",
     "build": "tsc",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",

@@ -101,7 +101,10 @@ export {
 } from "./mdx/index.js";
 
 /**
- * Library semver — kept identical to `package.json`'s `version` so a surface
- * can surface "surface-render 0.1.0" diagnostics.
+ * Library semver — surfaced by a surface in "surface-render 0.1.0" diagnostics.
+ * Auto-derived from `package.json` at build time via `scripts/gen-version.ts`
+ * (the `prebuild` step), so it can never drift from the version the package
+ * actually ships at. Do not hand-edit; bump `package.json` and the build
+ * regenerates `src/version.ts`. Mirrors surface-client's guard (see #57).
  */
-export const SURFACE_RENDER_VERSION = "0.1.0";
+export { SURFACE_RENDER_VERSION } from "./version.js";
