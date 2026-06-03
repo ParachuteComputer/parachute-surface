@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared browser-side library for Parachute apps \u2014 OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id + runtime tenancy helpers.",
   "license": "AGPL-3.0",
   "type": "module",

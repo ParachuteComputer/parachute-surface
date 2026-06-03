@@ -1,9 +1,10 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes THREE packages on different tag namespaces:
+# This workflow publishes FOUR packages on different tag namespaces:
 #
 #   - @openparachute/surface      ← tag prefix `v...`          (from packages/surface-host)
 #   - @openparachute/surface-client ← tag prefix `client-v...`   (from packages/surface-client)
+#   - @openparachute/surface-render ← tag prefix `render-v...`   (from packages/surface-render)
 #   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
 #
 # All packages have npm Trusted Publisher rules pointing at this workflow
@@ -34,8 +35,9 @@
 #      the tag prefix.
 #
 # Operator setup (one-time) — see RELEASING.md:
-#   - npm Trusted Publisher rules: one per package (surface, surface-client, notes-ui).
-#     All three rules point at: org=ParachuteComputer, repo=parachute-surface,
+#   - npm Trusted Publisher rules: one per package (surface, surface-client,
+#     surface-render, notes-ui).
+#     All four rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -50,6 +52,9 @@ on:
       # App-client release tags
       - 'client-v[0-9]+.[0-9]+.[0-9]+'
       - 'client-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Surface-render release tags
+      - 'render-v[0-9]+.[0-9]+.[0-9]+'
+      - 'render-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
       # Notes-ui release tags
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
@@ -73,18 +78,19 @@ jobs:
         # and web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks all three packages (surface-host, surface-client, notes-ui).
+        # Root script typechecks all four packages (surface-host, surface-client,
+        # surface-render, notes-ui).
         run: bun run typecheck
       - name: tests
-        # Root script runs all three suites: surface-host (bun test), surface-client
-        # (bun test), and notes-ui (vitest via `bun run --filter`).
+        # Root script runs all four suites: surface-host (bun test), surface-client
+        # (bun test), surface-render (vitest), and notes-ui (vitest via `bun run --filter`).
         run: bun run test
 
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client- and notes-ui- tags.
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'notes-ui-') }}
+    # App-only: skip on client-, render-, and notes-ui- tags.
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -173,6 +179,19 @@ jobs:
             echo "::error::packages/surface-client/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
+      - name: guard against workspace:/link: protocol in published manifest
+        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
+        # do, on their own publish path). A leaked protocol breaks every `npm install`
+        # of the published package. Fail loudly before publish if any dependency
+        # block still carries one.
+        working-directory: packages/surface-client
+        run: |
+          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
+            echo "no workspace:/link: protocols in published manifest"
+          else
+            echo "::error::packages/surface-client/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
+            exit 1
+          fi
       - name: publish
         # surface-client's package.json has `prepublishOnly: bun run build`, so
         # `npm publish` will build (tsc) before packing. No explicit build
@@ -185,6 +204,64 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/surface-client with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
+  publish-surface-render-npm:
+    name: publish @openparachute/surface-render to npm
+    needs: test
+    # surface-render-only: gate on the `render-v...` tag prefix.
+    if: ${{ startsWith(github.ref_name, 'render-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against surface-render's package.json — that's the package this
+        # job publishes. Tag prefix is `render-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/surface-render/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#render-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/surface-render/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: guard against workspace:/link: protocol in published manifest
+        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
+        # do, on their own publish path). A leaked protocol breaks every `npm install`
+        # of the published package. surface-render depends on surface-client — fail
+        # loudly before publish if that dep (or any other) still carries a protocol.
+        working-directory: packages/surface-render
+        run: |
+          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
+            echo "no workspace:/link: protocols in published manifest"
+          else
+            echo "::error::packages/surface-render/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
+            exit 1
+          fi
+      - name: publish
+        # surface-render's package.json has `prepublishOnly: bun run build`, so
+        # `npm publish` will build (tsc) before packing. No explicit build
+        # step needed here.
+        working-directory: packages/surface-render
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/surface-render with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-notes-ui-npm:

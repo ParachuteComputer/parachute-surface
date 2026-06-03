@@ -149,7 +149,7 @@ export type {
  * the const had stalled at `0.1.0-rc.4` while `package.json` shipped
  * `0.1.0`). The release flow bumps both together (see RELEASING.md).
  */
-export const SURFACE_CLIENT_VERSION = "0.1.0";
+export const SURFACE_CLIENT_VERSION = "0.2.0";
 
 /**
  * @deprecated Renamed to {@link SURFACE_CLIENT_VERSION} when
