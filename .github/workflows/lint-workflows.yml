@@ -33,7 +33,7 @@ jobs:
   lint-workflows:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Layer 1 — parse every workflow file. Catches the unquoted-colon /
       # ScannerError class that caused the silent release failure.
@@ -57,11 +57,16 @@ jobs:
           sys.exit(1 if failed else 0)
           PY
 
-      # Layer 2 — actionlint for schema + expression errors. Pinned by version;
-      # if the download flakes, layer 1 has already run.
+      # Layer 2 — actionlint for schema + expression errors. Pinned by version
+      # AND sha256 (download is verified before extraction; a tampered or
+      # truncated binary fails the job). Layer 1 has already run by this point,
+      # so a download/verify failure here never masks a YAML parse error.
       - name: Run actionlint
         run: |
           ACTIONLINT_VERSION=1.7.7
-          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz actionlint
+          ACTIONLINT_SHA256=023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+          TARBALL="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$TARBALL" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${TARBALL}"
+          echo "${ACTIONLINT_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xzf "$TARBALL" actionlint
           ./actionlint -color
