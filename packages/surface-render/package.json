@@ -31,9 +31,10 @@
     "./mdx": {
       "types": "./dist/mdx/index.d.ts",
       "import": "./dist/mdx/index.js"
-    }
+    },
+    "./styles.css": "./styles.css"
   },
-  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": ["dist", "styles.css", "README.md", "LICENSE", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public"
   },

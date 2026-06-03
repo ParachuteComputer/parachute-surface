@@ -25,10 +25,42 @@ export interface WikilinkTarget {
  * Per-surface wikilink resolver hook.
  *
  * Given the raw target text inside `[[…]]` (before any `|alias`), return a
- * {@link WikilinkTarget}, or `null` to mean "I can't resolve this — render
- * the unresolved affordance." Returning a `{ href, exists: false }` is also
- * valid (e.g. notes-ui links unresolved targets to a create-on-navigate
- * route); `null` is the "no link at all, just styled text" signal.
+ * {@link WikilinkTarget}, or `null`.
+ *
+ * ## ⚠️ `null` vs `{ exists: false }` — two DIFFERENT rendered outcomes
+ *
+ * This is the single most common source of confusion. The return value picks
+ * between two materially different renderings:
+ *
+ * | Return value                     | Rendered as                              | Navigable? |
+ * |----------------------------------|------------------------------------------|------------|
+ * | `{ href, exists: true }`         | live link, `wikilink wikilink-resolved`  | ✅ yes      |
+ * | `{ href, exists: false }`        | dashed "create-on-navigate" link, `wikilink wikilink-unresolved` | ✅ **yes** |
+ * | `null`                           | inert `<span>`, `wikilink wikilink-unresolved`, **no anchor** | ❌ **no**   |
+ *
+ * The trap: `null` and `{ exists: false }` look interchangeable but are not.
+ * `null` drops the link entirely — the words render as styled text the reader
+ * can SEE but cannot CLICK. `{ exists: false }` keeps a working link to a
+ * destination that doesn't exist YET (the canonical "click to create" /
+ * "create-on-navigate" affordance, which is what notes-ui does: an unresolved
+ * `[[Foo]]` still navigates to `/n/Foo` where the note gets created).
+ *
+ * **For most surfaces, "unresolved-but-still-linked" is what you want** — see
+ * {@link unresolvedLink} and {@link UNRESOLVED}, the obvious-default helpers.
+ * Reach for `null` only when an unresolved target should have NO destination
+ * at all (rare).
+ *
+ * ```ts
+ * // Recommended default — unresolved targets still navigate (create-on-navigate):
+ * const resolve: WikilinkResolver = (target) => {
+ *   const id = index.lookup(target);
+ *   return id ? { href: `/n/${id}`, exists: true } : unresolvedLink(`/n/${target}`);
+ * };
+ *
+ * // Only if you genuinely want unresolved targets to be un-clickable text:
+ * const resolve: WikilinkResolver = (target) =>
+ *   index.lookup(target) ? { href: `/n/${index.lookup(target)}`, exists: true } : null;
+ * ```
  *
  * Trust boundary: the resolver owns the `href` it returns, so it owns the
  * href trust boundary. It must validate the target against a known index and
@@ -38,6 +70,50 @@ export interface WikilinkTarget {
  * rendered link; this plugin sets the href verbatim and does not sanitize it.
  */
 export type WikilinkResolver = (target: string) => WikilinkTarget | null;
+
+/**
+ * Helper for the common case: a wikilink target that doesn't resolve to an
+ * existing note yet but should STILL be a working link (the
+ * "create-on-navigate" affordance — dashed styling, but clickable).
+ *
+ * Prefer this over returning `null` from a {@link WikilinkResolver} unless you
+ * specifically want an un-clickable styled span. See {@link WikilinkResolver}
+ * for the `null` vs `{ exists: false }` distinction.
+ *
+ * ```ts
+ * return index.lookup(target)
+ *   ? { href: `/n/${id}`, exists: true }
+ *   : unresolvedLink(`/n/${target}`);
+ * ```
+ */
+export function unresolvedLink(href: string): WikilinkTarget {
+  return { href, exists: false };
+}
+
+/**
+ * Helper for a RESOLVED wikilink target (an existing note — live link,
+ * `wikilink-resolved` styling). The mirror of {@link unresolvedLink}.
+ *
+ * ```ts
+ * return index.lookup(target) ? resolvedLink(`/n/${id}`) : unresolvedLink(`/n/${target}`);
+ * ```
+ */
+export function resolvedLink(href: string): WikilinkTarget {
+  return { href, exists: true };
+}
+
+/**
+ * The "no link at all" sentinel — return this (or `null`) from a
+ * {@link WikilinkResolver} when an unresolved target should render as inert
+ * styled text with NO anchor. Named so call sites read intentionally:
+ *
+ * ```ts
+ * return index.lookup(target) ? resolvedLink(href) : INERT; // un-clickable
+ * ```
+ *
+ * Most surfaces want {@link unresolvedLink} instead (still navigable).
+ */
+export const INERT = null;
 
 /** Class names emitted onto the link node; a surface styles against these. */
 export const WIKILINK_CLASS = "wikilink";

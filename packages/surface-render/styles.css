@@ -1,0 +1,113 @@
+/*
+ * @openparachute/surface-render — OPTIONAL baseline stylesheet.
+ *
+ * Import this to get sane, unobtrusive defaults for the *affordance* classes
+ * the renderers emit (scroll containers, warnings, media error/loading,
+ * audio) so a consumer isn't left with unstyled elements while wiring up:
+ *
+ *   import "@openparachute/surface-render/styles.css";
+ *
+ * Scope, on purpose:
+ *   - This file does NOT theme the `.prose-note` typographic container
+ *     (headings/paragraphs/lists/tables/code) — that's the surface's design
+ *     decision. notes-ui, for instance, owns its full `.prose-note` theme.
+ *   - It does NOT ship a highlight.js color theme. `.hljs` coloring comes from
+ *     any highlight.js stylesheet you import (e.g. `highlight.js/styles/…`),
+ *     applied via the `highlight` hook or `rehype-highlight`. The rule here is
+ *     only a minimal no-theme fallback (display block + overflow).
+ *
+ * Everything uses CSS custom properties with fallbacks, so a surface can
+ * retheme by setting the vars (e.g. `--sr-warning-fg`) without overriding
+ * rules. All values are deliberately neutral.
+ *
+ * See the README "Emitted CSS classes" table for the complete contract.
+ */
+
+/* ── Wikilinks ─────────────────────────────────────────────────────────────
+ * Resolved links inherit the surface's normal link color. Unresolved links
+ * (and inert unresolved spans) get the dashed "doesn't exist yet" affordance.
+ * The plugin always emits `wikilink` plus one of `-resolved` / `-unresolved`.
+ */
+.wikilink-unresolved {
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 0.2em;
+  opacity: 0.85;
+  cursor: pointer;
+}
+/* The `null`-resolver case renders an inert <span> (no anchor): keep the
+ * dashed affordance but make clear it isn't a link. */
+span.wikilink-unresolved {
+  cursor: default;
+}
+
+/* ── CSV ──────────────────────────────────────────────────────────────────
+ * `.csv-scroll` wraps the table so wide CSVs scroll horizontally instead of
+ * blowing out the layout. `.csv-warning` flags a malformed parse.
+ */
+.csv-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.csv-warning {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+  color: var(--sr-warning-fg, #92400e);
+  background: var(--sr-warning-bg, #fef3c7);
+  border: 1px solid var(--sr-warning-border, #fcd34d);
+}
+
+/* ── Auth'd media (VaultImage / VaultAudio) states ─────────────────────────
+ * `.vault-media-loading` shows while an auth'd blob fetch is in flight;
+ * `.vault-media-error` shows the failure inline (it renders the message text).
+ */
+.vault-media-loading {
+  display: inline-block;
+  min-width: 2rem;
+  min-height: 1em;
+  border-radius: 0.25rem;
+  background: var(--sr-loading-bg, rgba(127, 127, 127, 0.15));
+  /* a gentle pulse so it reads as "working", not "broken" */
+  animation: sr-media-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sr-media-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.vault-media-error {
+  display: inline-block;
+  font-size: 0.875em;
+  color: var(--sr-error-fg, #b91c1c);
+}
+
+/* ── Audio embeds ──────────────────────────────────────────────────────────
+ * `.vault-audio` wraps the control (+ optional `.vault-audio-label`).
+ */
+.vault-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  vertical-align: middle;
+}
+.vault-audio-label {
+  font-size: 0.875em;
+  color: var(--sr-muted-fg, #6b7280);
+}
+
+/* ── Code (CodeRenderer / highlighted markdown fences) ─────────────────────
+ * Minimal no-theme fallback so highlighted code is at least a scrollable
+ * block when no highlight.js color theme is imported. A real theme overrides
+ * the colors; this only guarantees layout.
+ */
+.hljs {
+  display: block;
+  overflow-x: auto;
+}
