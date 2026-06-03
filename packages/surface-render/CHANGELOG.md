@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-DX polish from the notes-ui Phase-4 dogfood ([#74](https://github.com/ParachuteComputer/parachute-surface/issues/74)). All additive + backward-compatible — existing consumers (notes-ui) render identically. Next release will be 0.2.0 (minor features).
+## 0.2.0
+
+DX polish from the notes-ui Phase-4 dogfood ([#74](https://github.com/ParachuteComputer/parachute-surface/issues/74)). All additive + backward-compatible — existing consumers (notes-ui) render identically.
 
 - **`useVaultFetchBlob(client)` hook** (`/embed`) — convenience over
   `vaultClientFetchBlob`: memoized, returns `undefined` when signed out, so
