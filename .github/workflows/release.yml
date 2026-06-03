@@ -1,9 +1,10 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes THREE packages on different tag namespaces:
+# This workflow publishes FOUR packages on different tag namespaces:
 #
 #   - @openparachute/surface      ← tag prefix `v...`          (from packages/surface-host)
 #   - @openparachute/surface-client ← tag prefix `client-v...`   (from packages/surface-client)
+#   - @openparachute/surface-render ← tag prefix `render-v...`   (from packages/surface-render)
 #   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
 #
 # All packages have npm Trusted Publisher rules pointing at this workflow
@@ -50,6 +51,9 @@ on:
       # App-client release tags
       - 'client-v[0-9]+.[0-9]+.[0-9]+'
       - 'client-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Surface-render release tags
+      - 'render-v[0-9]+.[0-9]+.[0-9]+'
+      - 'render-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
       # Notes-ui release tags
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
@@ -83,8 +87,8 @@ jobs:
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client- and notes-ui- tags.
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'notes-ui-') }}
+    # App-only: skip on client-, render-, and notes-ui- tags.
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -185,6 +189,51 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/surface-client with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
+  publish-surface-render-npm:
+    name: publish @openparachute/surface-render to npm
+    needs: test
+    # surface-render-only: gate on the `render-v...` tag prefix.
+    if: ${{ startsWith(github.ref_name, 'render-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against surface-render's package.json — that's the package this
+        # job publishes. Tag prefix is `render-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/surface-render/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#render-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/surface-render/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: publish
+        # surface-render's package.json has `prepublishOnly: bun run build`, so
+        # `npm publish` will build (tsc) before packing. No explicit build
+        # step needed here.
+        working-directory: packages/surface-render
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/surface-render with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-notes-ui-npm:

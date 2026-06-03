@@ -20,7 +20,7 @@
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.41.1",
         "@lezer/highlight": "^1.2.3",
-        "@openparachute/surface-client": "^0.1.0-rc.4",
+        "@openparachute/surface-client": "^0.1.0",
         "@tanstack/react-query": "^5",
         "highlight.js": "^11.11.1",
         "idb": "^8.0.3",
@@ -61,7 +61,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
@@ -78,7 +78,7 @@
       },
       "dependencies": {
         "@openparachute/scope-guard": "^0.4.0-rc.1",
-        "@openparachute/surface-client": "^0.1.0-rc.3",
+        "@openparachute/surface-client": "^0.1.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -88,6 +88,44 @@
       "peerDependencies": {
         "typescript": "^5",
       },
+    },
+    "packages/surface-render": {
+      "name": "@openparachute/surface-render",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openparachute/surface-client": "workspace:^",
+      },
+      "devDependencies": {
+        "@testing-library/dom": "^10.4.0",
+        "@testing-library/jest-dom": "^6.6.3",
+        "@testing-library/react": "^16.1.0",
+        "@types/mdast": "^4.0.4",
+        "@types/react": "^19.1.0",
+        "@types/react-dom": "^19.1.0",
+        "@vitejs/plugin-react": "^4.3.0",
+        "highlight.js": "^11.11.1",
+        "jsdom": "^25.0.1",
+        "react": "^19.1.0",
+        "react-dom": "^19.1.0",
+        "react-markdown": "^10.1.0",
+        "rehype-highlight": "^7.0.2",
+        "remark-gfm": "^4.0.1",
+        "remark-parse": "^11.0.0",
+        "remark-stringify": "^11.0.0",
+        "typescript": "^5",
+        "unified": "^11.0.5",
+        "vitest": "^3",
+      },
+      "peerDependencies": {
+        "react": "^18 || ^19",
+        "react-dom": "^18 || ^19",
+        "react-markdown": "^9 || ^10",
+        "rehype-highlight": "^7",
+        "remark-gfm": "^4",
+      },
+      "optionalPeers": [
+        "rehype-highlight",
+      ],
     },
     "web/admin": {
       "name": "@openparachute/surface-admin-ui",
@@ -489,6 +527,8 @@
     "@openparachute/surface-admin-ui": ["@openparachute/surface-admin-ui@workspace:web/admin"],
 
     "@openparachute/surface-client": ["@openparachute/surface-client@workspace:packages/surface-client"],
+
+    "@openparachute/surface-render": ["@openparachute/surface-render@workspace:packages/surface-render"],
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 
@@ -1658,7 +1698,11 @@
 
     "@babel/preset-env/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
+    "@openparachute/notes-ui/@openparachute/surface-client": ["@openparachute/surface-client@0.1.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-X929FaVXFRwwirLTSKsZFMbsG9+adsONsOO/aWjUmwKs+kpwsDIiExioG/c/gGPj5vFtTy3VVayZz03Q2YM7Rg=="],
+
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
+
+    "@openparachute/surface/@openparachute/surface-client": ["@openparachute/surface-client@0.1.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-X929FaVXFRwwirLTSKsZFMbsG9+adsONsOO/aWjUmwKs+kpwsDIiExioG/c/gGPj5vFtTy3VVayZz03Q2YM7Rg=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

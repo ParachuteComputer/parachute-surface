@@ -1,16 +1,17 @@
 # Releasing
 
-The `parachute-app` repo is a monorepo with three publishable packages, all shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
+The `parachute-app` repo is a monorepo with four publishable packages, all shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
 
 | Package | Path | Tag prefix |
 |---|---|---|
 | `@openparachute/app` | `packages/app-host/` | `v...` (e.g. `v0.2.0-rc.10`) |
 | `@openparachute/app-client` | `packages/app-client/` | `client-v...` (e.g. `client-v0.1.0-rc.4`) |
+| `@openparachute/surface-render` | `packages/surface-render/` | `render-v...` (e.g. `render-v0.1.0-rc.1`) |
 | `@openparachute/notes-ui` | `packages/notes-ui/` | `notes-ui-v...` (e.g. `notes-ui-v0.1.4-rc.1`) |
 
 The workspace root (`@openparachute/app-monorepo`) is intentionally `private: true` and should NEVER publish. The admin SPA (`web/admin/` → `@openparachute/app-admin-ui`) is also `private: true` — it's bundled into app-host's `dist/`, not separately published.
 
-All three packages run on independent release cadences. Each tag pushes only the matching package.
+All four packages run on independent release cadences. Each tag pushes only the matching package.
 
 > **notes-ui migration history (2026-05-24)**: notes-ui moved here from `parachute-notes/packages/notes-ui` to consolidate "host module + reference apps" in one repo. parachute-notes is being archived (notes-daemon was already deprecated per its [DEPRECATED.md](https://github.com/ParachuteComputer/parachute-notes/blob/main/packages/notes-daemon/DEPRECATED.md)). See workspace `CLAUDE.md` for context.
 
@@ -24,6 +25,8 @@ Per [parachute-patterns governance rule 2](https://github.com/ParachuteComputer/
 | `vX.Y.Z` | `@openparachute/app` | `latest` |
 | `client-vX.Y.Z-rc.N` | `@openparachute/app-client` | `rc` |
 | `client-vX.Y.Z` | `@openparachute/app-client` | `latest` |
+| `render-vX.Y.Z-rc.N` | `@openparachute/surface-render` | `rc` |
+| `render-vX.Y.Z` | `@openparachute/surface-render` | `latest` |
 | `notes-ui-vX.Y.Z-rc.N` | `@openparachute/notes-ui` | `rc` |
 | `notes-ui-vX.Y.Z` | `@openparachute/notes-ui` | `latest` |
 
@@ -56,6 +59,18 @@ git push origin "$VERSION"
 ```
 
 The other publish jobs skip on these tags. app-client's `prepublishOnly` hook builds via `tsc` before packing.
+
+### Releasing `@openparachute/surface-render`
+
+```sh
+git fetch && git checkout main && git pull --ff-only
+# Bump packages/surface-render/package.json, commit, push.
+VERSION="render-v$(bun -e "console.log(require('./packages/surface-render/package.json').version)")"
+git tag "$VERSION"
+git push origin "$VERSION"
+```
+
+The other publish jobs skip on these tags. surface-render's `prepublishOnly` hook builds via `tsc` before packing. surface-render depends on `@openparachute/surface-client` (`workspace:^`), so if shipping both, publish surface-client FIRST.
 
 ### Releasing `@openparachute/notes-ui`
 
@@ -91,7 +106,8 @@ Before the workflow can publish, this repo needs **npm Trusted Publisher rules �
    - Workflow filename: `release.yml`
    - Environment name: (leave blank)
 2. Same for `@openparachute/app-client` — same workflow file.
-3. Same for `@openparachute/notes-ui` — **this rule may currently be configured against `parachute-notes` from before the migration** (notes-ui's prior home). Update it to point at `parachute-app` per the values above. The publisher rule verifies `workflow_ref`, so a mismatched repo/workflow combo will fail with 403 on tag push.
+3. Same for `@openparachute/surface-render` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-app`, workflow `release.yml`, env blank) before the first `render-v...` tag is pushed, or the publish job will fail with 403.
+4. Same for `@openparachute/notes-ui` — **this rule may currently be configured against `parachute-notes` from before the migration** (notes-ui's prior home). Update it to point at `parachute-app` per the values above. The publisher rule verifies `workflow_ref`, so a mismatched repo/workflow combo will fail with 403 on tag push.
 
 All three packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
 
