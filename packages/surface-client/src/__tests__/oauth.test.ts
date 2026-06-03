@@ -131,6 +131,70 @@ describe("getClientId", () => {
   });
 });
 
+describe("useClientId (standalone DCR bootstrap)", () => {
+  test("seeds the cache so getClientId never fetches the hosted endpoint", async () => {
+    let hostedCalls = 0;
+    const oauth = makeOAuth({
+      // If the hosted endpoint is ever hit, count it — it must not be.
+      "http://hub.test/surface/notes/oauth-client": () => {
+        hostedCalls++;
+        return new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 });
+      },
+    });
+    const info = oauth.useClientId({ client_id: "dcr_client", scopes: ["vault:read"] });
+    expect(info.client_id).toBe("dcr_client");
+    const resolved = await oauth.getClientId();
+    expect(resolved.client_id).toBe("dcr_client");
+    expect(hostedCalls).toBe(0);
+  });
+
+  test("beginFlow uses the injected client_id (no hosted endpoint mocked)", async () => {
+    // Note: NO /surface/notes/oauth-client route is registered. If beginFlow
+    // tried the hosted path, makeFetch would throw "unmocked URL".
+    const oauth = makeOAuth({
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+    });
+    oauth.useClientId({ client_id: "dcr_client", scopes: ["vault:read", "vault:write"] });
+    const { authorizeUrl } = await oauth.beginFlow({
+      vaultName: "default",
+      redirectUri: "http://gh-pages.example/oauth/callback",
+    });
+    const u = new URL(authorizeUrl);
+    expect(u.searchParams.get("client_id")).toBe("dcr_client");
+    expect(u.searchParams.get("redirect_uri")).toBe("http://gh-pages.example/oauth/callback");
+  });
+
+  test("normalizes a missing scopes array to []", () => {
+    const oauth = makeOAuth({});
+    const info = oauth.useClientId({ client_id: "dcr_client" } as unknown as {
+      client_id: string;
+      scopes: string[];
+    });
+    expect(info.scopes).toEqual([]);
+  });
+
+  test("rejects an empty client_id", () => {
+    const oauth = makeOAuth({});
+    expect(() => oauth.useClientId({ client_id: "", scopes: [] })).toThrow(/client_id/);
+  });
+
+  test("resetCaches lets a later getClientId fall back to the hosted endpoint", async () => {
+    let hostedCalls = 0;
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () => {
+        hostedCalls++;
+        return new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 });
+      },
+    });
+    oauth.useClientId({ client_id: "dcr_client", scopes: [] });
+    oauth.resetCaches();
+    const resolved = await oauth.getClientId();
+    expect(resolved.client_id).toBe("client_abc");
+    expect(hostedCalls).toBe(1);
+  });
+});
+
 describe("beginFlow", () => {
   test("builds the authorize URL with PKCE params + persists pending state", async () => {
     const oauth = makeOAuth({

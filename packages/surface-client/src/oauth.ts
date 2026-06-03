@@ -209,8 +209,52 @@ export class ParachuteOAuth {
   }
 
   /**
-   * Fetch `/surface/<name>/oauth-client`. Cached for the lifetime of this
-   * instance (one DCR-discovery per page load).
+   * Inject a pre-resolved client identity — the **standalone** bootstrap.
+   *
+   * A standalone surface (served from GitHub Pages / any static host, with
+   * no Parachute surface-host in front of it) has no
+   * `/surface/<name>/oauth-client` endpoint to fetch. It instead registers
+   * itself as a public client via RFC 7591 Dynamic Client Registration
+   * (`registerClient` from `./discovery`) and hands the resulting
+   * `client_id` to this method. `beginFlow` / `handleCallback` /
+   * `refreshAccessToken` then use it directly and **never** call the hosted
+   * `getClientId()` endpoint.
+   *
+   * Seeds the same in-memory cache `getClientId()` populates, so the two
+   * bootstraps are interchangeable from every downstream call site. Returns
+   * the cached info for chaining.
+   *
+   * Example (standalone DCR):
+   *
+   *   const md = await discoverAuthServer(hubUrl);
+   *   const { client_id } = await registerClient(md.registration_endpoint, {
+   *     clientName: "My Vault UI",
+   *     redirectUri,
+   *   });
+   *   oauth.useClientId({ client_id, scopes: ["vault:read", "vault:write"] });
+   */
+  useClientId(info: OAuthClientInfo): OAuthClientInfo {
+    if (!info.client_id) {
+      throw new Error("useClientId requires a non-empty client_id");
+    }
+    const normalized: OAuthClientInfo = {
+      ...info,
+      scopes: Array.isArray(info.scopes) ? info.scopes : [],
+    };
+    this.clientInfoCache = normalized;
+    return normalized;
+  }
+
+  /**
+   * Fetch `/surface/<name>/oauth-client` — the **hosted** bootstrap. Only
+   * works when a Parachute surface-host serves this bundle (it exposes the
+   * endpoint). Standalone surfaces must instead self-register via DCR and
+   * call {@link useClientId}; calling this off-host throws because the
+   * endpoint doesn't exist.
+   *
+   * Cached for the lifetime of this instance (one discovery per page load).
+   * If a client_id was already provided via {@link useClientId}, the cached
+   * value is returned and no fetch happens.
    */
   async getClientId(): Promise<OAuthClientInfo> {
     if (this.clientInfoCache) return this.clientInfoCache;

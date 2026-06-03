@@ -4,6 +4,29 @@
 
 ### Added
 
+- **First-class standalone OAuth bootstrap (surface-client design doc
+  Phase 1).** `ParachuteOAuth.useClientId(info)` seeds the driver with a
+  client identity obtained out-of-band — the RFC 7591 Dynamic Client
+  Registration path a *standalone* surface (served from GitHub Pages / any
+  static host, with no Parachute surface-host in front of it) uses. With it,
+  `beginFlow` / `handleCallback` / `refreshAccessToken` never call the
+  hosted-only `/surface/<name>/oauth-client` endpoint. The README now leads
+  with this standalone path; `getClientId()` remains the hosted bootstrap.
+- **`examples/standalone-spa`** — a minimal, framework-free standalone surface
+  demonstrating the full DCR bootstrap + OAuth dance + a vault query, all via
+  `@openparachute/surface-client`.
+- **`SURFACE_CLIENT_VERSION`** export (kept in sync with `package.json`).
+  `APP_CLIENT_VERSION` is retained as a deprecated alias.
+
+### Fixed
+
+- **Docs truth.** README named the non-existent `@openparachute/app-client`
+  throughout; corrected to `@openparachute/surface-client`. Documented the
+  runtime-tenancy `<meta>`-tag contract + fallbacks and a typed-error → UI
+  affordance guide.
+- **Version drift.** The library version const had stalled at `0.1.0-rc.4`
+  while `package.json` shipped `0.1.0`; reconciled to `0.1.0`.
+
 - **Script-friendly `VaultClient` surface.** New entry points for code
   writing against a Parachute vault from Bun / Node / browser scripts
   without having to compose the canonical URL or carry the OAuth

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Standalone Parachute surface</title>
+    <!--
+      NOTE: a STANDALONE surface gets NO host-injected `parachute-*` meta tags.
+      It configures the hub URL + vault name explicitly (the form below). The
+      mount helpers (getMountBase / getVaultUrl / …) would return null here —
+      that's by design; this surface has no host.
+    -->
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+      input, button { font: inherit; padding: 0.5rem; }
+      input { width: 22rem; }
+      #status { margin-top: 1rem; padding: 0.75rem; background: #f3f3f3; border-radius: 6px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Standalone Parachute surface</h1>
+    <p>Sign in to a Parachute hub and query its vault — no host, all DCR.</p>
+
+    <div>
+      <input id="hub" type="url" placeholder="https://your-hub.example.com" />
+      <button id="login">Sign in</button>
+    </div>
+    <div style="margin-top: 1rem;">
+      <input id="tag" type="text" placeholder="tag to query (e.g. project)" value="project" />
+      <button id="query">Query vault</button>
+    </div>
+    <div id="status"></div>
+
+    <!--
+      In a real build you'd bundle ./app.ts (resolving
+      @openparachute/surface-client from npm) and load the output here. The
+      inline glue below shows the wiring; swap the import path for your build's
+      output URL.
+    -->
+    <script type="module">
+      import { login, handleCallback, loadNotes } from "./app.js";
+
+      const statusEl = document.getElementById("status");
+      const setStatus = (msg) => { statusEl.textContent = msg; };
+      const hubInput = document.getElementById("hub");
+
+      // On the OAuth callback path, complete the exchange then return home.
+      if (window.location.pathname.endsWith("/oauth/callback")) {
+        setStatus("Completing sign-in…");
+        handleCallback()
+          .then(() => setStatus("Signed in. Reopen the app to query."))
+          .catch((e) => setStatus("Sign-in failed: " + e.message));
+      }
+
+      document.getElementById("login").addEventListener("click", () => {
+        const hub = hubInput.value.trim();
+        if (!hub) return setStatus("Enter your hub URL first.");
+        login(hub).catch((e) => setStatus("Login failed: " + e.message));
+      });
+
+      document.getElementById("query").addEventListener("click", () => {
+        const hub = hubInput.value.trim();
+        const tag = document.getElementById("tag").value.trim();
+        if (!hub) return setStatus("Enter your hub URL first.");
+        setStatus("Querying…");
+        loadNotes(hub, tag)
+          .then(setStatus)
+          .catch((e) => setStatus("Query failed: " + e.message));
+      });
+    </script>
+  </body>
+</html>

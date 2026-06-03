@@ -125,6 +125,19 @@ export type {
 
 /**
  * Library semver — kept in sync with `package.json` so consumers can
- * surface "app-client 0.1.0" diagnostics in a banner.
+ * surface "surface-client 0.1.0" diagnostics in a banner.
+ *
+ * Keep this string identical to `package.json`'s `version` (this is the
+ * source-of-truth drift §1 of the surface-client design doc called out:
+ * the const had stalled at `0.1.0-rc.4` while `package.json` shipped
+ * `0.1.0`). The release flow bumps both together (see RELEASING.md).
  */
-export const APP_CLIENT_VERSION = "0.1.0-rc.4";
+export const SURFACE_CLIENT_VERSION = "0.1.0";
+
+/**
+ * @deprecated Renamed to {@link SURFACE_CLIENT_VERSION} when
+ * `parachute-app` → `parachute-surface` (2026-05-27). Retained as an
+ * alias so existing diagnostics banners keep resolving; prefer
+ * `SURFACE_CLIENT_VERSION` in new code.
+ */
+export const APP_CLIENT_VERSION = SURFACE_CLIENT_VERSION;
