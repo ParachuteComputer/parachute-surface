@@ -144,9 +144,21 @@ export async function loadNotes(hubUrl: string, tag: string): Promise<string> {
     vaultUrl: `${hubUrl.replace(/\/$/, "")}/vault/${VAULT_NAME}`,
     accessToken: stored.accessToken,
     // Auto-refresh on 401 — the loop both real adopters wrote by hand.
+    //
+    // PRODUCTION NOTE: this example closes over `stored.refreshToken`, which is
+    // a simplification. `refreshAccessToken` ROTATES the refresh token (RFC 6749
+    // §6 rotation — each call returns a fresh one that supersedes the prior),
+    // and `oauth.refreshAccessToken` already persists it. So in a real surface,
+    // re-read the latest token from `oauth.getToken(VAULT_NAME)` here rather
+    // than reusing the closed-over `stored.refreshToken` — otherwise a SECOND
+    // 401 in the same client would replay the now-superseded refresh token and
+    // fail. (The `createVaultSurface` factory's `getClient()` does exactly this
+    // re-read; prefer it for new surfaces.)
     onAuthError: async () => {
-      if (!stored.refreshToken) return null;
-      const { token } = await oauth.refreshAccessToken(stored.refreshToken, VAULT_NAME);
+      const current = oauth.getToken(VAULT_NAME);
+      const refreshToken = current?.refreshToken;
+      if (!refreshToken) return null;
+      const { token } = await oauth.refreshAccessToken(refreshToken, VAULT_NAME);
       return token.access_token;
     },
   });

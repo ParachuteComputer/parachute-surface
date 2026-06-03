@@ -12,6 +12,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./create-vault-surface": {
+      "types": "./dist/create-vault-surface.d.ts",
+      "import": "./dist/create-vault-surface.js"
+    },
     "./oauth": {
       "types": "./dist/oauth.d.ts",
       "import": "./dist/oauth.js"

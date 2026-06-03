@@ -8,9 +8,14 @@
  * one well-tested implementation. Same trajectory as
  * `@openparachute/scope-guard` for resource-server JWT validation.
  *
- * Design doc: 2026-05-21-parachute-apps-design.md (parachute.computer)
+ * Design doc: 2026-06-03-surface-client.md (parachute.computer) — the
+ * make-custom-surfaces-a-thin-import plan; supersedes the barrel-module
+ * reference that previously pointed at 2026-05-21-parachute-apps-design.md
+ * (still the surface-host design; §16 is the migration arc that produced
+ * this package).
  * Surface:
- *   - `oauth`         — `ParachuteOAuth` driver class, PKCE + same-hub auto-trust
+ *   - `create-vault-surface` — `createVaultSurface` turnkey factory (hosted/standalone auto-detect)
+ *   - `oauth`         — `ParachuteOAuth` driver class, PKCE + DCR + same-hub auto-trust
  *   - `vault-client`  — REST client with auto-refresh on 401/403
  *   - `token-storage` — localStorage-backed token persistence (per app, per vault)
  *   - `sw-reload`     — service-worker reload helper (PWA-mode apps)
@@ -21,6 +26,18 @@
  * resolve to the same modules; subpaths exist for tree-shake
  * friendliness when a consumer only needs one piece.
  */
+
+// Quick-start factory — the turnkey one-call entry (hosted/standalone
+// auto-detect + sane defaults + an auto-refresh-wired VaultClient). The
+// recommended starting point for a new surface; the lower-level pieces below
+// remain available for advanced flows.
+export {
+  createVaultSurface,
+  type CreateVaultSurfaceOpts,
+  type VaultSurface,
+  type SurfaceBootstrap,
+  type SimpleStorageLike,
+} from "./create-vault-surface.js";
 
 // OAuth driver — public class, errors, helper types.
 export {

@@ -117,7 +117,8 @@ describe("getClientId", () => {
 
   test("non-2xx throws explicit message", async () => {
     const oauth = makeOAuth({
-      "http://hub.test/surface/notes/oauth-client": () => new Response("not found", { status: 404 }),
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response("not found", { status: 404 }),
     });
     await expect(oauth.getClientId()).rejects.toThrow(/oauth-client/);
   });
@@ -177,6 +178,33 @@ describe("useClientId (standalone DCR bootstrap)", () => {
   test("rejects an empty client_id", () => {
     const oauth = makeOAuth({});
     expect(() => oauth.useClientId({ client_id: "", scopes: [] })).toThrow(/client_id/);
+  });
+
+  test("refreshAccessToken uses the injected client_id (never hits the hosted endpoint)", async () => {
+    // Tripwire mirroring the beginFlow case above: NO /surface/notes/oauth-client
+    // route is registered. A standalone surface refreshing its token must use
+    // the DCR-seeded client_id — if refreshAccessToken tried the hosted path,
+    // makeFetch would throw "unmocked URL".
+    const fresh = {
+      access_token: "at_new",
+      token_type: "bearer",
+      scope: "vault:read vault:write",
+      refresh_token: "rt_new",
+      expires_in: 3600,
+    };
+    const oauth = makeOAuth({
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": (_url, init) => {
+        const body = init?.body as string;
+        expect(body.includes("refresh_token=rt_old")).toBe(true);
+        expect(body.includes("client_id=dcr_client")).toBe(true);
+        return new Response(JSON.stringify(fresh), { status: 200 });
+      },
+    });
+    oauth.useClientId({ client_id: "dcr_client", scopes: ["vault:read", "vault:write"] });
+    const result = await oauth.refreshAccessToken("rt_old", "default");
+    expect(result.token.access_token).toBe("at_new");
   });
 
   test("resetCaches lets a later getClientId fall back to the hosted endpoint", async () => {

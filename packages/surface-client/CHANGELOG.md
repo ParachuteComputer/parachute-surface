@@ -4,6 +4,36 @@
 
 ### Added
 
+- **Quick-start factory `createVaultSurface(...)` (surface-client design doc
+  §5C / Phase 2).** One call replaces the ~20-line OAuth + `VaultClient` dance
+  both adopters wrote by hand. It **auto-detects hosted vs standalone**: if a
+  `parachute-mount` meta tag is present (the host-injected runtime-tenancy
+  signal) it uses the hosted `getClientId()` path; otherwise it runs RFC 7591
+  DCR (`discoverAuthServer` + `registerClient`) and seeds the client via
+  `useClientId()`, caching the client_id in localStorage so it registers at
+  most once per browser per (issuer, redirectUri). Force either path with
+  `bootstrap: "hosted" | "dcr"`.
+
+  Bakes the defaults both adopters chose by hand: `hubUrl` → the
+  `parachute-hub` meta tag else `window.location.origin`; `redirectUri` →
+  `${mount}/oauth/callback` (hosted) or `${origin}/oauth/callback`
+  (standalone); `scope` → `"vault:read vault:write"`; `appName` → the tenant id
+  (hosted) or a slug of `clientName` (standalone). `clientName` is the only
+  required field (it's the DCR `client_name` shown on the hub consent screen).
+
+  Returns a `VaultSurface` bundle: the configured `ParachuteOAuth` plus
+  `login()` / `handleCallback()` / `getClient()` / `logout()`. `getClient()`
+  hands back a `VaultClient` wired with refresh-on-401 that **re-reads** the
+  latest stored token before refreshing (so a rotated refresh token isn't
+  replayed). Framework-agnostic — no React. New subpath export
+  `@openparachute/surface-client/create-vault-surface`. The brand-pin that
+  notes-ui's `discovery.ts` shim carried (`client_name: "Parachute Notes"`)
+  is now the factory's `clientName`.
+
+## [0.1.0] - 2026-06-02
+
+### Added
+
 - **First-class standalone OAuth bootstrap (surface-client design doc
   Phase 1).** `ParachuteOAuth.useClientId(info)` seeds the driver with a
   client identity obtained out-of-band — the RFC 7591 Dynamic Client
