@@ -1,21 +1,22 @@
-import { CodeRenderer } from "@/components/render/CodeRenderer";
-import { CsvRenderer } from "@/components/render/CsvRenderer";
-import { JsonRenderer } from "@/components/render/JsonRenderer";
-import { PlainRenderer } from "@/components/render/PlainRenderer";
-import { YamlRenderer } from "@/components/render/YamlRenderer";
-import type { WikilinkResolver } from "@/lib/markdown/remark-wikilinks";
-import { CODE_EXTENSIONS, extensionOf, formatForPath } from "@/lib/render/format";
+import { highlightAs } from "@/lib/render/highlight";
+import {
+  type NoteLike,
+  NoteRenderer as SurfaceNoteRenderer,
+  type WikilinkResolver,
+} from "@openparachute/surface-render";
 import { MarkdownView } from "./MarkdownView";
 
-// Phase 2 dispatcher: pick the right format-specific renderer based on the
-// note's path extension. Markdown stays the default (no extension or
-// .md/.mdx/.markdown). Everything else is read-only — the editor still uses
-// CodeMirror with markdown grammar, that's a separate Phase 3 concern.
+// notes-ui's note-format dispatcher — a thin wrapper over
+// `@openparachute/surface-render`'s <NoteRenderer>. The shared layer owns
+// format detection + the csv/json/yaml/code/plain primitives; notes-ui
+// supplies its own glue:
+//   - the markdown branch is overridden to notes-ui's <MarkdownView> (which
+//     wires the react-router link component + auth'd image fetcher),
+//   - the `highlight` hook is notes-ui's highlight.js-backed `highlightAs`, so
+//     code/json/yaml keep their syntax coloring (surface-render's default is
+//     escape-only).
 
-export interface NoteLike {
-  path?: string;
-  content?: string;
-}
+export type { NoteLike };
 
 export function NoteRenderer({
   note,
@@ -31,24 +32,20 @@ export function NoteRenderer({
   resolve: WikilinkResolver;
   className?: string;
 }) {
-  const content = note.content ?? "";
-  const format = formatForPath(note.path);
-
-  switch (format) {
-    case "markdown":
-      return <MarkdownView content={content} resolve={resolve} className={className} />;
-    case "csv":
-      return <CsvRenderer content={content} />;
-    case "json":
-      return <JsonRenderer content={content} />;
-    case "yaml":
-      return <YamlRenderer content={content} />;
-    case "code": {
-      const ext = extensionOf(note.path);
-      const language = CODE_EXTENSIONS[ext] ?? "plaintext";
-      return <CodeRenderer content={content} language={language} />;
-    }
-    default:
-      return <PlainRenderer content={content} />;
-  }
+  return (
+    <SurfaceNoteRenderer
+      note={note}
+      resolve={resolve}
+      className={className}
+      highlight={highlightAs}
+      overrides={{
+        // notes-ui's <MarkdownView> carries the router link component + auth'd
+        // image fetcher; route the markdown branch through it rather than the
+        // shared default.
+        markdown: ({ content, resolve: r, className: c }) => (
+          <MarkdownView content={content} resolve={r} className={c} />
+        ),
+      }}
+    />
+  );
 }
