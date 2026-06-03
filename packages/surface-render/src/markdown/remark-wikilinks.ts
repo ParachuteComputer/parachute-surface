@@ -46,7 +46,7 @@ export interface WikilinkTarget {
  * `[[Foo]]` still navigates to `/n/Foo` where the note gets created).
  *
  * **For most surfaces, "unresolved-but-still-linked" is what you want** — see
- * {@link unresolvedLink} and {@link UNRESOLVED}, the obvious-default helpers.
+ * {@link unresolvedLink} and {@link resolvedLink}, the obvious-default helpers.
  * Reach for `null` only when an unresolved target should have NO destination
  * at all (rare).
  *

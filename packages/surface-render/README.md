@@ -60,9 +60,10 @@ const Link = ({ href, className, children }) => (
   <RouterLink to={href} className={className}>{children}</RouterLink>
 );
 
-// 3. Adapt your vault client to the fetch-blob hook (for auth'd media):
-import { useVaultFetchBlob } from "@openparachute/surface-render/embed";
-const fetchBlob = useVaultFetchBlob(client); // client from surface-client
+// 3. Adapt your vault client to the fetch-blob fn (for auth'd media).
+//    `vaultClientFetchBlob` is a plain fn — safe at module scope. Inside a
+//    component, prefer the memoized `useVaultFetchBlob(client)` hook.
+const fetchBlob = vaultClientFetchBlob(client); // client from surface-client
 
 <MarkdownView content={note.content} resolve={resolve} linkComponent={Link} fetchBlob={fetchBlob} />;
 ```
@@ -95,8 +96,8 @@ look interchangeable but render **materially differently**:
 | Return value              | Rendered as                                           | Navigable? |
 |---------------------------|-------------------------------------------------------|------------|
 | `{ href, exists: true }`  | live link, class `wikilink wikilink-resolved`         | ✅ yes      |
-| `{ href, exists: false }` | dashed "create-on-navigate" link, `wikilink-unresolved` | ✅ **yes**  |
-| `null`                    | inert `<span>`, `wikilink-unresolved`, **no anchor**  | ❌ **no**   |
+| `{ href, exists: false }` | dashed "create-on-navigate" link, `wikilink wikilink-unresolved` | ✅ **yes**  |
+| `null`                    | inert `<span>`, `wikilink wikilink-unresolved`, **no anchor**  | ❌ **no**   |
 
 - `{ exists: false }` keeps a **working link** to a destination that doesn't
   exist *yet* — the canonical "click to create" affordance (notes-ui links an
