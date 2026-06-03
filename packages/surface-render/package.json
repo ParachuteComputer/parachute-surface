@@ -1,0 +1,98 @@
+{
+  "name": "@openparachute/surface-render",
+  "version": "0.1.0",
+  "description": "React rendering primitives for Parachute surfaces — markdown + wikilinks, auth'd vault media (image/audio) embeds, multi-format (csv/json/yaml/code/plain) renderers, a note-format dispatcher, and an MDX-safe-by-default view. Good defaults + per-surface override hooks. Sibling to @openparachute/surface-client.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./markdown": {
+      "types": "./dist/markdown/index.d.ts",
+      "import": "./dist/markdown/index.js"
+    },
+    "./embed": {
+      "types": "./dist/embed/index.d.ts",
+      "import": "./dist/embed/index.js"
+    },
+    "./formats": {
+      "types": "./dist/formats/index.d.ts",
+      "import": "./dist/formats/index.js"
+    },
+    "./note": {
+      "types": "./dist/note/index.d.ts",
+      "import": "./dist/note/index.js"
+    },
+    "./mdx": {
+      "types": "./dist/mdx/index.d.ts",
+      "import": "./dist/mdx/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@openparachute/surface-client": "workspace:^"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19",
+    "react-markdown": "^9 || ^10",
+    "rehype-highlight": "^7",
+    "remark-gfm": "^4"
+  },
+  "peerDependenciesMeta": {
+    "rehype-highlight": {
+      "optional": true
+    },
+    "remark-gfm": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/mdast": "^4.0.4",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "highlight.js": "^11.11.1",
+    "jsdom": "^25.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "typescript": "^5",
+    "unified": "^11.0.5",
+    "vitest": "^3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/surface-render"
+  }
+}
