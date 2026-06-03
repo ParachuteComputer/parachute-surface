@@ -34,8 +34,10 @@ npm add @openparachute/surface-render @openparachute/surface-client react react-
 npm add rehype-highlight
 ```
 
-`react`, `react-dom`, `react-markdown` are **peer dependencies** (the package
-doesn't bundle React). `remark-gfm` and `rehype-highlight` are optional peers.
+`react`, `react-dom`, `react-markdown`, and `remark-gfm` are **required peer
+dependencies** (the package doesn't bundle React, and `MarkdownView` imports
+`remark-gfm` unconditionally). `rehype-highlight` is an optional peer (only
+needed if you pass it for fenced-code-block coloring).
 
 ## Quick start
 

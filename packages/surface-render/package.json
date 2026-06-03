@@ -33,12 +33,7 @@
       "import": "./dist/mdx/index.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
-  ],
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public"
   },
@@ -63,9 +58,6 @@
   },
   "peerDependenciesMeta": {
     "rehype-highlight": {
-      "optional": true
-    },
-    "remark-gfm": {
       "optional": true
     }
   },

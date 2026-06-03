@@ -25,6 +25,9 @@ describe("MdxView — safe by default (decision B)", () => {
     const { container } = render(<MdxView content={"value is {1+1} here"} />);
     // No evaluation: the digits 1+1 are not collapsed to a computed 2 via JS.
     expect(container.textContent).not.toMatch(/value is 2 here/);
+    // Positive anchor: the literal expression text renders verbatim (inert),
+    // so a future regression that *did* evaluate `{1+1}` to "2" breaks this.
+    expect(container.textContent).toContain("1+1");
   });
 
   it("supplying mdxComponents alone (no evaluate) still does NOT execute", () => {

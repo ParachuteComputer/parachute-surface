@@ -69,6 +69,13 @@ describe("VaultImage", () => {
     expect(fetchBlob).not.toHaveBeenCalled();
   });
 
+  it("renders the error affordance for a storage URL when no fetchBlob is supplied", async () => {
+    render(<VaultImage src="/api/storage/p.png" alt="pic" />);
+    await waitFor(() =>
+      expect(screen.getByText(/pic: No authenticated fetcher supplied/)).toBeInTheDocument(),
+    );
+  });
+
   it("surfaces an error affordance when the auth'd fetch fails", async () => {
     const fetchBlob = vi.fn(async () => {
       throw new Error("403");

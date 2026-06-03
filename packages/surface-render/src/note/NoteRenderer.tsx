@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CodeRenderer } from "../formats/CodeRenderer.js";
 import { CsvRenderer } from "../formats/CsvRenderer.js";
 import { JsonRenderer } from "../formats/JsonRenderer.js";
@@ -21,25 +22,25 @@ export interface NoteLike {
  * `className`/`highlight`.
  */
 export interface NoteRendererOverrides {
-  markdown?: (props: MarkdownViewProps) => React.ReactNode;
-  csv?: (props: { content: string; className?: string }) => React.ReactNode;
+  markdown?: (props: MarkdownViewProps) => ReactNode;
+  csv?: (props: { content: string; className?: string }) => ReactNode;
   json?: (props: {
     content: string;
     className?: string;
     highlight?: HighlightFn;
-  }) => React.ReactNode;
+  }) => ReactNode;
   yaml?: (props: {
     content: string;
     className?: string;
     highlight?: HighlightFn;
-  }) => React.ReactNode;
+  }) => ReactNode;
   code?: (props: {
     content: string;
     language: string;
     className?: string;
     highlight?: HighlightFn;
-  }) => React.ReactNode;
-  plain?: (props: { content: string; className?: string }) => React.ReactNode;
+  }) => ReactNode;
+  plain?: (props: { content: string; className?: string }) => ReactNode;
 }
 
 export interface NoteRendererProps

@@ -29,6 +29,13 @@ export interface WikilinkTarget {
  * the unresolved affordance." Returning a `{ href, exists: false }` is also
  * valid (e.g. notes-ui links unresolved targets to a create-on-navigate
  * route); `null` is the "no link at all, just styled text" signal.
+ *
+ * Trust boundary: the resolver owns the `href` it returns, so it owns the
+ * href trust boundary. It must validate the target against a known index and
+ * mint hrefs it controls — never echo a vault-authored target string straight
+ * back as the `href`. A naïve pass-through resolver (`(t) => ({ href: t, … })`)
+ * would let vault-authored content inject `javascript:`-style URIs into the
+ * rendered link; this plugin sets the href verbatim and does not sanitize it.
  */
 export type WikilinkResolver = (target: string) => WikilinkTarget | null;
 
