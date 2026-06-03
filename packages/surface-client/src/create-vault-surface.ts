@@ -155,15 +155,45 @@ export interface VaultSurface {
    * A `VaultClient` wired with auto-refresh-on-401, or `null` if no token is
    * stored (not signed in). Re-reads the stored token on each call so a token
    * refreshed elsewhere is picked up.
+   *
+   * **React (and other render-loop frameworks):** each call constructs a fresh
+   * `VaultClient` (and a fresh refresh-on-401 closure), so do NOT call this in
+   * a render body. Store the result in state/ref (e.g. `useMemo`/`useState`/
+   * `useRef`) and re-derive only when the signed-in identity changes — calling
+   * it every render churns a new client + closure per frame. The auto-refresh
+   * loop re-reads the latest stored token on each request regardless, so a
+   * single retained client stays current across token rotation.
    */
   getClient(): VaultClient | null;
-  /** Clear the stored token for this vault (local sign-out). */
+  /**
+   * Clear the stored session token for this vault (local sign-out). This
+   * clears the OAuth *token* only — it deliberately does NOT clear the DCR
+   * client registration (the `client_id` is durable: it survives sign-out so
+   * the next `login()` reuses it instead of re-registering). To force a fresh
+   * Dynamic Client Registration (e.g. the operator rotated the hub URL or you
+   * want a clean client_id), call `surface.oauth.resetCaches()` and clear the
+   * DCR cache storage.
+   */
   logout(): void;
 }
 
 const DEFAULT_SCOPE = "vault:read vault:write";
 const DEFAULT_VAULT = "default";
-const DCR_CACHE_KEY = "parachute_surface_dcr";
+/**
+ * Prefix for the per-surface DCR client_id cache key in localStorage. The
+ * full key incorporates the surface identity (`appName`) — see
+ * {@link dcrCacheKey} — so two standalone surfaces sharing an origin (e.g.
+ * `/notes/` and `/tasks/` on the same GitHub Pages site) with different
+ * `redirectUri`s don't evict each other's registrations. A single fixed key
+ * would let the last-registered surface clobber the others, forcing a
+ * re-registration round-trip on every surface switch.
+ */
+const DCR_CACHE_KEY_PREFIX = "parachute_surface_dcr";
+
+/** Per-surface DCR cache key — namespaced by `appName` so surfaces don't collide. */
+function dcrCacheKey(appName: string): string {
+  return `${DCR_CACHE_KEY_PREFIX}:${appName}`;
+}
 
 /**
  * Build a ready-to-use surface bundle (OAuth + VaultClient) with hosted /
@@ -230,7 +260,7 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
   async function ensureClientId(): Promise<void> {
     if (bootstrap === "hosted") return;
     const metadata = await discoverAuthServer(hubUrl, fetchImpl);
-    let clientId = loadCachedClientId(dcrCache, metadata.issuer, redirectUri);
+    let clientId = loadCachedClientId(dcrCache, appName, metadata.issuer, redirectUri);
     if (!clientId) {
       const registration = await registerClient(
         metadata.registration_endpoint,
@@ -238,7 +268,7 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
         fetchImpl,
       );
       clientId = registration.client_id;
-      saveCachedClientId(dcrCache, metadata.issuer, redirectUri, clientId);
+      saveCachedClientId(dcrCache, appName, metadata.issuer, redirectUri, clientId);
     }
     const info: OAuthClientInfo = {
       client_id: clientId,
@@ -336,11 +366,12 @@ interface CachedRegistration {
 
 function loadCachedClientId(
   storage: SimpleStorageLike,
+  appName: string,
   issuer: string,
   redirectUri: string,
 ): string | null {
   try {
-    const raw = storage.getItem(DCR_CACHE_KEY);
+    const raw = storage.getItem(dcrCacheKey(appName));
     if (!raw) return null;
     const cached = JSON.parse(raw) as CachedRegistration;
     if (cached.issuer !== issuer) return null;
@@ -353,13 +384,14 @@ function loadCachedClientId(
 
 function saveCachedClientId(
   storage: SimpleStorageLike,
+  appName: string,
   issuer: string,
   redirectUri: string,
   clientId: string,
 ): void {
   try {
     storage.setItem(
-      DCR_CACHE_KEY,
+      dcrCacheKey(appName),
       JSON.stringify({ issuer, redirectUri, clientId } satisfies CachedRegistration),
     );
   } catch {

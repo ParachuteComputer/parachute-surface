@@ -276,6 +276,72 @@ describe("createVaultSurface — standalone login (DCR)", () => {
     await make().login(); // fresh surface instance, same cache
     expect(registerCalls).toBe(1);
   });
+
+  test("two distinct surfaces sharing an origin do NOT evict each other's DCR registration", async () => {
+    // Regression: a single fixed localStorage key (`parachute_surface_dcr`)
+    // meant two standalone surfaces on one origin clobbered each other's
+    // cached client_id (different redirectUris → cross-eviction → a wasteful
+    // re-register on every surface switch). The cache key is now namespaced by
+    // appName, so each surface keeps its own entry.
+    const registerCallsByName: Record<string, number> = {};
+    const fetchImpl = makeFetch({
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/register": (_url, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}") as { client_name?: string };
+        const name = body.client_name ?? "?";
+        registerCallsByName[name] = (registerCallsByName[name] ?? 0) + 1;
+        return new Response(
+          JSON.stringify({
+            client_id: `dcr_${name.replace(/\s+/g, "_")}`,
+            client_name: name,
+            redirect_uris: ["http://gh-pages.example/oauth/callback"],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    // Two surfaces, same origin + shared dcrCache, distinct appName + redirectUri.
+    const makeNotes = () =>
+      createVaultSurface({
+        clientName: "Notes Surface",
+        appName: "notes",
+        hubUrl: "http://hub.test",
+        origin: "http://gh-pages.example",
+        redirectUri: "http://gh-pages.example/notes/oauth/callback",
+        doc: makeDoc({}),
+        fetchImpl,
+        sessionStorage,
+        tokenStorage,
+        dcrCacheStorage: dcrCache,
+      });
+    const makeTasks = () =>
+      createVaultSurface({
+        clientName: "Tasks Surface",
+        appName: "tasks",
+        hubUrl: "http://hub.test",
+        origin: "http://gh-pages.example",
+        redirectUri: "http://gh-pages.example/tasks/oauth/callback",
+        doc: makeDoc({}),
+        fetchImpl,
+        sessionStorage,
+        tokenStorage,
+        dcrCacheStorage: dcrCache,
+      });
+
+    // Interleave: notes, tasks, then notes again. With per-surface keys, the
+    // third login reuses notes' cached client_id (no eviction by tasks).
+    await makeNotes().login();
+    await makeTasks().login();
+    await makeNotes().login();
+
+    expect(registerCallsByName["Notes Surface"]).toBe(1);
+    expect(registerCallsByName["Tasks Surface"]).toBe(1);
+
+    // Both registrations coexist under distinct, namespaced cache keys.
+    expect(dcrCache.getItem("parachute_surface_dcr:notes")).not.toBeNull();
+    expect(dcrCache.getItem("parachute_surface_dcr:tasks")).not.toBeNull();
+  });
 });
 
 // --- hosted login ----------------------------------------------------------
@@ -387,6 +453,96 @@ describe("createVaultSurface — getClient", () => {
     const { token } = await surface.oauth.refreshAccessToken("rt_1", "default");
     expect(token.access_token).toBe("at_2");
     expect(seen).toContain("rt_1");
+  });
+
+  test("getClient()'s wired refresh fires through a real VaultClient 401 (re-reads latest token, retries with refreshed access token, second 401 fails)", async () => {
+    // Drive an actual VaultClient request to a 401 and assert the *wired*
+    // onAuthError closure (create-vault-surface.ts:~292) runs end-to-end:
+    //   (a) it re-reads the LATEST stored refresh token via oauth.getToken
+    //       (not a value closed over when getClient was called), then
+    //   (b) the refreshed access token is sent on the retried request, and
+    //   (c) a second 401 after rotation propagates as a VaultAuthError.
+    const tokenRefreshRequests: string[] = []; // refresh_tokens presented to the AS
+    const vaultAuthHeaders: string[] = []; // Bearer values the vault saw
+    // The vault accepts the freshly-refreshed access token EXACTLY ONCE (it
+    // expires immediately after, mimicking a short-lived access token). Keying
+    // behavior on the actual credential presented — plus single-use — makes the
+    // whole sequence deterministic with no timing/phase flag.
+    let acceptsRemaining = 1;
+    const VAULT_ACCEPTS = "at_refreshed";
+
+    const fetchImpl = makeFetch({
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": (_url, init) => {
+        const body = init?.body as string;
+        const m = /refresh_token=([^&]+)/.exec(body);
+        const presented = m ? decodeURIComponent(m[1]!) : "";
+        if (m) tokenRefreshRequests.push(presented);
+        // First refresh (rt_3) rotates to the access token the vault accepts;
+        // a later refresh (rt_2, after rotation) hands back a token the vault
+        // always rejects — proving the second-401 path surfaces.
+        const accessToken = presented === "rt_3" ? "at_refreshed" : "at_still_bad";
+        return new Response(
+          JSON.stringify({ ...HAPPY_TOKEN, access_token: accessToken, refresh_token: "rt_2" }),
+          { status: 200 },
+        );
+      },
+      "http://hub.test/vault/default/api/notes": (_url, init) => {
+        const auth = new Headers(init?.headers).get("Authorization") ?? "";
+        vaultAuthHeaders.push(auth);
+        if (auth === `Bearer ${VAULT_ACCEPTS}` && acceptsRemaining > 0) {
+          acceptsRemaining--;
+          return new Response(JSON.stringify([{ id: "n1" }]), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error_type: "expired", message: "token expired" }), {
+          status: 401,
+        });
+      },
+    });
+
+    const surface = createVaultSurface({
+      clientName: "X",
+      hubUrl: "http://hub.test",
+      origin: "http://x.test",
+      doc: makeDoc({}),
+      fetchImpl,
+      sessionStorage,
+      tokenStorage,
+      dcrCacheStorage: dcrCache,
+    });
+    surface.oauth.useClientId({ client_id: "dcr", scopes: ["vault:read"] });
+    // Build the client while "at_1"/"rt_1" is the stored token...
+    saveTokenDirect(tokenStorage, "x", "default", "at_1", "rt_1");
+    const client = surface.getClient();
+    expect(client).not.toBeNull();
+
+    // ...then mutate the stored REFRESH token under the client from "rt_1" to
+    // "rt_3" BEFORE the request (e.g. another tab refreshed). The client's
+    // own access token stays "at_1" (the value it was built with), but a
+    // correct onAuthError re-reads getToken at 401-time and refreshes with
+    // "rt_3" (the latest), NOT "rt_1" (the value present when getClient ran).
+    saveTokenDirect(tokenStorage, "x", "default", "at_1", "rt_3");
+
+    // First request 401s (at_1 is expired) → wired onAuthError re-reads
+    // getToken, refreshes with rt_3 → vault accepts the at_refreshed retry.
+    const notes = await client!.queryNotes({ tag: "#x" });
+    expect(notes).toEqual([{ id: "n1" }]);
+
+    // (a) the refresh used the LATEST stored refresh token (rt_3), not the
+    //     rt_1 that was stored when getClient() built the closure.
+    expect(tokenRefreshRequests).toContain("rt_3");
+    expect(tokenRefreshRequests).not.toContain("rt_1");
+    // (b) the first attempt carried the client's built-in token "at_1"; the
+    //     retry carried the refreshed access token "at_refreshed".
+    expect(vaultAuthHeaders[0]).toBe("Bearer at_1");
+    expect(vaultAuthHeaders).toContain("Bearer at_refreshed");
+
+    // (c) a second 401 after rotation fails correctly. The first refresh
+    // rotated the stored refresh token to "rt_2"; the next request 401s,
+    // onAuthError refreshes once more (rt_2 → at_still_bad), the retry 401s
+    // again → VaultAuthError surfaces (no infinite loop; one retry only).
+    await expect(client!.queryNotes({ tag: "#y" })).rejects.toThrow(/rejected the token/);
   });
 });
 
