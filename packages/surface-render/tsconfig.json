@@ -17,6 +17,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "types": []
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

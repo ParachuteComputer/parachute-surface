@@ -141,15 +141,17 @@ export type {
 } from "./types.js";
 
 /**
- * Library semver — kept in sync with `package.json` so consumers can
- * surface "surface-client 0.1.0" diagnostics in a banner.
- *
- * Keep this string identical to `package.json`'s `version` (this is the
- * source-of-truth drift §1 of the surface-client design doc called out:
- * the const had stalled at `0.1.0-rc.4` while `package.json` shipped
- * `0.1.0`). The release flow bumps both together (see RELEASING.md).
+ * Library semver — surfaced by consumers in "surface-client 0.2.0" diagnostics
+ * banners. Auto-derived from `package.json` at build time via
+ * `scripts/gen-version.ts` (the `prebuild` step), so it can never drift from
+ * the version the package actually ships at. See #57 — this previously stalled
+ * at `0.1.0-rc.4` while `package.json` shipped `0.1.0`. Do not hand-edit; bump
+ * `package.json` and the build regenerates `src/version.ts`.
  */
-export const SURFACE_CLIENT_VERSION = "0.2.0";
+export { SURFACE_CLIENT_VERSION } from "./version.js";
+// Local binding required to reference the value in the APP_CLIENT_VERSION alias
+// below — a re-export alone doesn't bring the name into local value scope.
+import { SURFACE_CLIENT_VERSION } from "./version.js";
 
 /**
  * @deprecated Renamed to {@link SURFACE_CLIENT_VERSION} when
