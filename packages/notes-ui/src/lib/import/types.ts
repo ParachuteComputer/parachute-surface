@@ -67,12 +67,50 @@ export interface ParseError {
   reason: string;
 }
 
+/**
+ * A non-markdown file pulled out of the source archive, carried alongside
+ * the parsed notes so the apply path can upload it to vault storage and
+ * rewrite the embeds that reference it.
+ *
+ * `kind` drives the served-markdown the rewrite emits (image embed vs.
+ * plain link) AND whether the file is uploadable at all:
+ *   - `image` / `pdf` / `audio` / `video` → vault-storage-allowlisted;
+ *     uploaded via the attachment chain.
+ *   - `text` → NOT a storage type (json/csv/yaml/txt/svg); the apply path
+ *     turns these into notes (text wrapped, no interpretation) so their
+ *     content is preserved and searchable.
+ *   - `unsupported` → a binary the vault storage allowlist refuses (e.g.
+ *     `.zip`-in-zip, `.docx`); surfaced in the report as skipped-with-
+ *     reason rather than silently dropped.
+ */
+export type AttachmentKind = "image" | "pdf" | "audio" | "video" | "text" | "unsupported";
+
+export interface CollectedAttachment {
+  /** Path inside the archive, after common-root strip (matches note paths). */
+  sourcePath: string;
+  /** Basename of `sourcePath` — the name Obsidian embeds resolve against. */
+  filename: string;
+  /** Lowercased extension without the dot (`png`, `pdf`, `json`, …). */
+  ext: string;
+  /** Classification — see `AttachmentKind`. */
+  kind: AttachmentKind;
+  /** The file bytes, as a Blob (JSZip `.async("blob")`). */
+  blob: Blob;
+}
+
 export interface ParsedImport {
   format: DetectedFormat;
   notes: ParsedNote[];
   errors: ParseError[];
   /** Unique tag set across every parsed note — surfaces in the summary. */
   tags: string[];
+  /**
+   * Non-markdown files collected from the archive (Obsidian only; loose
+   * markdown drops carry none). The apply path uploads the storage-eligible
+   * ones, rewrites referencing embeds, brings text-shaped ones in as notes,
+   * and reports the rest. Empty for loose-markdown imports.
+   */
+  attachments: CollectedAttachment[];
 }
 
 /**
@@ -91,9 +129,30 @@ export interface ImportProgress {
   total: number;
 }
 
+/**
+ * Per-attachment outcome from the apply path. `uploaded` = blob landed in
+ * vault storage AND at least one referencing embed was rewritten to served
+ * markdown (or, for a loose file, linked from the "Imported files" note).
+ * `skipped` = the vault refused it (not in the storage allowlist) or it was
+ * a text-shaped file folded into a note instead. `errored` = the upload or
+ * link call failed.
+ */
+export type AttachmentOutcome =
+  | { status: "uploaded"; sourcePath: string; storagePath: string; references: number }
+  | { status: "skipped"; sourcePath: string; reason: string }
+  | { status: "errored"; sourcePath: string; reason: string };
+
 export interface ImportReport {
   created: number;
   skipped: number;
   errored: number;
   outcomes: ImportOutcome[];
+  /** Attachments uploaded + linked (storage-eligible files). */
+  attachmentsUploaded: number;
+  /** Attachments not brought across as files (allowlist refusal, etc.). */
+  attachmentsSkipped: number;
+  /** Attachments that failed upload/link. */
+  attachmentsErrored: number;
+  /** Per-attachment detail rows for the report UI. */
+  attachmentOutcomes: AttachmentOutcome[];
 }

@@ -213,7 +213,7 @@ describe("Import route", () => {
     });
     const summaryHeading = screen.getByText(/Import complete/i);
     const summaryCard = summaryHeading.closest("div");
-    expect(summaryCard?.textContent?.replace(/\s+/g, " ")).toMatch(/2 created/i);
+    expect(summaryCard?.textContent?.replace(/\s+/g, " ")).toMatch(/2 notes created/i);
 
     // Verify two POST /api/notes calls happened with the right payloads.
     const postCalls = fetchImpl.mock.calls.filter(
@@ -257,8 +257,8 @@ describe("Import route", () => {
     const summaryHeading = screen.getByText(/Import complete/i);
     const summaryCard = summaryHeading.closest("div");
     const normalized = summaryCard?.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(normalized).toMatch(/1 created/i);
-    expect(normalized).toMatch(/1 skipped/i);
-    expect(normalized).toMatch(/0 errored/i);
+    expect(normalized).toMatch(/1 notes created/i);
+    expect(normalized).toMatch(/1 notes skipped/i);
+    expect(normalized).toMatch(/0 notes errored/i);
   });
 });

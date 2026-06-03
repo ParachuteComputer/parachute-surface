@@ -6,7 +6,19 @@ import {
   VaultTargetExistsError,
   VaultUnreachableError,
 } from "@/lib/vault/client";
-import type { ImportOutcome, ImportProgress, ImportReport, ParsedNote } from "./types";
+import type { ImportOutcome, ImportProgress, ParsedNote } from "./types";
+
+/**
+ * Note-creation tally returned by `runImport`. The full `ImportReport`
+ * (which the apply orchestrator surfaces in the UI) extends this with the
+ * attachment counts; `runImport` itself only touches notes.
+ */
+export interface NoteImportReport {
+  created: number;
+  skipped: number;
+  errored: number;
+  outcomes: ImportOutcome[];
+}
 
 /**
  * The maximum number of concurrent POST /api/notes calls we'll have in
@@ -61,7 +73,7 @@ export interface RunImportOptions {
  * point. A genuinely unrecoverable condition (auth dead) still produces
  * a report with every remaining note classified as "errored".
  */
-export async function runImport(opts: RunImportOptions): Promise<ImportReport> {
+export async function runImport(opts: RunImportOptions): Promise<NoteImportReport> {
   const { client, notes, onProgress, signal } = opts;
   const concurrency = Math.max(1, opts.concurrency ?? DEFAULT_CONCURRENCY);
   const outcomes: ImportOutcome[] = [];

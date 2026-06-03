@@ -68,7 +68,7 @@ describe("parseObsidianZip", () => {
     expect(result.notes.map((n) => n.path)).toEqual(["Notes/Real"]);
   });
 
-  it("ignores non-markdown entries silently (no error rows for images / json)", async () => {
+  it("collects non-markdown entries as attachments (not error rows)", async () => {
     const zip = await buildZip({
       "Real.md": "real",
       "image.png": "binary-bytes-but-still-content",
@@ -77,13 +77,33 @@ describe("parseObsidianZip", () => {
     const result = await parseObsidianZip(zip);
     expect(result.notes.map((n) => n.path)).toEqual(["Real"]);
     expect(result.errors).toEqual([]);
+    // The image + json are now carried as classified attachments.
+    expect(result.attachments.map((a) => a.sourcePath).sort()).toEqual(["data.json", "image.png"]);
+    const img = result.attachments.find((a) => a.filename === "image.png");
+    const json = result.attachments.find((a) => a.filename === "data.json");
+    expect(img?.kind).toBe("image");
+    expect(json?.kind).toBe("text");
   });
 
-  it("returns an empty notes list (not an error) for a zip with no markdown", async () => {
+  it("returns an empty notes list (not an error) for a zip with no markdown, still collects files", async () => {
     const zip = await buildZip({ "image.png": "x", "data.json": "{}" });
     const result = await parseObsidianZip(zip);
     expect(result.notes).toEqual([]);
     expect(result.errors).toEqual([]);
+    expect(result.attachments.length).toBe(2);
+  });
+
+  it("does NOT collect excluded-path files (.obsidian icons, .trash) as attachments", async () => {
+    const zip = await buildZip({
+      "MyVault/Notes/Real.md": "real",
+      "MyVault/.obsidian/icons/logo.png": "x",
+      "MyVault/.trash/old.png": "y",
+      "MyVault/assets/keep.png": "z",
+    });
+    const result = await parseObsidianZip(zip);
+    expect(result.notes.map((n) => n.path)).toEqual(["Notes/Real"]);
+    // Only the real asset survives; .obsidian + .trash binaries are excluded.
+    expect(result.attachments.map((a) => a.sourcePath)).toEqual(["assets/keep.png"]);
   });
 
   it("parses frontmatter + tags from each note in the archive", async () => {

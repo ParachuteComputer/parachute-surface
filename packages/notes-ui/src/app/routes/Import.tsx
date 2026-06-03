@@ -1,8 +1,8 @@
 import { AttachmentDropZone } from "@/components/AttachmentDropZone";
+import { applyImport } from "@/lib/import/apply";
 import { detectFormat, isMarkdownLike, isZipLike } from "@/lib/import/detect";
 import { parseLooseMarkdown } from "@/lib/import/loose";
 import { parseObsidianZip } from "@/lib/import/obsidian";
-import { runImport } from "@/lib/import/runner";
 import type {
   DetectedFormat,
   ImportProgress,
@@ -91,6 +91,7 @@ export function Import() {
               reason: "Unrecognized format (expected .zip, .md, or .markdown).",
             })),
             tags: [],
+            attachments: [],
           };
         }
         setStage({ kind: "review", parsed });
@@ -115,9 +116,9 @@ export function Import() {
       parsed: stage.parsed,
       progress: { done: 0, total: stage.parsed.notes.length },
     });
-    const report = await runImport({
+    const report = await applyImport({
       client,
-      notes: stage.parsed.notes,
+      parsed: stage.parsed,
       signal: ctrl.signal,
       onProgress: (progress) => {
         // Use functional setState so a fast-firing onProgress doesn't
@@ -250,9 +251,16 @@ interface ReviewProps {
 }
 
 function ReviewStage({ parsed, onConfirm, onBack }: ReviewProps) {
-  const { notes, errors, tags } = parsed;
+  const { notes, errors, tags, attachments } = parsed;
   const noteCount = notes.length;
-  const canImport = noteCount > 0;
+  // Files we'll bring across as attachments (image/pdf/audio/video) vs. as
+  // notes (text-shaped: txt/json/csv/yaml/svg) vs. can't import (allowlist).
+  const attachmentCount = attachments.filter((a) =>
+    ["image", "pdf", "audio", "video"].includes(a.kind),
+  ).length;
+  const fileNoteCount = attachments.filter((a) => a.kind === "text").length;
+  const unsupportedCount = attachments.filter((a) => a.kind === "unsupported").length;
+  const canImport = noteCount > 0 || attachmentCount > 0 || fileNoteCount > 0;
 
   const sampleNotes = useMemo(() => notes.slice(0, 8), [notes]);
   const sampleTags = useMemo(() => tags.slice(0, 12), [tags]);
@@ -265,6 +273,24 @@ function ReviewStage({ parsed, onConfirm, onBack }: ReviewProps) {
           Detected format: <FormatBadge format={parsed.format} />.{" "}
           <strong className="text-fg">{noteCount}</strong> {noteCount === 1 ? "note" : "notes"} will
           be created.{" "}
+          {attachmentCount > 0 ? (
+            <span className="text-fg-muted">
+              <strong className="text-fg">{attachmentCount}</strong> attachment
+              {attachmentCount === 1 ? "" : "s"} (images / PDFs / audio) will come across.{" "}
+            </span>
+          ) : null}
+          {fileNoteCount > 0 ? (
+            <span className="text-fg-muted">
+              {fileNoteCount} data file{fileNoteCount === 1 ? "" : "s"} (json / csv / yaml / txt)
+              will be saved as notes.{" "}
+            </span>
+          ) : null}
+          {unsupportedCount > 0 ? (
+            <span className="text-fg-dim">
+              {unsupportedCount} file{unsupportedCount === 1 ? "" : "s"} can't be imported (not a
+              vault file type).{" "}
+            </span>
+          ) : null}
           {errors.length > 0 ? (
             <span className="text-fg-dim">{errors.length} file(s) couldn't be parsed.</span>
           ) : null}
@@ -335,7 +361,11 @@ function ReviewStage({ parsed, onConfirm, onBack }: ReviewProps) {
           disabled={!canImport}
           className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
         >
-          Run import ({noteCount} {noteCount === 1 ? "note" : "notes"})
+          Run import ({noteCount} {noteCount === 1 ? "note" : "notes"}
+          {attachmentCount > 0
+            ? ` + ${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`
+            : ""}
+          )
         </button>
       </div>
     </section>
@@ -393,23 +423,46 @@ function DoneStage({
 }) {
   const errored = report.outcomes.filter((o) => o.status === "errored");
   const skipped = report.outcomes.filter((o) => o.status === "skipped");
+  const attachmentsSkipped = report.attachmentOutcomes.filter((o) => o.status === "skipped");
+  const attachmentsErrored = report.attachmentOutcomes.filter((o) => o.status === "errored");
+  const hasAttachments = report.attachmentOutcomes.length > 0;
   return (
     <section className="space-y-6">
       <div className="rounded-md border border-border bg-card p-4">
         <h2 className="font-serif text-lg">Import complete</h2>
         <ul className="mt-3 space-y-1 text-sm">
           <li>
-            <span className="text-accent">{report.created}</span> created
+            <span className="text-accent">{report.created}</span> notes created
           </li>
           <li>
-            <span className="text-fg-muted">{report.skipped}</span> skipped (already in vault)
+            <span className="text-fg-muted">{report.skipped}</span> notes skipped (already in vault)
           </li>
           <li>
             <span className={report.errored > 0 ? "text-red-400" : "text-fg-muted"}>
               {report.errored}
             </span>{" "}
-            errored
+            notes errored
           </li>
+          {hasAttachments ? (
+            <>
+              <li className="pt-1">
+                <span className="text-accent">{report.attachmentsUploaded}</span> attachments
+                imported
+              </li>
+              {report.attachmentsSkipped > 0 ? (
+                <li>
+                  <span className="text-fg-muted">{report.attachmentsSkipped}</span> attachments
+                  skipped (not a vault file type)
+                </li>
+              ) : null}
+              {report.attachmentsErrored > 0 ? (
+                <li>
+                  <span className="text-red-400">{report.attachmentsErrored}</span> attachments
+                  errored
+                </li>
+              ) : null}
+            </>
+          ) : null}
         </ul>
         {parsed.errors.length > 0 ? (
           <p className="mt-2 text-xs text-fg-dim">
@@ -417,6 +470,25 @@ function DoneStage({
           </p>
         ) : null}
       </div>
+
+      {attachmentsSkipped.length > 0 || attachmentsErrored.length > 0 ? (
+        <details className="rounded-md border border-border bg-card p-4">
+          <summary className="cursor-pointer text-sm text-fg-muted hover:text-accent">
+            {attachmentsSkipped.length + attachmentsErrored.length} attachment(s) not imported as
+            files — why
+          </summary>
+          <ul className="mt-3 space-y-1 text-xs">
+            {[...attachmentsErrored, ...attachmentsSkipped].map((o) => (
+              <li key={`a-${o.sourcePath}`} className="flex flex-col gap-0.5">
+                <span className="font-mono text-fg">{o.sourcePath}</span>
+                <span className="text-fg-dim">
+                  {o.status === "skipped" || o.status === "errored" ? o.reason : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
 
       {skipped.length > 0 ? (
         <details className="rounded-md border border-border bg-card p-4">
