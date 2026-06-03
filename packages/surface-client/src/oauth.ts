@@ -1,18 +1,32 @@
 /**
- * `ParachuteOAuth` — OAuth 2.1 + PKCE client for parachute-app-hosted UIs.
+ * `ParachuteOAuth` — OAuth 2.1 + PKCE client for both **hosted** and
+ * **standalone** Parachute surfaces.
  *
  * The shape generalizes what parachute-notes hand-rolled inline (see
- * `parachute-notes/src/lib/vault/oauth.ts`). Each hosted UI under
- * parachute-surface gets its own OAuth client_id (per design doc section 6 —
- * "Per-UI client_id"). The UI's JS reads its `client_id` at boot from
- * `/surface/<name>/oauth-client`, then drives the OAuth dance through this
- * class.
+ * `parachute-notes/src/lib/vault/oauth.ts`). It supports the two §3
+ * bootstraps the surface-client design doc describes — and the driver itself
+ * is bootstrap-agnostic once it has a `client_id`:
+ *
+ *   - **Hosted** (bundle served under `/surface/<name>/` by a Parachute
+ *     surface-host): the host exposes a per-surface OAuth-client endpoint, so
+ *     the client_id is fetched lazily via `getClientId()`
+ *     (`/surface/<name>/oauth-client`).
+ *   - **Standalone** (GitHub Pages / any static host, no Parachute host in
+ *     front): there is no such endpoint, so the surface self-registers via RFC
+ *     7591 Dynamic Client Registration (`discoverAuthServer` + `registerClient`
+ *     from `./discovery`) and seeds the resulting client_id via
+ *     {@link useClientId}. `beginFlow` / `handleCallback` / `refreshAccessToken`
+ *     then **never** touch the hosted endpoint. The `createVaultSurface`
+ *     factory (`./create-vault-surface`) auto-detects which path applies; this
+ *     class exposes both primitives directly for advanced callers.
  *
  * Lifecycle the class assumes:
  *
- *   1. `getClientId(appName)` — fetches `/surface/<name>/oauth-client`,
- *      caches in-memory. Subsequent calls in the same page load reuse
- *      the cached id.
+ *   1a. (hosted) `getClientId()` — fetches `/surface/<name>/oauth-client`,
+ *       caches in-memory. Subsequent calls in the same page load reuse
+ *       the cached id.
+ *   1b. (standalone) `useClientId(info)` — seeds a DCR-registered client_id
+ *       into the same in-memory cache so the hosted endpoint is never hit.
  *   2. `beginFlow(vaultScope)` — starts OAuth: discover AS, get a
  *      client_id (cache → fetch), generate PKCE, save pending state,
  *      redirect (or return URL — caller can choose).

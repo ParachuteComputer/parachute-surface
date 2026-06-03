@@ -30,6 +30,49 @@ Everything is re-exported from the barrel (`@openparachute/surface-client`) and 
 
 ---
 
+## Quick start — `createVaultSurface` (the one-liner path)
+
+For the common case, you don't wire OAuth + `VaultClient` by hand at all. `createVaultSurface` is a turnkey factory that **auto-detects** whether you're hosted or standalone (see "Two deployment shapes" below), bakes sane defaults, runs Dynamic Client Registration for you when standalone, and hands back a `VaultClient` already wired with refresh-on-401:
+
+```ts
+import { createVaultSurface } from "@openparachute/surface-client";
+
+// One call. clientName is the only required field — it's shown on the hub
+// consent screen the first time the operator approves your surface.
+const surface = createVaultSurface({ clientName: "My Vault UI" });
+
+// On your callback route (default redirect URI: `${origin}/oauth/callback`):
+if (location.pathname === "/oauth/callback") {
+  await surface.handleCallback();      // exchanges code → token, persists it
+  location.replace("/");
+}
+
+// Anywhere: get a ready VaultClient, or null if not signed in.
+const vault = surface.getClient();
+if (vault) {
+  const notes = await vault.queryNotes({ tag: "x" });
+} else {
+  await surface.login();               // DCR-registers (standalone) + redirects to consent
+}
+```
+
+The factory figures out the deployment shape, hub URL, redirect URI, scopes, and app name. Override any of them:
+
+```ts
+const surface = createVaultSurface({
+  clientName: "My Vault UI",
+  hubUrl: "https://my-hub.example.com", // default: parachute-hub meta tag, else window.location.origin
+  vaultName: "default",                  // default: "default"
+  scope: "vault:read vault:write",       // default
+  redirectUri: `${origin}/oauth/callback`, // default per deployment shape
+  bootstrap: "auto",                     // "hosted" | "dcr" | "auto" (default: detect from parachute-mount meta tag)
+});
+```
+
+The returned `VaultSurface` is `{ oauth, bootstrap, hubUrl, vaultName, login(), handleCallback(), getClient(), logout() }`. `oauth` is the underlying `ParachuteOAuth` if you need to drop down to the low-level dance. Everything below this section is that low-level layer — reach for it when the factory's defaults don't fit.
+
+---
+
 ## Two deployment shapes — read this first
 
 How a surface bootstraps OAuth depends on **where it runs**. This is the single most important thing to get right.
@@ -108,7 +151,7 @@ window.location.assign(authorizeUrl);
 
 `getClientId()` succeeds only when the host endpoint exists. If you're not sure which shape you're in, the presence of a `parachute-mount` meta tag (see below) is the signal: present → hosted; absent → standalone.
 
-> A future `createVaultSurface(...)` factory (design doc Phase 2) will collapse both bootstraps into one call with automatic hosted-vs-standalone detection. Until it lands, pick the path above that matches your deployment.
+> Prefer the [`createVaultSurface(...)` quick-start](#quick-start--createvaultsurface-the-one-liner-path) above — it collapses both bootstraps into one call with automatic hosted-vs-standalone detection. The hand-wired paths in this section are the low-level escape hatch for when the factory's defaults don't fit.
 
 ---
 
