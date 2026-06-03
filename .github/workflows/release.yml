@@ -179,7 +179,7 @@ jobs:
             echo "::error::packages/surface-client/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
-      - name: guard against workspace:/link: protocol in published manifest
+      - name: "guard against workspace:/link: protocol in published manifest"
         # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
         # do, on their own publish path). A leaked protocol breaks every `npm install`
         # of the published package. Fail loudly before publish if any dependency
@@ -237,7 +237,7 @@ jobs:
             echo "::error::packages/surface-render/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
-      - name: guard against workspace:/link: protocol in published manifest
+      - name: "guard against workspace:/link: protocol in published manifest"
         # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
         # do, on their own publish path). A leaked protocol breaks every `npm install`
         # of the published package. surface-render depends on surface-client — fail
