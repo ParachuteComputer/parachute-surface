@@ -7,3 +7,4 @@ export {
   isVaultStorageUrl,
 } from "./fetch-blob.js";
 export { useBlobObjectUrl, type BlobObjectUrlState } from "./use-blob-object-url.js";
+export { useVaultFetchBlob } from "./use-vault-fetch-blob.js";

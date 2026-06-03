@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { VaultImage } from "../embed/VaultImage.js";
 import type { FetchBlob } from "../embed/fetch-blob.js";
+import type { HighlightFn } from "../formats/highlight.js";
 import { type WikilinkResolver, remarkWikilinks } from "./remark-wikilinks.js";
 
 /**
@@ -74,15 +75,38 @@ export interface MarkdownViewProps {
    */
   className?: string;
   /**
+   * Syntax highlighter for fenced code blocks (```​lang … ```), wired into the
+   * markdown `code` renderer so the SAME `highlight` hook colors both
+   * "a fenced block inside a `.md` note" *and* "a whole `.ts`/`.json`/`.yaml`
+   * note" (which the format renderers color via {@link HighlightFn}). This
+   * unifies the two highlight paths under one prop — pass `highlight` once to
+   * `<NoteRenderer>` and every code path colors consistently.
+   *
+   * Output markup matches `<CodeRenderer>`: `<pre><code class="hljs
+   * language-X">`, so one stylesheet themes both. The default (omit it) leaves
+   * fenced code unstyled — no dependency, no coloring.
+   *
+   * **Don't combine with `rehypePlugins={[rehypeHighlight]}`.** They are two
+   * routes to the same result; using both double-processes fenced code. Pick
+   * one: `highlight` (recommended — same hook the format renderers use, no
+   * extra peer dep) OR `rehypePlugins={[rehypeHighlight]}` (the older path,
+   * needs the optional `rehype-highlight` peer). When `highlight` is set, the
+   * built-in `code` override takes precedence; a `components.code` override you
+   * pass still wins over both.
+   */
+  highlight?: HighlightFn;
+  /**
    * remark plugins appended after the built-ins (gfm + wikilinks). Use to add
    * footnotes, math, etc.
    */
   remarkPlugins?: NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>;
   /**
-   * rehype plugins. Defaults to none. A surface that wants syntax
-   * highlighting in fenced code blocks passes `[rehypeHighlight]` here (the
-   * package keeps `rehype-highlight` an optional peer so non-highlighting
-   * surfaces don't pull it in).
+   * rehype plugins. Defaults to none. An alternative to the `highlight` prop
+   * for fenced-code coloring: a surface can instead pass `[rehypeHighlight]`
+   * here (the package keeps `rehype-highlight` an optional peer so
+   * non-highlighting surfaces don't pull it in). Prefer the `highlight` prop —
+   * it shares the hook the format renderers use and needs no extra peer. Use
+   * one or the other, never both (see `highlight`).
    */
   rehypePlugins?: NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>;
 }
@@ -103,6 +127,23 @@ export interface MarkdownViewProps {
  * Everything is overridable via `components`, `remarkPlugins`,
  * `rehypePlugins`, `linkComponent`, and `className`.
  */
+/**
+ * Pull a highlight.js-style language id out of react-markdown's `code`
+ * `className` (`language-ts` → `ts`). Returns `""` when absent.
+ */
+function languageFromClass(className: unknown): string {
+  if (typeof className !== "string") return "";
+  const m = className.match(/(?:^|\s)language-([^\s]+)/);
+  return m?.[1] ?? "";
+}
+
+/** Flatten a code node's children to its raw source text. */
+function codeText(children: ReactNode): string {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return children.map(codeText).join("");
+  return children == null ? "" : String(children);
+}
+
 export function MarkdownView({
   content,
   resolve,
@@ -110,6 +151,7 @@ export function MarkdownView({
   fetchBlob,
   components,
   className = "prose-note",
+  highlight,
   remarkPlugins,
   rehypePlugins,
 }: MarkdownViewProps) {
@@ -129,6 +171,37 @@ export function MarkdownView({
         </Link>
       );
     },
+    // When a `highlight` hook is supplied, color fenced code blocks through it
+    // — the SAME hook the format renderers use, so markdown fences and whole
+    // code notes look identical. Only fenced blocks (those carrying a
+    // `language-…` class) are highlighted; inline code is left untouched so it
+    // keeps `.prose-note code` inline styling. Emits the same
+    // `<code class="hljs language-X">` markup as <CodeRenderer> so one
+    // stylesheet themes both. Omitted entirely when no `highlight` is passed,
+    // so the rehype-highlight path (and the no-coloring default) are unchanged.
+    ...(highlight
+      ? {
+          code({ node: _node, className: codeClass, children, ...rest }) {
+            const language = languageFromClass(codeClass);
+            if (!language) {
+              // inline code — leave as-is.
+              return (
+                <code className={typeof codeClass === "string" ? codeClass : undefined} {...rest}>
+                  {children}
+                </code>
+              );
+            }
+            const html = highlight(codeText(children), language);
+            return (
+              <code
+                className={`hljs language-${language}`}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: the highlight hook is contracted to return sanitized HTML (escape-only by default); same contract as <CodeRenderer>.
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            );
+          },
+        }
+      : {}),
   };
 
   const mergedComponents: Components = { ...defaultComponents, ...components };

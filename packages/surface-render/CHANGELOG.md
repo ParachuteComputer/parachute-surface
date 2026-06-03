@@ -1,5 +1,34 @@
 # @openparachute/surface-render
 
+## Unreleased
+
+DX polish from the notes-ui Phase-4 dogfood ([#74](https://github.com/ParachuteComputer/parachute-surface/issues/74)). All additive + backward-compatible — existing consumers (notes-ui) render identically. Next release will be 0.2.0 (minor features).
+
+- **`useVaultFetchBlob(client)` hook** (`/embed`) — convenience over
+  `vaultClientFetchBlob`: memoized, returns `undefined` when signed out, so
+  surfaces stop hand-writing `useMemo(() => vaultClientFetchBlob(client) ?? undefined, …)`.
+- **Unified `highlight`** — the `highlight` hook now also colors fenced code
+  blocks inside markdown (`<MarkdownView highlight>` / `<NoteRenderer highlight>`),
+  not just code/json/yaml notes. One hook for every code path, same
+  `hljs language-X` markup. Backward-compatible: the markdown `code` override
+  only activates when `highlight` is passed, so the `rehypePlugins={[rehypeHighlight]}`
+  path (notes-ui) and the no-coloring default are unchanged. Use one or the
+  other, never both.
+- **Resolver clarity** — prominent `WikilinkResolver` docs on the `null` vs
+  `{ exists: false }` distinction, plus tiny named helpers `unresolvedLink(href)`
+  / `resolvedLink(href)` / the `INERT` sentinel (`/markdown`) that make
+  "unresolved-but-still-linked" the obvious default. No contract change.
+- **Optional baseline stylesheet** — `import "@openparachute/surface-render/styles.css"`
+  gives sane neutral defaults for the affordance classes (csv-scroll/warning,
+  vault-media-loading/error, vault-audio, dashed unresolved wikilinks) so
+  consumers aren't source-spelunking for unstyled elements. Does not theme
+  `.prose-note` or ship a highlight.js color theme.
+- **Ergonomic override types** — re-exported named aliases for the
+  `NoteRendererOverrides` prop shapes (`MarkdownOverride`, `MarkdownOverrideProps`,
+  `CodeOverrideProps`, `HighlightableOverrideProps`, `BasicFormatOverrideProps`)
+  so consumers annotate override fns without `as`-casts or deep imports.
+- **Docs** — README now enumerates the *complete* emitted CSS class contract.
+
 ## 0.1.0
 
 Initial release — Phase 3 of the

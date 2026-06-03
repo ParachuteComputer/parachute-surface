@@ -33,6 +33,9 @@ export {
   remarkWikilinks,
   type WikilinkResolver,
   type WikilinkTarget,
+  unresolvedLink,
+  resolvedLink,
+  INERT,
   WIKILINK_CLASS,
   WIKILINK_RESOLVED_CLASS,
   WIKILINK_UNRESOLVED_CLASS,
@@ -50,6 +53,7 @@ export {
   isVaultStorageUrl,
   useBlobObjectUrl,
   type BlobObjectUrlState,
+  useVaultFetchBlob,
 } from "./embed/index.js";
 
 // Multi-format renderers
@@ -77,6 +81,11 @@ export {
   type NoteRendererProps,
   type NoteRendererOverrides,
   type NoteLike,
+  type MarkdownOverride,
+  type MarkdownOverrideProps,
+  type BasicFormatOverrideProps,
+  type HighlightableOverrideProps,
+  type CodeOverrideProps,
   formatForPath,
   extensionOf,
   CODE_EXTENSIONS,

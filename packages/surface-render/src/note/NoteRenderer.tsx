@@ -15,32 +15,45 @@ export interface NoteLike {
   content?: string;
 }
 
+/** Props the markdown override receives — surface-render's {@link MarkdownViewProps}.
+ *  Aliased so a consumer can annotate its override fn without a deep import or
+ *  an `as` cast (issue #74 item 5). */
+export type MarkdownOverrideProps = MarkdownViewProps;
+/** Props a `csv` / `plain` override receives. */
+export interface BasicFormatOverrideProps {
+  content: string;
+  className?: string;
+}
+/** Props a `json` / `yaml` override receives (adds the `highlight` hook). */
+export interface HighlightableOverrideProps extends BasicFormatOverrideProps {
+  highlight?: HighlightFn;
+}
+/** Props a `code` override receives (adds the resolved `language`). */
+export interface CodeOverrideProps extends HighlightableOverrideProps {
+  language: string;
+}
+
+/** A markdown-branch override fn (the most-overridden branch — a surface
+ *  routes markdown through its own glue: router link, auth'd image fetch). */
+export type MarkdownOverride = (props: MarkdownOverrideProps) => ReactNode;
+
 /**
  * Per-format renderer overrides. A surface that wants different csv/json/yaml
  * behavior (e.g. a JSON tree view) passes a replacement here; otherwise the
  * good defaults are used. Each receives `content` plus the dispatcher's
  * `className`/`highlight`.
+ *
+ * The override prop types are exported as named aliases
+ * ({@link MarkdownOverrideProps}, {@link CodeOverrideProps}, …) so a consumer
+ * can annotate its override functions without `as`-casts or deep imports.
  */
 export interface NoteRendererOverrides {
-  markdown?: (props: MarkdownViewProps) => ReactNode;
-  csv?: (props: { content: string; className?: string }) => ReactNode;
-  json?: (props: {
-    content: string;
-    className?: string;
-    highlight?: HighlightFn;
-  }) => ReactNode;
-  yaml?: (props: {
-    content: string;
-    className?: string;
-    highlight?: HighlightFn;
-  }) => ReactNode;
-  code?: (props: {
-    content: string;
-    language: string;
-    className?: string;
-    highlight?: HighlightFn;
-  }) => ReactNode;
-  plain?: (props: { content: string; className?: string }) => ReactNode;
+  markdown?: MarkdownOverride;
+  csv?: (props: BasicFormatOverrideProps) => ReactNode;
+  json?: (props: HighlightableOverrideProps) => ReactNode;
+  yaml?: (props: HighlightableOverrideProps) => ReactNode;
+  code?: (props: CodeOverrideProps) => ReactNode;
+  plain?: (props: BasicFormatOverrideProps) => ReactNode;
 }
 
 export interface NoteRendererProps
@@ -79,7 +92,13 @@ export function NoteRenderer({
 
   switch (fmt) {
     case "markdown": {
-      const props: MarkdownViewProps = { content, className, ...markdownProps };
+      // Thread `highlight` into the markdown branch too, so the SAME hook
+      // colors fenced code blocks inside `.md` notes and whole code notes
+      // alike (issue #74 item 3). A surface that highlights markdown fences a
+      // different way (e.g. `rehypePlugins={[rehypeHighlight]}`) just omits
+      // `highlight` and passes `rehypePlugins` — the markdown `code` override
+      // only activates when `highlight` is set, so the two paths never collide.
+      const props: MarkdownViewProps = { content, className, highlight, ...markdownProps };
       return overrides?.markdown ? <>{overrides.markdown(props)}</> : <MarkdownView {...props} />;
     }
     case "csv":
