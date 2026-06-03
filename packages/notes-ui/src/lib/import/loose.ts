@@ -45,6 +45,10 @@ export async function parseLooseMarkdown(files: File[]): Promise<ParsedImport> {
     notes,
     errors,
     tags: collectTagSet(notes),
+    // Loose-markdown drops don't carry attachments — the picker accepts
+    // `.md`/`.markdown` only, and there's no archive to resolve embeds
+    // against. Attachment carry-across is an Obsidian-zip feature.
+    attachments: [],
   };
 }
 

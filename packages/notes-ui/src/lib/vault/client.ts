@@ -76,6 +76,13 @@ export type { CreateNotePayload, UpdateNotePayload, UploadProgress, StorageUploa
 // add-attachment flow surfaces them in error messages); app-client's
 // VaultClient leaves enforcement to the vault.
 export const STORAGE_MAX_BYTES = 100 * 1024 * 1024;
+// MUST mirror vault's server-side `ALLOWED_EXTENSIONS` (routes.ts) — this is
+// the client-side pre-flight so the editor + importer reject a file before
+// the round-trip rather than surfacing a server 400. `.pdf` + `.mp4` were
+// added server-side (knowledge-vault content + mobile capture) but the
+// client list had drifted out of sync, so a PDF paste or PDF-attachment
+// import was wrongly rejected client-side. `.svg`/`.html` stay OUT — the
+// server refuses them as XSS vectors.
 export const STORAGE_ALLOWED_EXTENSIONS = new Set([
   "wav",
   "mp3",
@@ -87,6 +94,8 @@ export const STORAGE_ALLOWED_EXTENSIONS = new Set([
   "jpeg",
   "gif",
   "webp",
+  "pdf",
+  "mp4",
 ]);
 
 export type VaultClientOptions = BaseVaultClientOptions;

@@ -1,7 +1,13 @@
 import { useLinkAttachment, useUploadStorageFile } from "@/lib/vault";
-import { STORAGE_ALLOWED_EXTENSIONS, STORAGE_MAX_BYTES } from "@/lib/vault/client";
+import { fileExt, markdownForUpload, validateFile } from "@/lib/vault/attachment-upload";
 import type { StorageUploadResult } from "@/lib/vault/client";
 import { useCallback, useRef, useState } from "react";
+
+// Re-exported from the shared `attachment-upload` module so existing
+// import sites (`@/components/useAttachmentUploader`) keep working. The
+// upload+link+served-markdown logic is shared with the Obsidian importer
+// there — single source of truth, no copy-paste.
+export { fileExt, markdownForUpload, validateFile };
 
 export type UploadStatus = "uploading" | "linking" | "done" | "error" | "cancelled";
 
@@ -15,34 +21,6 @@ export interface UploadEntry {
   error?: string;
   result?: StorageUploadResult;
   abort: () => void;
-}
-
-export function fileExt(filename: string): string {
-  const i = filename.lastIndexOf(".");
-  return i >= 0 ? filename.slice(i + 1).toLowerCase() : "";
-}
-
-export function validateFile(file: File): string | null {
-  if (file.size > STORAGE_MAX_BYTES) {
-    return `${file.name} is too large (${formatMB(file.size)}). Max: 100 MB.`;
-  }
-  const ext = fileExt(file.name);
-  if (!STORAGE_ALLOWED_EXTENSIONS.has(ext)) {
-    return `${file.name}: .${ext || "?"} is not in the vault allowlist.`;
-  }
-  return null;
-}
-
-function formatMB(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function markdownForUpload(result: StorageUploadResult, filename: string): string {
-  const url = `/api/storage/${result.path}`;
-  if (result.mimeType.startsWith("image/")) {
-    return `![${filename}](${url})\n`;
-  }
-  return `[${filename}](${url})\n`;
 }
 
 interface UploaderArgs {
