@@ -1,10 +1,7 @@
 # Changelog — @openparachute/pebble-config
 
-## 0.1.0
 
-- First npm release — installed by default by surface-host's bootstrap.
-
-## Unreleased
+First npm release — installed by default by surface-host's bootstrap.
 
 - **Fix (#81): authenticate via the standard runtime DCR flow.** The connect
   flow now self-registers a fresh OAuth client at runtime from the browser via

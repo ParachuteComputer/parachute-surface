@@ -59,6 +59,9 @@ on:
       # Notes-ui release tags
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Pebble-config release tags
+      - 'pebble-config-v[0-9]+.[0-9]+.[0-9]+'
+      - 'pebble-config-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   # Don't let two releases race on the same tag.
@@ -90,8 +93,8 @@ jobs:
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client-, render-, and notes-ui- tags.
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') }}
+    # App-only: skip on client-, render-, notes-ui-, and pebble-config- tags.
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'pebble-config-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -308,6 +311,7 @@ jobs:
           fi
           echo "publishing @openparachute/notes-ui with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
+
   publish-pebble-config-npm:
     name: publish @openparachute/pebble-config to npm
     needs: test
@@ -330,7 +334,7 @@ jobs:
         # Workspace install at root brings in notes-ui's deps.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against notes-ui's package.json; tag prefix is `pebble-config-v...`.
+        # Pin against pebble-config's package.json; tag prefix is `pebble-config-v...`.
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/pebble-config/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#pebble-config-v}"

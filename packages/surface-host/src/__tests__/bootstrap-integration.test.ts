@@ -124,6 +124,8 @@ describe("serve ↔ bootstrap integration", () => {
       // The UI is on disk + in-state.
       expect(fs.existsSync(path.join(uisDir, "notes", "dist", "index.html"))).toBe(true);
       expect(h.state.registeredUis.find((u) => u.meta.name === "notes")).toBeDefined();
+      expect(fs.existsSync(path.join(uisDir, "pebble-config", "dist", "index.html"))).toBe(true);
+      expect(h.state.registeredUis.find((u) => u.meta.name === "pebble-config")).toBeDefined();
       // Healthz reports the bootstrapped UI.
       const url = `http://127.0.0.1:${h.server.port}`;
       const r = await fetch(`${url}/surface/healthz`);
