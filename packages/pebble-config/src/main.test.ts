@@ -9,6 +9,7 @@ import {
   parseCurrent,
   parseQuickLogsText,
   quickLogsToText,
+  validateReturnTo,
 } from "./main.ts";
 
 describe("parseCurrent", () => {
@@ -105,10 +106,17 @@ describe("buildReturnUrl", () => {
     expect(JSON.parse(decodeURIComponent(encoded))).toEqual(payload);
   });
 
-  test("works with an https return_to and querystring marker", () => {
-    const url = buildReturnUrl("https://app.example/cfg?p=", payload);
-    const encoded = url.slice("https://app.example/cfg?p=".length);
-    expect(JSON.parse(decodeURIComponent(encoded))).toEqual(payload);
+});
+
+describe("validateReturnTo", () => {
+  test("allows the pebblejs scheme through", () => {
+    expect(validateReturnTo("pebblejs://close#")).toBe("pebblejs://close#");
+  });
+
+  test("collapses https / garbage / null to the default — the payload carries credentials", () => {
+    expect(validateReturnTo("https://evil.example/steal?p=")).toBe("pebblejs://close#");
+    expect(validateReturnTo("close#")).toBe("pebblejs://close#");
+    expect(validateReturnTo(null)).toBe("pebblejs://close#");
   });
 });
 

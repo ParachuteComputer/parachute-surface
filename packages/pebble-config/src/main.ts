@@ -140,6 +140,24 @@ export function buildReturnUrl(returnTo: string, payload: PebblePayload): string
   return returnTo + encodeURIComponent(JSON.stringify(payload));
 }
 
+/**
+ * Allowlist the final navigation target. The payload carries a vault write
+ * token + a rotating refresh token, so handing it to an arbitrary URL would be
+ * an open redirect with credentials attached. Only the Pebble app's
+ * webview-close scheme is a legitimate consumer; anything else collapses to
+ * the default.
+ */
+export function validateReturnTo(raw: string | null): string {
+  if (raw) {
+    try {
+      if (new URL(raw).protocol === "pebblejs:") return raw;
+    } catch {
+      // not a parseable URL — fall through to the default
+    }
+  }
+  return DEFAULT_RETURN_TO;
+}
+
 // ---------------------------------------------------------------------------
 // DOM helpers (kept dependency-free on purpose — see meta.json `pwa: false`)
 // ---------------------------------------------------------------------------
@@ -196,7 +214,7 @@ export async function boot(): Promise<void> {
 
   // Fresh visit — capture return_to + current from the query and stash them so
   // they survive the OAuth redirect round-trip.
-  const returnTo = url.searchParams.get("return_to") ?? DEFAULT_RETURN_TO;
+  const returnTo = validateReturnTo(url.searchParams.get("return_to"));
   const current = parseCurrent(url.searchParams.get("current"));
   sessionStorage.setItem(SS_RETURN_TO, returnTo);
   sessionStorage.setItem(SS_CURRENT, JSON.stringify(current));
@@ -345,7 +363,7 @@ async function save(oauth: ParachuteOAuth, hubUrl: string, vault: string): Promi
   }
 
   const quicklogs = parseQuickLogsText(el<"textarea">("quicklogs").value);
-  const returnTo = sessionStorage.getItem(SS_RETURN_TO) ?? DEFAULT_RETURN_TO;
+  const returnTo = validateReturnTo(sessionStorage.getItem(SS_RETURN_TO));
 
   const payload: PebblePayload = {
     hub: hubUrl,

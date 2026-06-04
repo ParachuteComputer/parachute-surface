@@ -1,7 +1,7 @@
 {
   "name": "@openparachute/pebble-config",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "description": "Pebble watch config surface — a tiny hosted OAuth page that lets the Pebble app connect to a Parachute vault via the hub's OAuth 2.1 + PKCE flow instead of pasted tokens.",
   "license": "AGPL-3.0",
