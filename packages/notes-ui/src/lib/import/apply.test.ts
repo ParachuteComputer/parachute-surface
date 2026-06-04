@@ -1,4 +1,4 @@
-import { type VaultClient, VaultConflictError } from "@/lib/vault/client";
+import { type VaultClient, VaultConflictError, VaultTargetExistsError } from "@/lib/vault/client";
 import { describe, expect, it, vi } from "vitest";
 import { applyImport } from "./apply";
 import type { CollectedAttachment, ParsedImport, ParsedNote } from "./types";
@@ -221,6 +221,20 @@ describe("applyImport", () => {
     expect(links.some((l) => l.path === "2026/upload-0.png")).toBe(true);
     const row = report.attachmentOutcomes.find((o) => o.sourcePath === "loose/orphan.png");
     expect(row?.status === "uploaded" && row.references).toBe(1);
+  });
+
+  it("also treats VaultTargetExistsError as a collision when retrying the index note (#66 N5)", async () => {
+    const { client, created } = makeClient();
+    (client.createNote as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      throw new VaultTargetExistsError("Imported files");
+    });
+    await applyImport({
+      client,
+      parsed: parsed({
+        attachments: [attachment("loose/orphan.png", "image")],
+      }),
+    });
+    expect(created.find((c) => c.path === "Imported files 2")).toBeTruthy();
   });
 
   it("produces a complete report: notes + attachments + skips all accounted for", async () => {

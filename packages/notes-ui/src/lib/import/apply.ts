@@ -245,7 +245,7 @@ export async function applyImport(opts: ApplyImportOptions): Promise<ImportRepor
         });
       }
     } else {
-      await gatherLooseFiles(client, loose, attachmentOutcomes, opts.concurrency);
+      await gatherLooseFiles(client, loose, attachmentOutcomes, opts.concurrency, signal);
     }
   }
 
@@ -321,6 +321,7 @@ async function gatherLooseFiles(
   loose: UploadedRecord[],
   outcomes: AttachmentOutcome[],
   concurrency: number | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   const lines = [
     "# Imported files",
@@ -342,6 +343,7 @@ async function gatherLooseFiles(
   // index note is created; a real error (not a collision) stops the loop.
   let noteId: string | null = null;
   for (let attempt = 1; attempt <= MAX_INDEX_NOTE_ATTEMPTS && !noteId; attempt++) {
+    if (signal?.aborted) break; // cancelled mid-retry — report files as unlinked
     const path = attempt === 1 ? IMPORTED_FILES_PATH : `${IMPORTED_FILES_PATH} ${attempt}`;
     const indexNote: ParsedNote = {
       sourcePath: path,
