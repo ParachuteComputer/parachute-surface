@@ -1,5 +1,21 @@
 # Changelog — @openparachute/pebble-config
 
+## Unreleased
+
+- **Fix (#81): authenticate via the standard runtime DCR flow.** The connect
+  flow now self-registers a fresh OAuth client at runtime from the browser via
+  RFC 7591 Dynamic Client Registration (`discoverAuthServer` + `registerClient`
+  from `@openparachute/surface-client`) — the same path Notes / My Vault UI /
+  Paraclaw use — with the redirect URI built from the page's OWN origin and the
+  standard `/oauth/callback` (slash) path. Replaces the previous dependency on
+  the host's add-time `GET /surface/pebble-config/oauth-client` record, whose
+  `redirect_uris` were pinned to the daemon's loopback origin and used a
+  divergent `oauth-callback` (dash) path — which the hub's (correct) exact-match
+  redirect validation rejected for any remotely-served install. The returned
+  `client_id` in the payload is now the runtime-registered id; the watch's
+  refresh story is unchanged (hub's refresh path is identical for any approved
+  public client).
+
 ## 0.1.0
 
 Initial release.
