@@ -238,7 +238,9 @@ function scopeFor(vault: string): string {
  * match redirect validation passes. Built from `window.location.origin`, never
  * the add-time loopback origin.
  */
-export function redirectUriFor(origin: string = window.location.origin): string {
+export function redirectUriFor(
+  origin: string = typeof window !== "undefined" ? window.location.origin : "",
+): string {
   const mount = getMountBase() ?? DEFAULT_MOUNT_BASE;
   return `${origin.replace(/\/$/, "")}${mount}/oauth/callback`;
 }
