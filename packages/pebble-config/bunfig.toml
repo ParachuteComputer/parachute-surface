@@ -1,0 +1,6 @@
+# Scope `bun test` (no args) to this package's src/ — same discipline as
+# surface-client. Without this, running `bun test` from the package root
+# globs surrounding workspace dirs.
+
+[test]
+root = "src"

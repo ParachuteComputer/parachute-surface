@@ -60,6 +60,18 @@
         "workbox-window": "^7.4.0",
       },
     },
+    "packages/pebble-config": {
+      "name": "@openparachute/pebble-config",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openparachute/surface-client": "^0.2.0",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^1.9.4",
+        "@types/bun": "latest",
+        "typescript": "^5",
+      },
+    },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
       "version": "0.2.0",
@@ -520,6 +532,8 @@
     "@marijn/find-cluster-break": ["@marijn/find-cluster-break@1.0.2", "", {}, "sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g=="],
 
     "@openparachute/notes-ui": ["@openparachute/notes-ui@workspace:packages/notes-ui"],
+
+    "@openparachute/pebble-config": ["@openparachute/pebble-config@workspace:packages/pebble-config"],
 
     "@openparachute/scope-guard": ["@openparachute/scope-guard@0.4.0-rc.1", "", { "dependencies": { "jose": "^6.2.2" }, "peerDependencies": { "typescript": "^5" } }, "sha512-tN0vMTIgG5OfbbDnFHcXxhH3ULrBFM5Yzc9Xp2f81LGHc4xmFGabYA8gTAk9eNcY810k2zEaOTKypYsRNcxC0g=="],
 

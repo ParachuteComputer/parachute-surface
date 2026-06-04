@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Connect the Pebble watch app to your Parachute vault — runs the hub's OAuth 2.1 + PKCE flow so the watch never holds a pasted token."
+    />
+    <title>Pebble Config — Parachute</title>
+    <link rel="icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <h1>Pebble&nbsp;·&nbsp;Parachute</h1>
+      <p class="lead">
+        Connect your Pebble watch to a Parachute vault. The watch never sees your
+        password — it gets a scoped vault token issued by your hub.
+      </p>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <div id="view"></div>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
