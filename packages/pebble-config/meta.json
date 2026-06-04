@@ -1,0 +1,29 @@
+{
+  "$schema": "https://parachute.computer/schemas/app-ui-meta.json",
+  "name": "pebble-config",
+  "displayName": "Pebble Config",
+  "tagline": "Connect the Pebble watch app to your vault with real OAuth.",
+  "version": "0.1.0",
+  "path": "/surface/pebble-config",
+  "iconUrl": "icon.svg",
+  "scopes_required": ["vault:*:write"],
+  "pwa": false,
+  "required_schema": {
+    "tags": [
+      {
+        "name": "capture",
+        "description": "Notes captured directly by the user (text or voice)."
+      },
+      {
+        "name": "capture/text",
+        "description": "Text capture.",
+        "parent_names": ["capture"]
+      },
+      {
+        "name": "capture/voice",
+        "description": "Voice capture.",
+        "parent_names": ["capture"]
+      }
+    ]
+  }
+}
