@@ -1,4 +1,4 @@
-import type { VaultClient } from "@/lib/vault/client";
+import { type VaultClient, VaultConflictError, VaultTargetExistsError } from "@/lib/vault/client";
 import { describe, expect, it, vi } from "vitest";
 import { applyImport } from "./apply";
 import type { CollectedAttachment, ParsedImport, ParsedNote } from "./types";
@@ -115,7 +115,11 @@ describe("applyImport", () => {
     // Created as a note with the text body verbatim.
     const txtNote = created.find((c) => String(c.content).includes("hello world"));
     expect(txtNote).toBeTruthy();
-    expect(report.attachmentsUploaded).toBe(1); // counted as "brought across"
+    // Counted as a data-file-note, NOT as a storage attachment (#66 N2).
+    expect(report.filesImportedAsNotes).toBe(1);
+    expect(report.attachmentsUploaded).toBe(0);
+    const row = report.attachmentOutcomes.find((o) => o.sourcePath === "notes.txt");
+    expect(row?.status === "uploaded" && row.asNote).toBe(true);
   });
 
   it("fences json/csv/yaml content when importing as a note", async () => {
@@ -181,6 +185,58 @@ describe("applyImport", () => {
     expect(report.attachmentsErrored).toBe(1);
   });
 
+  it("does not count a failed link in the attachment's references (#66 N1)", async () => {
+    const { client } = makeClient();
+    (client.linkAttachment as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("link 500"),
+    );
+    const report = await applyImport({
+      client,
+      parsed: parsed({
+        notes: [note({ sourcePath: "N.md", path: "N", content: "![[pic.png]]" })],
+        attachments: [attachment("pic.png", "image")],
+      }),
+    });
+    // Upload + rewrite still succeeded — only the link failed.
+    const row = report.attachmentOutcomes.find((o) => o.sourcePath === "pic.png");
+    expect(row?.status).toBe("uploaded");
+    if (row?.status === "uploaded") expect(row.references).toBe(0);
+  });
+
+  it("retries the loose-files index note with a numbered suffix on re-import collision (#66 N5)", async () => {
+    const { client, created, links } = makeClient();
+    // First import already left an "Imported files" note → the create 409s.
+    (client.createNote as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      throw new VaultConflictError({ message: "target exists" });
+    });
+    const report = await applyImport({
+      client,
+      parsed: parsed({
+        attachments: [attachment("loose/orphan.png", "image")],
+      }),
+    });
+    // The retry landed on a suffixed path, and the loose file is linked to it.
+    const indexNote = created.find((c) => c.path === "Imported files 2");
+    expect(indexNote).toBeTruthy();
+    expect(links.some((l) => l.path === "2026/upload-0.png")).toBe(true);
+    const row = report.attachmentOutcomes.find((o) => o.sourcePath === "loose/orphan.png");
+    expect(row?.status === "uploaded" && row.references).toBe(1);
+  });
+
+  it("also treats VaultTargetExistsError as a collision when retrying the index note (#66 N5)", async () => {
+    const { client, created } = makeClient();
+    (client.createNote as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      throw new VaultTargetExistsError("Imported files");
+    });
+    await applyImport({
+      client,
+      parsed: parsed({
+        attachments: [attachment("loose/orphan.png", "image")],
+      }),
+    });
+    expect(created.find((c) => c.path === "Imported files 2")).toBeTruthy();
+  });
+
   it("produces a complete report: notes + attachments + skips all accounted for", async () => {
     const { client } = makeClient();
     const report = await applyImport({
@@ -195,8 +251,9 @@ describe("applyImport", () => {
         ],
       }),
     });
-    // pic + loose + txt all "brought across" (uploaded count); weird skipped.
-    expect(report.attachmentsUploaded).toBe(3);
+    // pic + loose are storage attachments; txt is a data-file-note; weird skipped.
+    expect(report.attachmentsUploaded).toBe(2);
+    expect(report.filesImportedAsNotes).toBe(1);
     expect(report.attachmentsSkipped).toBe(1);
     expect(report.attachmentsErrored).toBe(0);
     // Every attachment appears in the report — none vanished.

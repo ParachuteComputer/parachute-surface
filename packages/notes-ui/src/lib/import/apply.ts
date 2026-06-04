@@ -55,6 +55,11 @@ export interface ApplyImportOptions {
 
 /** Title/path used for the index note that gathers loose attachments. */
 const IMPORTED_FILES_PATH = "Imported files";
+/**
+ * How many numbered suffixes to try when the index-note path collides with
+ * one left by an earlier import ("Imported files 2", "Imported files 3", …).
+ */
+const MAX_INDEX_NOTE_ATTEMPTS = 20;
 
 interface UploadedRecord {
   attachment: CollectedAttachment;
@@ -169,8 +174,8 @@ export async function applyImport(opts: ApplyImportOptions): Promise<ImportRepor
         references++;
       } catch {
         // A failed link doesn't lose the blob — it's uploaded AND the
-        // served-markdown rewrite still renders it. Best-effort link only.
-        references++;
+        // served-markdown rewrite still renders it. Best-effort link only;
+        // the report's `references` counts SUCCESSFUL links, so no bump.
       }
     }
     attachmentOutcomes.push({
@@ -202,6 +207,7 @@ export async function applyImport(opts: ApplyImportOptions): Promise<ImportRepor
           sourcePath: att.sourcePath,
           storagePath: `note:${outcome.noteId}`,
           references: 1,
+          asNote: true,
         });
       } else {
         attachmentOutcomes.push({
@@ -239,7 +245,7 @@ export async function applyImport(opts: ApplyImportOptions): Promise<ImportRepor
         });
       }
     } else {
-      await gatherLooseFiles(client, loose, attachmentOutcomes, opts.concurrency);
+      await gatherLooseFiles(client, loose, attachmentOutcomes, opts.concurrency, signal);
     }
   }
 
@@ -315,6 +321,7 @@ async function gatherLooseFiles(
   loose: UploadedRecord[],
   outcomes: AttachmentOutcome[],
   concurrency: number | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   const lines = [
     "# Imported files",
@@ -330,20 +337,30 @@ async function gatherLooseFiles(
         : `- [${rec.attachment.filename}](${url})`,
     );
   }
-  const indexNote: ParsedNote = {
-    sourcePath: IMPORTED_FILES_PATH,
-    path: IMPORTED_FILES_PATH,
-    content: `${lines.join("\n")}\n`,
-    tags: ["imported-file"],
-    metadata: {},
-  };
-  const report = await runImport({
-    client,
-    notes: [indexNote],
-    ...(concurrency !== undefined ? { concurrency } : {}),
-  });
-  const created = report.outcomes.find((o) => o.status === "created");
-  const noteId = created?.status === "created" ? created.noteId : null;
+  // A re-import of the same vault collides on the fixed path (the runner
+  // routes the 409 to "skipped"), which used to strand that import's loose
+  // files with no note link. Retry with numbered suffixes until a FRESH
+  // index note is created; a real error (not a collision) stops the loop.
+  let noteId: string | null = null;
+  for (let attempt = 1; attempt <= MAX_INDEX_NOTE_ATTEMPTS && !noteId; attempt++) {
+    if (signal?.aborted) break; // cancelled mid-retry — report files as unlinked
+    const path = attempt === 1 ? IMPORTED_FILES_PATH : `${IMPORTED_FILES_PATH} ${attempt}`;
+    const indexNote: ParsedNote = {
+      sourcePath: path,
+      path,
+      content: `${lines.join("\n")}\n`,
+      tags: ["imported-file"],
+      metadata: {},
+    };
+    const report = await runImport({
+      client,
+      notes: [indexNote],
+      ...(concurrency !== undefined ? { concurrency } : {}),
+    });
+    const outcome = report.outcomes[0];
+    if (outcome?.status === "created") noteId = outcome.noteId;
+    else if (outcome?.status !== "skipped") break; // errored — retrying won't help
+  }
   for (const rec of loose) {
     if (noteId) {
       try {
@@ -370,16 +387,22 @@ function mergeReport(
   attachmentOutcomes: AttachmentOutcome[],
 ): ImportReport {
   let attachmentsUploaded = 0;
+  let filesImportedAsNotes = 0;
   let attachmentsSkipped = 0;
   let attachmentsErrored = 0;
   for (const o of attachmentOutcomes) {
-    if (o.status === "uploaded") attachmentsUploaded++;
-    else if (o.status === "skipped") attachmentsSkipped++;
+    // Data files folded into notes are "brought across" but NOT storage
+    // attachments — counting them as such made the done-stage tally lie.
+    if (o.status === "uploaded") {
+      if (o.asNote) filesImportedAsNotes++;
+      else attachmentsUploaded++;
+    } else if (o.status === "skipped") attachmentsSkipped++;
     else attachmentsErrored++;
   }
   return {
     ...noteReport,
     attachmentsUploaded,
+    filesImportedAsNotes,
     attachmentsSkipped,
     attachmentsErrored,
     attachmentOutcomes,
