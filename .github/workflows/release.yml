@@ -1,11 +1,12 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes FOUR packages on different tag namespaces:
+# This workflow publishes FIVE packages on different tag namespaces:
 #
 #   - @openparachute/surface      ← tag prefix `v...`          (from packages/surface-host)
 #   - @openparachute/surface-client ← tag prefix `client-v...`   (from packages/surface-client)
 #   - @openparachute/surface-render ← tag prefix `render-v...`   (from packages/surface-render)
 #   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
+#   - @openparachute/pebble-config ← tag prefix `pebble-config-v...` (from packages/pebble-config)
 #
 # All packages have npm Trusted Publisher rules pointing at this workflow
 # file. Jobs gate on the tag prefix so only one package publishes per tag
@@ -306,4 +307,47 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/notes-ui with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+  publish-pebble-config-npm:
+    name: publish @openparachute/pebble-config to npm
+    needs: test
+    # pebble-config-only: skip on all other tag prefixes.
+    if: ${{ startsWith(github.ref_name, 'pebble-config-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root brings in notes-ui's deps.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against notes-ui's package.json; tag prefix is `pebble-config-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/pebble-config/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#pebble-config-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/pebble-config/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: publish
+        # pebble-config's package.json has `prepublishOnly: bun run build`, which
+        # runs the Bun.build script to produce `dist/` (the published artifact).
+        # `npm publish` triggers prepublishOnly, so the build happens just-in-time.
+        working-directory: packages/pebble-config
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/pebble-config with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance

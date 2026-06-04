@@ -156,7 +156,7 @@ describe("resolveConfigPath / resolveUisDir", () => {
 describe("Phase 2.1 config — bootstrap_default_apps + auto_provision_required_schema", () => {
   test("defaults: bootstrap enabled with notes-ui, auto_provision true", () => {
     expect(DEFAULTS.bootstrap_default_apps.enabled).toBe(true);
-    expect(DEFAULTS.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+    expect(DEFAULTS.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui", "@openparachute/pebble-config"]);
     expect(DEFAULTS.auto_provision_required_schema).toBe(true);
   });
 
@@ -164,7 +164,7 @@ describe("Phase 2.1 config — bootstrap_default_apps + auto_provision_required_
     const cfg = loadConfig({ configPath, logger: silentLogger });
     expect(cfg.bootstrap_default_apps).toEqual({
       enabled: true,
-      apps: ["@openparachute/notes-ui"],
+      apps: ["@openparachute/notes-ui", "@openparachute/pebble-config"],
     });
     expect(cfg.auto_provision_required_schema).toBe(true);
   });
@@ -193,7 +193,7 @@ describe("Phase 2.1 config — bootstrap_default_apps + auto_provision_required_
     fs.writeFileSync(configPath, JSON.stringify({ bootstrap_default_apps: { enabled: false } }));
     const cfg = loadConfig({ configPath, logger: silentLogger });
     expect(cfg.bootstrap_default_apps.enabled).toBe(false);
-    expect(cfg.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+    expect(cfg.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui", "@openparachute/pebble-config"]);
   });
 
   test("bootstrap_default_apps wrong type → ConfigError", () => {
@@ -216,6 +216,6 @@ describe("Phase 2.1 config — bootstrap_default_apps + auto_provision_required_
     const cfg = loadConfig({ configPath, logger: silentLogger });
     cfg.bootstrap_default_apps.apps.push("rogue");
     const cfg2 = loadConfig({ configPath, logger: silentLogger });
-    expect(cfg2.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui"]);
+    expect(cfg2.bootstrap_default_apps.apps).toEqual(["@openparachute/notes-ui", "@openparachute/pebble-config"]);
   });
 });

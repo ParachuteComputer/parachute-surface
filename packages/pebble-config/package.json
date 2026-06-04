@@ -1,21 +1,28 @@
 {
   "name": "@openparachute/pebble-config",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
-  "description": "Pebble watch config surface — a tiny hosted OAuth page that lets the Pebble app connect to a Parachute vault via the hub's OAuth 2.1 + PKCE flow instead of pasted tokens.",
+  "description": "Pebble watch config surface \u2014 a tiny hosted OAuth page that lets the Pebble app connect to a Parachute vault via the hub's OAuth 2.1 + PKCE flow instead of pasted tokens.",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/ParachuteComputer/parachute-surface.git",
     "directory": "packages/pebble-config"
   },
-  "files": ["dist", "meta.json", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "meta.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "bun run scripts/build.ts",
     "test": "bun test src/",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "@openparachute/surface-client": "^0.2.0"

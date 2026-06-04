@@ -66,22 +66,26 @@ function makeNotesUiSpawn(opts: { metaName?: string; metaPath?: string } = {}): 
     }
     // The npm-fetch staging dir doesn't need a real install — just create
     // the synthetic shape it expects: node_modules/<pkg>/dist/index.html
-    // + node_modules/<pkg>/meta.json
+    // + node_modules/<pkg>/meta.json. Derive the package from argv so the
+    // mock serves every default app (notes-ui, pebble-config, ...).
+    const requested = (argv[argv.length - 1] ?? "").replace(/@[^/]*$/, "");
+    const short = requested.split("/").pop() ?? "notes-ui";
+    const appName = short === "notes-ui" ? "notes" : short;
     const pkgScopeDir = path.join(cwd, "node_modules", "@openparachute");
     fs.mkdirSync(pkgScopeDir, { recursive: true });
-    const pkgDir = path.join(pkgScopeDir, "notes-ui");
+    const pkgDir = path.join(pkgScopeDir, short);
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.mkdirSync(path.join(pkgDir, "dist"), { recursive: true });
     fs.writeFileSync(
       path.join(pkgDir, "dist", "index.html"),
-      "<!doctype html><html><body>notes</body></html>",
+      `<!doctype html><html><body>${appName}</body></html>`,
     );
     fs.writeFileSync(
       path.join(pkgDir, "meta.json"),
       JSON.stringify({
-        name: opts.metaName ?? "notes",
+        name: opts.metaName ?? appName,
         displayName: "Notes",
-        path: opts.metaPath ?? "/surface/notes",
+        path: opts.metaPath ?? `/surface/${appName}`,
         version: "0.1.2",
         scopes_required: ["vault:*:read", "vault:*:write"],
         pwa: false,
@@ -100,7 +104,7 @@ const failingSpawn: NpmSpawnFn = async () => ({
 });
 
 describe("serve ↔ bootstrap integration", () => {
-  test("fresh uis/ + default config → installs notes-ui", async () => {
+  test("fresh uis/ + default config → installs the default apps", async () => {
     // Default config is in-process — no config.json on disk means
     // loadConfig returns DEFAULTS which has bootstrap enabled.
     const h = serve({
@@ -115,7 +119,7 @@ describe("serve ↔ bootstrap integration", () => {
       // The bootstrap promise resolves after the add completes.
       const result = await h.bootstrap;
       expect(result).toBeDefined();
-      expect(result!.bootstrapped).toEqual(["@openparachute/notes-ui"]);
+      expect(result!.bootstrapped).toEqual(["@openparachute/notes-ui", "@openparachute/pebble-config"]);
       expect(result!.failed).toEqual([]);
       // The UI is on disk + in-state.
       expect(fs.existsSync(path.join(uisDir, "notes", "dist", "index.html"))).toBe(true);
@@ -124,7 +128,7 @@ describe("serve ↔ bootstrap integration", () => {
       const url = `http://127.0.0.1:${h.server.port}`;
       const r = await fetch(`${url}/surface/healthz`);
       const body = (await r.json()) as { uis: number };
-      expect(body.uis).toBe(1);
+      expect(body.uis).toBe(2);
       // Notes mount serves index.html.
       const r2 = await fetch(`${url}/surface/notes/`);
       expect(r2.status).toBe(200);
@@ -251,8 +255,9 @@ describe("serve ↔ bootstrap integration", () => {
     try {
       const result = await h.bootstrap;
       expect(result!.bootstrapped).toEqual([]);
-      expect(result!.failed.length).toBe(1);
+      expect(result!.failed.length).toBe(2);
       expect(result!.failed[0]!.pkg).toBe("@openparachute/notes-ui");
+      expect(result!.failed[1]!.pkg).toBe("@openparachute/pebble-config");
       // Daemon still healthy + serving healthz.
       const url = `http://127.0.0.1:${h.server.port}`;
       const r = await fetch(`${url}/surface/healthz`);

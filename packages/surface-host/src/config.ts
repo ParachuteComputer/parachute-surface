@@ -93,7 +93,7 @@ export const DEFAULTS: AppConfig = {
   dev_mode_allowed: true,
   bootstrap_default_apps: {
     enabled: true,
-    apps: ["@openparachute/notes-ui"],
+    apps: ["@openparachute/notes-ui", "@openparachute/pebble-config"],
   },
   auto_provision_required_schema: true,
 };
