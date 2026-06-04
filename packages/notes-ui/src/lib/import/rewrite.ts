@@ -29,6 +29,12 @@
  * Only references whose target is in `pathByFilename` (the storage paths of
  * attachments we actually uploaded) get rewritten; unresolved or
  * non-uploaded references pass through unchanged.
+ *
+ * KNOWN LIMITATION (surface#66 N4): the rewrite is NOT code-fence-aware. An
+ * `![[file.png]]` shown as an *example* inside a fenced code block will be
+ * rewritten if `file.png` matches an uploaded attachment. Rare in practice;
+ * the result is a broken display example, never data loss. Guarding it means
+ * fence-tracking the scan — do that if a real vault gets bitten.
  */
 
 /** A resolved attachment: its served storage path + whether it's an image. */

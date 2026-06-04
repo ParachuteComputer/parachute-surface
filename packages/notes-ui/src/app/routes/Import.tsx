@@ -449,6 +449,12 @@ function DoneStage({
                 <span className="text-accent">{report.attachmentsUploaded}</span> attachments
                 imported
               </li>
+              {report.filesImportedAsNotes > 0 ? (
+                <li>
+                  <span className="text-accent">{report.filesImportedAsNotes}</span> data files
+                  imported as notes
+                </li>
+              ) : null}
               {report.attachmentsSkipped > 0 ? (
                 <li>
                   <span className="text-fg-muted">{report.attachmentsSkipped}</span> attachments

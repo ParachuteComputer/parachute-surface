@@ -138,7 +138,18 @@ export interface ImportProgress {
  * link call failed.
  */
 export type AttachmentOutcome =
-  | { status: "uploaded"; sourcePath: string; storagePath: string; references: number }
+  | {
+      status: "uploaded";
+      sourcePath: string;
+      storagePath: string;
+      references: number;
+      /**
+       * True when the file was brought across as its OWN NOTE (text-shaped
+       * files the storage allowlist won't take), not as a storage
+       * attachment. Counted separately in `filesImportedAsNotes`.
+       */
+      asNote?: boolean;
+    }
   | { status: "skipped"; sourcePath: string; reason: string }
   | { status: "errored"; sourcePath: string; reason: string };
 
@@ -147,8 +158,10 @@ export interface ImportReport {
   skipped: number;
   errored: number;
   outcomes: ImportOutcome[];
-  /** Attachments uploaded + linked (storage-eligible files). */
+  /** Attachments uploaded + linked (storage-eligible files only). */
   attachmentsUploaded: number;
+  /** Text-shaped data files (json/csv/yaml/txt/…) imported as their own notes. */
+  filesImportedAsNotes: number;
   /** Attachments not brought across as files (allowlist refusal, etc.). */
   attachmentsSkipped: number;
   /** Attachments that failed upload/link. */
