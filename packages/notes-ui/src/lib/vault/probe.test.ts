@@ -90,6 +90,9 @@ describe("shouldTryLocalHubFallback", () => {
 
   it("is false when the page is already the hub origin (same-origin probe covered it)", () => {
     expect(shouldTryLocalHubFallback("http://127.0.0.1:1939")).toBe(false);
+    // localhost spelling of the same hub — origin-string equality used to
+    // miss this and re-probe the hub via 127.0.0.1 (surface#56).
+    expect(shouldTryLocalHubFallback("http://localhost:1939")).toBe(false);
   });
 
   it("is false for remote origins where reaching loopback would be nonsensical", () => {

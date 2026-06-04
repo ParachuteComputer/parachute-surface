@@ -115,8 +115,11 @@ export function shouldTryLocalHubFallback(pageOrigin: string): boolean {
   }
   const isLoopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (!isLoopback) return false;
-  // Already on the hub origin — same-origin probe already covered it.
-  if (url.origin === LOCAL_HUB_URL) return false;
+  // Already on the hub origin — same-origin probe already covered it. Compare
+  // loopback-hostname + port rather than origin strings so a hub served at
+  // http://localhost:1939 doesn't redundantly re-probe itself via 127.0.0.1
+  // (surface#56): both spellings are the same local hub.
+  if (url.port === "1939" && url.protocol === "http:") return false;
   return true;
 }
 
