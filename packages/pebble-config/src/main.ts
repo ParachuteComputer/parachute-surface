@@ -9,10 +9,18 @@
  *        <hub>/surface/pebble-config/?return_to=<enc>&current=<enc-json>
  *
  *   2. This page (a real browser, secure context) runs the hub's OAuth 2.1 +
- *      PKCE flow via `@openparachute/surface-client`'s `ParachuteOAuth`. Because
- *      the bundle is served by a Parachute surface-host, it uses the HOSTED
- *      bootstrap: `getClientId()` fetches `/surface/pebble-config/oauth-client`
- *      for the DCR-registered client_id — no pasted token anywhere.
+ *      PKCE flow via `@openparachute/surface-client`'s `ParachuteOAuth`. It
+ *      bootstraps its OAuth client identity the SAME way every other Parachute
+ *      surface does (Notes, My Vault UI, Paraclaw): a FRESH runtime browser-side
+ *      RFC 7591 Dynamic Client Registration (DCR) against the hub the page is
+ *      actually served from, with a redirect URI built from the page's OWN
+ *      origin (`discoverAuthServer` + `registerClient` from surface-client). The
+ *      registration carries `credentials: "include"`, so the same-origin
+ *      operator session auto-approves it. This is correct by construction on any
+ *      origin (loopback, tailnet, Cloudflare) — see issue #81. It deliberately
+ *      does NOT use the host's add-time `/surface/pebble-config/oauth-client`
+ *      record, whose redirect_uris are pinned to the daemon's loopback origin and
+ *      a divergent callback path spelling.
  *
  *   3. After auth it shows a quick-logs editor (one `Label | note text` per
  *      line) prefilled from `current.quicklogs`.
@@ -22,7 +30,10 @@
  *        return_to + encodeURIComponent(JSON.stringify(payload))
  *
  *      where payload is the {@link PebblePayload} below. `return_to` defaults to
- *      `pebblejs://close#` when absent.
+ *      `pebblejs://close#` when absent. `client_id` in the payload is the
+ *      runtime DCR-registered id (the watch refreshes the token via
+ *      `POST token_endpoint` with that id — the hub's refresh path is identical
+ *      for any approved public client).
  *
  * The page handles the OAuth callback leg on the same URL: the surface-host
  * SPA-fallback serves this index.html for `/surface/pebble-config/oauth/callback`
@@ -31,15 +42,24 @@
  */
 
 import {
+  type AuthorizationServerMetadata,
   InsecureContextError,
   ParachuteOAuth,
   PendingApprovalError,
   type StoredToken,
   getHubOrigin,
+  getMountBase,
+  registerClient,
 } from "@openparachute/surface-client";
 
-/** Matches the `name` in meta.json + the `<name>` in `/surface/<name>/oauth-client`. */
+/** Matches the `name` in meta.json. */
 const APP_NAME = "pebble-config";
+/** Human-readable client_name surfaced on the hub consent screen (DCR brand). */
+const CLIENT_NAME = "Pebble Config";
+/** Mount this surface defaults to when the host injected no `parachute-mount` meta. */
+const DEFAULT_MOUNT_BASE = `/surface/${APP_NAME}`;
+/** localStorage key prefix for the DCR client_id cache, keyed by issuer. */
+const DCR_CACHE_PREFIX = "pebble_config_dcr:";
 /** Default return target when the Pebble app didn't supply one (closes the webview). */
 const DEFAULT_RETURN_TO = "pebblejs://close#";
 /** sessionStorage keys that survive the OAuth redirect round-trip. */
@@ -193,6 +213,125 @@ function scopeFor(vault: string): string {
   return `vault:${vault}:write`;
 }
 
+// ---------------------------------------------------------------------------
+// Runtime DCR bootstrap (the standard surface auth path — see issue #81)
+//
+// Every Parachute surface (Notes, My Vault UI, Paraclaw) self-registers a fresh
+// OAuth client at runtime from the browser via RFC 7591 Dynamic Client
+// Registration, with a redirect URI built from the PAGE'S OWN origin. Correct
+// by construction on any origin. This mirrors notes-ui's `beginOAuth`
+// (packages/notes-ui/src/lib/vault/oauth.ts): discover the AS, reuse a cached
+// client_id keyed by `(issuer, redirectUri)`, else register (the registration
+// sends `credentials:"include"` so the same-origin operator session
+// auto-approves), then seed it into the driver via `useClientId`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the OAuth redirect URI from the page's ACTUAL origin + live mount path.
+ *
+ * Uses `getMountBase()` (the `parachute-mount` meta the surface-host injects)
+ * so a renamed install (`/surface/<slug>/`) lands back on a URL the SPA-
+ * fallback actually serves, falling back to the canonical `/surface/pebble-config`
+ * mount when the meta is absent (e.g. the unit-test / off-host path). The path
+ * segment is `/oauth/callback` (slash) — the SAME spelling surface-client uses
+ * and the same one `registerClient` binds the client to, so the hub's exact-
+ * match redirect validation passes. Built from `window.location.origin`, never
+ * the add-time loopback origin.
+ */
+export function redirectUriFor(
+  origin: string = typeof window !== "undefined" ? window.location.origin : "",
+): string {
+  const mount = getMountBase() ?? DEFAULT_MOUNT_BASE;
+  return `${origin.replace(/\/$/, "")}${mount}/oauth/callback`;
+}
+
+interface CachedDcrRegistration {
+  clientId: string;
+  redirectUri: string;
+}
+
+/** Minimal localStorage-shaped surface the DCR cache needs (tests inject a stub). */
+export interface DcrCacheStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** Resolve the DCR cache backend — `window.localStorage`, or a no-op fallback. */
+function resolveDcrCache(): DcrCacheStorage {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) return window.localStorage;
+  } catch {
+    // localStorage access can throw in sandboxed contexts.
+  }
+  return { getItem: () => null, setItem: () => {} };
+}
+
+/** Normalize the issuer to a bare (trailing-slash-free) key for the DCR cache. */
+export function dcrCacheKey(issuer: string): string {
+  return DCR_CACHE_PREFIX + issuer.replace(/\/+$/, "");
+}
+
+export function loadCachedClientId(
+  issuer: string,
+  redirectUri: string,
+  storage: DcrCacheStorage = resolveDcrCache(),
+): string | null {
+  try {
+    const raw = storage.getItem(dcrCacheKey(issuer));
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as CachedDcrRegistration;
+    // Re-register when the redirect URI changes — the hub binds client_id to
+    // redirect_uri and would reject the authorize request otherwise.
+    if (cached.redirectUri !== redirectUri) return null;
+    return cached.clientId || null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedClientId(
+  issuer: string,
+  redirectUri: string,
+  clientId: string,
+  storage: DcrCacheStorage = resolveDcrCache(),
+): void {
+  try {
+    storage.setItem(
+      dcrCacheKey(issuer),
+      JSON.stringify({ clientId, redirectUri } satisfies CachedDcrRegistration),
+    );
+  } catch {
+    // best-effort — a sandboxed context without localStorage just re-registers.
+  }
+}
+
+/**
+ * Ensure a runtime DCR client_id is registered for `(issuer, redirectUri)` and
+ * seeded into the driver. Idempotent: reads the localStorage cache first, only
+ * hits the hub's registration endpoint on a cache miss. Returns the metadata +
+ * client_id so callers can also build the authorize/refresh payloads.
+ */
+async function ensureDcrClient(
+  oauth: ParachuteOAuth,
+  redirectUri: string,
+): Promise<{ metadata: AuthorizationServerMetadata; clientId: string }> {
+  const metadata = await oauth.getMetadata();
+  let clientId = loadCachedClientId(metadata.issuer, redirectUri);
+  if (!clientId) {
+    const registration = await registerClient(metadata.registration_endpoint, {
+      clientName: CLIENT_NAME,
+      redirectUri,
+    });
+    clientId = registration.client_id;
+    saveCachedClientId(metadata.issuer, redirectUri, clientId);
+  }
+  // Seed the in-memory cache so beginFlow / handleCallback / the save payload
+  // all use this id and NEVER fetch the hosted `/surface/<name>/oauth-client`
+  // endpoint (whose redirect_uris are loopback-pinned — the issue #81 bug).
+  oauth.useClientId({ client_id: clientId, scopes: [] });
+  return { metadata, clientId };
+}
+
 /**
  * Entry point. Decides between three legs:
  *   - OAuth callback (`?code=&state=` present) → finish exchange, show editor.
@@ -219,7 +358,7 @@ export async function boot(): Promise<void> {
   sessionStorage.setItem(SS_RETURN_TO, returnTo);
   sessionStorage.setItem(SS_CURRENT, JSON.stringify(current));
 
-  renderConnect(oauth, hubUrl, current);
+  renderConnect(oauth, current);
 }
 
 async function completeCallback(
@@ -231,7 +370,16 @@ async function completeCallback(
   const vault = sessionStorage.getItem(SS_VAULT) ?? "default";
   setStatus("Finishing sign-in…");
   try {
-    await oauth.handleCallback(code, state, vault);
+    // The token POST uses the client_id stashed in pending OAuth state by
+    // `beginFlow` (the runtime DCR id from the connect leg), so the exchange
+    // already targets the right client. Seed the driver from THAT exact id —
+    // the one the token was minted under — so the save-payload's later
+    // `getClientId()` returns it. We deliberately do NOT re-run
+    // `ensureDcrClient` here: on a cache miss it would register a *different*
+    // client_id and the watch's refresh (POST token_endpoint with client_id)
+    // would then mismatch the refresh token's bound client (hub invalid_grant).
+    const { pending } = await oauth.handleCallback(code, state, vault);
+    oauth.useClientId({ client_id: pending.clientId, scopes: [] });
   } catch (err) {
     if (err instanceof PendingApprovalError) {
       setStatus(
@@ -245,8 +393,10 @@ async function completeCallback(
   }
 
   // Strip code/state from the URL so a reload doesn't replay the (now spent)
-  // authorization code.
-  window.history.replaceState({}, "", `${window.location.origin}/surface/${APP_NAME}/`);
+  // authorization code. Land back on the live mount root (handles renamed
+  // installs + non-default mounts), not a hardcoded path.
+  const mount = getMountBase() ?? DEFAULT_MOUNT_BASE;
+  window.history.replaceState({}, "", `${window.location.origin}${mount}/`);
 
   const current = readStoredCurrent();
   renderEditor(oauth, hubUrl, vault, current);
@@ -267,7 +417,7 @@ function readStoredCurrent(): CurrentConfig {
 // View: connect
 // ---------------------------------------------------------------------------
 
-function renderConnect(oauth: ParachuteOAuth, hubUrl: string, current: CurrentConfig): void {
+function renderConnect(oauth: ParachuteOAuth, current: CurrentConfig): void {
   const view = el<"div">("view");
   const defaultVault = current.vault ?? "default";
   view.innerHTML = `
@@ -283,16 +433,21 @@ function renderConnect(oauth: ParachuteOAuth, hubUrl: string, current: CurrentCo
   el<"button">("connect").addEventListener("click", () => {
     const vault = el<"input">("vault").value.trim() || "default";
     sessionStorage.setItem(SS_VAULT, vault);
-    void startOAuth(oauth, hubUrl, vault);
+    void startOAuth(oauth, vault);
   });
 }
 
-async function startOAuth(oauth: ParachuteOAuth, hubUrl: string, vault: string): Promise<void> {
+async function startOAuth(oauth: ParachuteOAuth, vault: string): Promise<void> {
   const connectBtn = el<"button">("connect");
   connectBtn.disabled = true;
   setStatus("Connecting to your hub…");
   try {
-    const redirectUri = `${hubUrl}/surface/${APP_NAME}/oauth/callback`;
+    // Standard surface flow: register a fresh OAuth client at runtime against
+    // THIS origin (issue #81), then begin the dance with the matching redirect
+    // URI. `beginFlow` reuses the seeded client_id — it never touches the
+    // loopback-pinned hosted `/oauth-client` record.
+    const redirectUri = redirectUriFor();
+    await ensureDcrClient(oauth, redirectUri);
     const { authorizeUrl } = await oauth.beginFlow({
       vaultName: vault,
       scope: scopeFor(vault),
@@ -349,6 +504,14 @@ async function save(oauth: ParachuteOAuth, hubUrl: string, vault: string): Promi
     return;
   }
 
+  // Resolve the token endpoint + the runtime DCR client_id the watch needs to
+  // refresh the token (`POST token_endpoint` with this client_id — the hub's
+  // refresh path is identical for any approved public client). The driver's
+  // in-memory client cache was seeded by `completeCallback` with the EXACT id
+  // the token was minted under, so `getClientId()` returns it without any
+  // network call (and never falls through to the hosted endpoint). We read the
+  // seeded id rather than re-running DCR so the payload's client_id can never
+  // drift from the one bound to the refresh token.
   let tokenEndpoint: string;
   let clientId: string;
   try {
