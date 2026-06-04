@@ -86,6 +86,8 @@ describe("shouldTryLocalHubFallback", () => {
     expect(shouldTryLocalHubFallback("http://localhost:1942")).toBe(true);
     expect(shouldTryLocalHubFallback("http://127.0.0.1:1942")).toBe(true);
     expect(shouldTryLocalHubFallback("http://localhost:5173")).toBe(true);
+    // https on the hub port is NOT the (http-only) local hub — still fall back.
+    expect(shouldTryLocalHubFallback("https://localhost:1939")).toBe(true);
   });
 
   it("is false when the page is already the hub origin (same-origin probe covered it)", () => {
