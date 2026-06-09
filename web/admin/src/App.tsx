@@ -6,9 +6,11 @@
  *   - `/add`      — Add UI form
  *   - `/info/:n`  — Per-UI detail
  *
- * Auth: every API call carries a Bearer header sourced from
- * `localStorage["parachute_operator_token"]`. The operator pastes this once
- * via the setup banner; Phase 1.3 wires hub-session-based auth instead.
+ * Auth (boundary C4): every API call carries a Bearer resolved by
+ * `lib/api.ts` — a `surface:admin` JWT silently minted from the hub session
+ * cookie (`lib/auth.ts`, in-memory cache, zero paste), falling back to the
+ * operator-pasted token in `localStorage["parachute_operator_token"]` for
+ * direct / no-hub deployments (the `TokenSetup` fallback affordance).
  *
  * Cross-surface navigation off the SPA (back to hub admin, to a hosted UI)
  * uses plain `<a href>` since react-router's `<Link>` resolves against the
@@ -26,12 +28,12 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>
-          <Link to="/" className="brand" aria-label="Parachute · app">
+          <Link to="/" className="brand" aria-label="Parachute · surface">
             <span className="brand-mark">
               <BrandMark size={24} />
             </span>
             <span className="brand-name">Parachute</span>
-            <span className="brand-chip">app</span>
+            <span className="brand-chip">surface</span>
           </Link>
         </h1>
         <nav className="app-nav">
