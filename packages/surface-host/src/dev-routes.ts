@@ -120,7 +120,7 @@ export function routeDev(req: Request, opts: DevRoutesOpts): RouteOutcome {
     return { handled: true, response: handleReloadStream(streamMatch[1]!, opts) };
   }
 
-  // GET /surface/<name>/dev — dev-mode status for one UI (app:read).
+  // GET /surface/<name>/dev — dev-mode status for one UI (surface:read).
   const statusMatch = pathname.match(DEV_STATUS_RE);
   if (statusMatch && method === "GET") {
     return { handled: true, response: handleStatus(req, statusMatch[1]!, opts) };

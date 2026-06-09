@@ -173,4 +173,25 @@ describe("validateWithAudienceFallback", () => {
     ).rejects.toMatchObject({ code: "revoked" });
     expect(tried).toEqual(["surface"]);
   });
+
+  // Fail-fast-on-signature is the make-or-break property of the fallback: a
+  // token that fails verification for any reason OTHER than audience mismatch
+  // must rethrow on the FIRST attempt — retrying against the legacy audience
+  // can't make a forged or expired token valid, and looping would mask the
+  // real failure behind a misleading audience error. Pinned explicitly per
+  // code (signature = forgery, expired = stale) alongside the representative
+  // "revoked" case above.
+  test.each(["signature", "expired"] as const)(
+    "%s failure rethrows on the first attempt — only the canonical audience is tried",
+    async (code) => {
+      const tried: string[] = [];
+      await expect(
+        validateWithAudienceFallback(async (aud) => {
+          tried.push(aud);
+          throw new HubJwtError(code, `hub JWT ${code} failure`);
+        }),
+      ).rejects.toMatchObject({ code });
+      expect(tried).toEqual(["surface"]);
+    },
+  );
 });
