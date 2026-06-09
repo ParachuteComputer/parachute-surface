@@ -3,11 +3,11 @@
  *
  * Routes implemented here:
  *
- *   GET  /surface/list                         — list mounted UIs (app:read or app:admin)
- *   POST /surface/add                          — register a new UI (app:admin)
- *   DELETE /surface/<name>                     — unregister + remove (app:admin)
- *   POST /surface/<name>/reload                — re-scan from disk (app:admin)
- *   GET  /surface/<name>/info                  — full info for one UI (app:read or app:admin)
+ *   GET  /surface/list                         — list mounted UIs (surface:read or surface:admin)
+ *   POST /surface/add                          — register a new UI (surface:admin)
+ *   DELETE /surface/<name>                     — unregister + remove (surface:admin)
+ *   POST /surface/<name>/reload                — re-scan from disk (surface:admin)
+ *   GET  /surface/<name>/info                  — full info for one UI (surface:read or surface:admin)
  *   GET  /surface/<name>/oauth-client          — public client_id discovery (UNAUTHENTICATED)
  *
  * The handlers operate on `AppState` (the same mutable state object the HTTP

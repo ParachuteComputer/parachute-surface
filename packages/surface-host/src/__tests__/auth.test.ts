@@ -4,17 +4,23 @@
  * Coverage:
  *   - extractBearer parses Authorization header correctly
  *   - hasScope is exact-match (no wildcard)
- *   - hasReadAccess accepts app:read OR app:admin
+ *   - hasReadAccess accepts surface:read OR surface:admin
  *   - validateBearer returns 401 on missing token
  *   - validateBearer returns 401 on invalid token (jwks unreachable / bad sig)
  *   - enforceScope returns 403 with insufficient_scope when scope missing
  *   - enforceScope returns scopes object on success (mocked guard)
  *   - getHubOrigin honors PARACHUTE_HUB_ORIGIN, then hubUrl, then loopback
+ *   - validateWithAudienceFallback tries canonical then legacy audience,
+ *     rethrows non-audience errors immediately
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { HubJwtError } from "@openparachute/scope-guard";
 
 import {
+  AUDIENCE,
+  AUDIENCES,
+  LEGACY_AUDIENCE,
   SCOPE_ADMIN,
   SCOPE_READ,
   extractBearer,
@@ -23,6 +29,7 @@ import {
   hasScope,
   resetGuard,
   validateBearer,
+  validateWithAudienceFallback,
 } from "../auth.ts";
 
 const savedEnv = process.env.PARACHUTE_HUB_ORIGIN;
@@ -112,4 +119,79 @@ describe("scope constants", () => {
   test("SCOPE_READ is `surface:read`", () => {
     expect(SCOPE_READ).toBe("surface:read");
   });
+});
+
+describe("audience constants", () => {
+  test("canonical audience is `surface` (what the hub mints — bare module short)", () => {
+    expect(AUDIENCE).toBe("surface");
+  });
+  test("legacy audience `app` stays accepted, canonical tried first", () => {
+    expect(LEGACY_AUDIENCE).toBe("app");
+    expect(AUDIENCES).toEqual(["surface", "app"]);
+  });
+});
+
+describe("validateWithAudienceFallback", () => {
+  test("returns on the first (canonical) audience when it validates", async () => {
+    const tried: string[] = [];
+    const result = await validateWithAudienceFallback(async (aud) => {
+      tried.push(aud);
+      return { scopes: ["surface:admin"] };
+    });
+    expect(result.scopes).toEqual(["surface:admin"]);
+    expect(tried).toEqual(["surface"]);
+  });
+
+  test("falls back to legacy `app` on an audience mismatch", async () => {
+    const tried: string[] = [];
+    const result = await validateWithAudienceFallback(async (aud) => {
+      tried.push(aud);
+      if (aud === "surface") {
+        throw new HubJwtError("audience", 'expected "surface", got "app"');
+      }
+      return { scopes: ["surface:admin"] };
+    });
+    expect(result.scopes).toEqual(["surface:admin"]);
+    expect(tried).toEqual(["surface", "app"]);
+  });
+
+  test("rethrows the audience error when no accepted audience matches", async () => {
+    await expect(
+      validateWithAudienceFallback(async () => {
+        throw new HubJwtError("audience", "mismatch");
+      }),
+    ).rejects.toMatchObject({ code: "audience" });
+  });
+
+  test("non-audience errors rethrow immediately — no fallback retry", async () => {
+    const tried: string[] = [];
+    await expect(
+      validateWithAudienceFallback(async (aud) => {
+        tried.push(aud);
+        throw new HubJwtError("revoked", "token has been revoked");
+      }),
+    ).rejects.toMatchObject({ code: "revoked" });
+    expect(tried).toEqual(["surface"]);
+  });
+
+  // Fail-fast-on-signature is the make-or-break property of the fallback: a
+  // token that fails verification for any reason OTHER than audience mismatch
+  // must rethrow on the FIRST attempt — retrying against the legacy audience
+  // can't make a forged or expired token valid, and looping would mask the
+  // real failure behind a misleading audience error. Pinned explicitly per
+  // code (signature = forgery, expired = stale) alongside the representative
+  // "revoked" case above.
+  test.each(["signature", "expired"] as const)(
+    "%s failure rethrows on the first attempt — only the canonical audience is tried",
+    async (code) => {
+      const tried: string[] = [];
+      await expect(
+        validateWithAudienceFallback(async (aud) => {
+          tried.push(aud);
+          throw new HubJwtError(code, `hub JWT ${code} failure`);
+        }),
+      ).rejects.toMatchObject({ code });
+      expect(tried).toEqual(["surface"]);
+    },
+  );
 });

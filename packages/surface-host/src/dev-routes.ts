@@ -9,10 +9,10 @@
  *                                       exists, same affordance as the
  *                                       OAuth-client discovery endpoint).
  *                                       404 when the UI isn't in dev mode.
- *   POST /surface/<name>/dev/enable       — flip dev mode on (app:admin)
- *   POST /surface/<name>/dev/disable      — flip dev mode off (app:admin)
- *   POST /surface/<name>/dev/trigger      — broadcast a reload event (app:admin)
- *   GET  /surface/dev/list                — UIs in dev mode (app:read)
+ *   POST /surface/<name>/dev/enable       — flip dev mode on (surface:admin)
+ *   POST /surface/<name>/dev/disable      — flip dev mode off (surface:admin)
+ *   POST /surface/<name>/dev/trigger      — broadcast a reload event (surface:admin)
+ *   GET  /surface/dev/list                — UIs in dev mode (surface:read)
  *
  * The SSE endpoint stays open as long as the client is connected; we hold
  * a per-stream subscriber in `dev-mode.ts`'s registry and broadcast to
@@ -120,7 +120,7 @@ export function routeDev(req: Request, opts: DevRoutesOpts): RouteOutcome {
     return { handled: true, response: handleReloadStream(streamMatch[1]!, opts) };
   }
 
-  // GET /surface/<name>/dev — dev-mode status for one UI (app:read).
+  // GET /surface/<name>/dev — dev-mode status for one UI (surface:read).
   const statusMatch = pathname.match(DEV_STATUS_RE);
   if (statusMatch && method === "GET") {
     return { handled: true, response: handleStatus(req, statusMatch[1]!, opts) };

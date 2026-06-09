@@ -2,9 +2,20 @@
  * API helpers — thin fetch wrapper for the admin endpoints.
  *
  * All admin endpoints under `/surface/*` (except `/oauth-client`) require a
- * bearer carrying `app:admin` or `app:read`. The SPA reads the operator's
- * token from `localStorage["parachute_operator_token"]`, set via the
- * `TokenSetup` banner.
+ * bearer carrying `surface:admin` or `surface:read`.
+ *
+ * Bearer resolution (boundary C4 — hub-session sign-in):
+ *   1. Session path (default, zero-paste): `lib/auth.ts` silently mints a
+ *      `surface:admin` JWT from the hub session cookie via
+ *      `GET /admin/module-token/surface` and caches it in memory.
+ *   2. Legacy fallback: when the silent mint can't work (no hub in front of
+ *      us, or no signed-in admin session), the operator-pasted token from
+ *      `localStorage["parachute_operator_token"]` is honored — set via the
+ *      `TokenSetup` fallback affordance.
+ *
+ * On a 401 the wrapper drops the cached session token, re-mints once, and
+ * retries the request once — covering token expiry races, revocation, and
+ * hub restarts without surfacing an error for a recoverable blip.
  */
 
 // Canonical type definitions live in app-host (`packages/surface-host/src/
@@ -16,6 +27,8 @@ import type {
   TagSchemaDeclaration,
   TagSchemaFieldDeclaration,
 } from "@openparachute/surface/meta-schema";
+
+import { clearSessionToken, ensureToken } from "./auth.ts";
 
 export type {
   RequiredSchemaDeclaration,
@@ -94,6 +107,7 @@ export type ApiError = {
   body?: unknown;
 };
 
+/** Read the legacy pasted token. The FALLBACK path — see module docstring. */
 export function getOperatorToken(): string | null {
   try {
     return window.localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -102,6 +116,8 @@ export function getOperatorToken(): string | null {
   }
 }
 
+/** Persist a pasted token. Only the explicit fallback affordance calls this —
+ *  the session path NEVER writes localStorage (in-memory cache only). */
 export function setOperatorToken(t: string): void {
   try {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, t);
@@ -110,9 +126,25 @@ export function setOperatorToken(t: string): void {
   }
 }
 
-function authHeaders(): Record<string, string> {
-  const t = getOperatorToken();
-  return t ? { authorization: `Bearer ${t}` } : {};
+/** Remove the legacy pasted token (the "Clear" affordances). */
+export function clearOperatorToken(): void {
+  try {
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // ignored — see setOperatorToken.
+  }
+}
+
+/**
+ * Resolve the bearer for one request: prefer a (possibly freshly-minted)
+ * session token; fall back to the legacy pasted token when the silent mint
+ * can't work. Returns `null` when neither path yields a token — the request
+ * goes out unauthenticated and the server's 401 drives the banner.
+ */
+async function resolveBearer(): Promise<string | null> {
+  const minted = await ensureToken();
+  if (minted.kind === "ok") return minted.token;
+  return getOperatorToken();
 }
 
 async function call<T>(
@@ -120,10 +152,34 @@ async function call<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const first = await callOnce<T>(method, path, body, await resolveBearer());
+  if (!first.unauthorized) return first.value;
+  // 401 → drop the cached session token, re-mint once, retry once. When the
+  // re-mint fails (or yields the same rejected bearer) rethrow the original
+  // 401 — there's nothing fresher to retry with.
+  clearSessionToken();
+  const reminted = await ensureToken();
+  const retryBearer = reminted.kind === "ok" ? reminted.token : getOperatorToken();
+  if (!retryBearer || retryBearer === first.bearer) throw first.error;
+  const second = await callOnce<T>(method, path, body, retryBearer);
+  if (second.unauthorized) throw second.error;
+  return second.value;
+}
+
+type CallOutcome<T> =
+  | { unauthorized: false; value: T }
+  | { unauthorized: true; error: ApiError; bearer: string | null };
+
+async function callOnce<T>(
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  body: unknown,
+  bearer: string | null,
+): Promise<CallOutcome<T>> {
   const init: RequestInit = {
     method,
     headers: {
-      ...authHeaders(),
+      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
     },
   };
@@ -136,13 +192,14 @@ async function call<T>(
   } catch {
     parsed = text;
   }
-  if (res.status >= 200 && res.status < 300) return parsed as T;
+  if (res.status >= 200 && res.status < 300) return { unauthorized: false, value: parsed as T };
   const err: ApiError = {
     status: res.status,
     ...(parsed && typeof parsed === "object"
       ? (parsed as Record<string, unknown>)
       : { body: parsed }),
   };
+  if (res.status === 401) return { unauthorized: true, error: err, bearer };
   throw err;
 }
 

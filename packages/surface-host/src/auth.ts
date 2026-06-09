@@ -3,9 +3,10 @@
  *
  * Mirrors `parachute-runner/src/auth.ts` deliberately — same trust kernel
  * (`@openparachute/scope-guard`), same hub-origin resolution, same shape for
- * the 401/403 responses. The single difference is the audience: `aud === "app"`.
+ * the 401/403 responses. The single difference is the audience: `aud ===
+ * "surface"` (with the legacy `"app"` still accepted — see AUDIENCES below).
  *
- * Two scopes apps defines:
+ * Two scopes surface defines:
  *   - `surface:read`  — list UIs, read per-UI info. Read-only.
  *   - `surface:admin` — add / remove / reload UIs + DCR registration on add.
  *
@@ -38,8 +39,24 @@ export const SCOPE_READ = "surface:read" as const;
 /** Hub loopback for v0.6 single-container; deploys override via env. */
 const DEFAULT_HUB_LOOPBACK = "http://127.0.0.1:1939";
 
-/** Audience the daemon declares — hub#300 mints with `aud: "app"` for our endpoints. */
-export const AUDIENCE = "app" as const;
+/**
+ * Audience the daemon declares. The hub's audience rule stamps the bare module
+ * short — `inferAudience("surface:admin")` and the session-cookie mint at
+ * `GET /admin/module-token/surface` both produce `aud: "surface"`.
+ *
+ * History: pre-rename (app → surface, PR #40) the short was `app` and hub#300
+ * minted `aud: "app"`. The rename flipped the scope strings to `surface:*`
+ * but this constant kept the legacy value, which meant NOTHING the hub mints
+ * by default validated here (`--scope surface:admin` infers `aud: "surface"`;
+ * the only working shape was a manual `--aud app` override). Canonical is now
+ * `"surface"`; `"app"` stays accepted (additive) so any manually-crafted
+ * legacy bearer rides to its expiry.
+ */
+export const AUDIENCE = "surface" as const;
+/** Legacy audience (pre-rename short). Accepted, never minted anymore. */
+export const LEGACY_AUDIENCE = "app" as const;
+/** Accepted audiences, canonical first — `validateBearer` tries them in order. */
+export const AUDIENCES = [AUDIENCE, LEGACY_AUDIENCE] as const;
 
 /**
  * Resolve the hub origin used for JWT validation.
@@ -103,13 +120,46 @@ export type AuthResult =
   | { ok: false; status: 401 | 403; body: { error: string; message: string } };
 
 /**
+ * Run `validate` against each accepted audience in order, returning the first
+ * success. An audience-mismatch failure (`HubJwtError` code `"audience"`)
+ * falls through to the next candidate; any other failure (bad signature,
+ * revoked, expired, …) rethrows immediately — retrying a different audience
+ * can't fix those, and masking them would garble the surfaced error.
+ *
+ * Exported as a pure-ish helper so the fallback ordering is unit-testable
+ * without standing up a JWKS endpoint.
+ */
+export async function validateWithAudienceFallback<T>(
+  validate: (audience: string) => Promise<T>,
+  audiences: readonly string[] = AUDIENCES,
+): Promise<T> {
+  let lastAudienceErr: unknown;
+  for (const audience of audiences) {
+    try {
+      return await validate(audience);
+    } catch (err) {
+      if (err instanceof HubJwtError && err.code === "audience") {
+        lastAudienceErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastAudienceErr ?? new HubJwtError("audience", "no accepted audience matched");
+}
+
+/**
  * Validate the presented bearer against the hub. Returns the granted scope
  * list on success; on failure returns a typed 401 or 403 the caller forwards
  * verbatim.
  *
- * `aud === "app"` enforced via `expectedAudience` — a token minted for a
- * different module can't reach our admin surface even if its bearer carries
- * `surface:admin` (which it can't, but defense-in-depth).
+ * Audience enforced via `expectedAudience` — a token minted for a different
+ * module can't reach our admin surface even if its bearer carries
+ * `surface:admin` (which it can't, but defense-in-depth). Canonical `aud` is
+ * `"surface"` (what the hub mints today); the legacy `"app"` is accepted as
+ * a fallback (see AUDIENCES). JWKS + revocation lookups are cached inside the
+ * guard, so the fallback retry costs one extra in-memory verification, not a
+ * second network round-trip.
  */
 export async function validateBearer(
   token: string | undefined,
@@ -123,9 +173,10 @@ export async function validateBearer(
     };
   }
   try {
-    const claims = await getGuard(opts.hubUrl).validateHubJwt(token, {
-      expectedAudience: AUDIENCE,
-    });
+    const guard = getGuard(opts.hubUrl);
+    const claims = await validateWithAudienceFallback((audience) =>
+      guard.validateHubJwt(token, { expectedAudience: audience }),
+    );
     return { ok: true, scopes: claims.scopes };
   } catch (err) {
     if (err instanceof HubJwtError && err.code === "revoked") {
