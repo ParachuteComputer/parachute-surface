@@ -12,6 +12,9 @@
   "health": "/surface/healthz",
   "uiUrl": "/surface/admin/",
   "managementUrl": "/surface/admin/",
+  "configUiUrl": "/surface/admin/",
+  "focus": "core",
+  "adminCapabilities": ["config"],
   "startCmd": [
     "parachute-surface",
     "serve"
