@@ -128,15 +128,25 @@ export interface SurfaceLogger {
 
 /**
  * The per-surface host context (P2 — the keystone injection; capability,
- * never secret). Commit 3 of R3a adds the `vault` (ScopedVaultClient — NO
- * token accessor) and `store` (per-surface SQLite) capabilities; the
- * members below are the lifecycle/trust core the supervisor wires at mount.
+ * never secret).
  *
  * Live-query subscriptions ride `vault.subscribe(...)` (surface-client
  * Tier 1) — bound to the same host-custodied credential, so there is no
  * separate `subscribe` member.
  */
 export interface SurfaceHostContext {
+  /**
+   * Pre-authenticated, tag-scope-bound vault client. NO token accessor —
+   * the credential lives host-side (P3); `force` writes are rejected
+   * (vault-as-source-of-truth, design §9). See `scoped-vault-client.ts`.
+   */
+  vault: import("./scoped-vault-client.ts").ScopedVaultClient;
+  /**
+   * Per-surface SQLite blob store for OPERATIONAL state (CRDT snapshots,
+   * caches, reconciliation cursors) — closed on unmount, file deleted on
+   * surface removal. Knowledge lives in the vault, never here.
+   */
+  store: import("./surface-state-store.ts").SurfaceStateStore;
   /**
    * Trust layer for a request (design §10): reads the hub-stamped
    * `X-Parachute-Layer`. Backends MUST use this, never raw headers — and

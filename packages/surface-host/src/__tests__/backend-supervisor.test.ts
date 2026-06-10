@@ -13,6 +13,8 @@ import * as path from "node:path";
 import { BackendSupervisor } from "../backend-supervisor.ts";
 import type { SurfaceHostContext } from "../backend-types.ts";
 import { parseMeta } from "../meta-schema.ts";
+import { ScopedVaultClient } from "../scoped-vault-client.ts";
+import { SurfaceStateStore } from "../surface-state-store.ts";
 import type { RegisteredUi } from "../ui-registry.ts";
 
 const silent = { log: () => {}, warn: () => {}, error: () => {} };
@@ -46,9 +48,21 @@ function makeSurface(
 
 function makeSupervisor(opts: Partial<ConstructorParameters<typeof BackendSupervisor>[0]> = {}) {
   const contexts: SurfaceHostContext[] = [];
+  const stateRoot = mkdtempSync(path.join(os.tmpdir(), "supervisor-state-"));
+  tmpdirs.push(stateRoot);
   const supervisor = new BackendSupervisor({
     buildContext: (ui, signal) => {
+      const store = new SurfaceStateStore(path.join(stateRoot, `${ui.meta.name}.sqlite`));
+      signal.addEventListener("abort", () => store.close());
       const ctx: SurfaceHostContext = {
+        vault: new ScopedVaultClient({
+          hubOrigin: "http://hub.test",
+          vaultName: "default",
+          tokenProvider: () => {
+            throw new Error("no credential in supervisor tests");
+          },
+        }),
+        store,
         layer: () => "public",
         clientIp: () => null,
         config: { all: () => ({}), get: () => undefined },

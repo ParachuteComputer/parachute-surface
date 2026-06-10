@@ -20,6 +20,7 @@ import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
+import { createHostContextBuilder } from "./host-context.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { scanUis } from "./ui-registry.ts";
@@ -70,6 +71,13 @@ export {
   DEFAULT_SHUTDOWN_TIMEOUT_MS,
   type BackendSupervisorOpts,
 } from "./backend-supervisor.ts";
+export * from "./host-context.ts";
+export { ScopedVaultClient, type ScopedVaultClientOptions } from "./scoped-vault-client.ts";
+export {
+  SurfaceStateStore,
+  type SurfaceStateEntry,
+  type SurfaceStateEntryMeta,
+} from "./surface-state-store.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
 export { startHttpServer } from "./http-server.ts";
@@ -194,18 +202,21 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     })),
   };
 
-  // Backend supervisor (P5) — mounts every backed surface's server entry.
-  // The context builder here is the lifecycle core (commit 3 of R3a swaps
-  // in the full host context: ScopedVaultClient + SurfaceStateStore +
-  // hub-stamped trust readers).
+  // Backend supervisor (P5) — mounts every backed surface's server entry
+  // with the full host context (P2): ScopedVaultClient + SurfaceStateStore
+  // + hub-stamped trust readers. The token provider is the commit-4 seam
+  // (credential custody): until a credential connection is provisioned for
+  // the surface, vault calls fail with a clear operator-actionable error —
+  // the backend itself still mounts and serves credential-free routes.
   const backends = new BackendSupervisor({
-    buildContext: (ui, signal) => ({
-      layer: () => "public" as const,
-      clientIp: () => null,
-      config: { all: () => ({}), get: () => undefined },
-      log: prefixedSurfaceLogger(logger, ui.meta.name),
-      mount: ui.meta.path,
-      shutdownSignal: signal,
+    buildContext: createHostContextBuilder({
+      config,
+      logger,
+      tokenProviderFor: (ui) => () => {
+        throw new Error(
+          `no vault credential provisioned for surface "${ui.meta.name}" — approve a credential connection in the hub admin (Connections → surface)`,
+        );
+      },
     }),
     logger,
   });
@@ -319,23 +330,6 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     stop,
     backendsReady,
     ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
-  };
-}
-
-/** `[surface:<name>]`-prefixed logger flowing into the daemon's stream. */
-function prefixedSurfaceLogger(
-  base: Pick<Console, "log" | "warn" | "error">,
-  name: string,
-): {
-  log: (...a: unknown[]) => void;
-  warn: (...a: unknown[]) => void;
-  error: (...a: unknown[]) => void;
-} {
-  const prefix = `[surface:${name}]`;
-  return {
-    log: (...a: unknown[]) => base.log(prefix, ...a),
-    warn: (...a: unknown[]) => base.warn(prefix, ...a),
-    error: (...a: unknown[]) => base.error(prefix, ...a),
   };
 }
 

@@ -57,6 +57,7 @@ import {
   unregisterOauthClient,
   writeOauthClientFile,
 } from "./dcr.ts";
+import { removeSurfaceState } from "./host-context.ts";
 import { InvalidMetaError, NAME_PATTERN, PATH_PATTERN, parseMeta } from "./meta-schema.ts";
 import { NpmFetchError, copyDir, fetchNpmPackage, parseNpmSpec } from "./npm-fetch.ts";
 import { readOperatorToken } from "./operator-token.ts";
@@ -107,6 +108,11 @@ export type AdminHandlerOpts = {
   skipSelfRegisterRefresh?: boolean;
   /** Test-only seam: replace `enforceScope` with a stub. */
   enforceScopeFn?: EnforceScopeFn;
+  /**
+   * Override the per-surface state dir (tests). Defaults to
+   * `resolveSurfaceStateDir()` — `$PARACHUTE_HOME/surface/state/`.
+   */
+  stateDir?: string;
 };
 
 type RouteOutcome = { handled: false } | { handled: true; response: Promise<Response> | Response };
@@ -799,6 +805,14 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
 
   // Remove the directory.
   rmSync(targetDir, { recursive: true, force: true });
+
+  // Delete the surface's operational state (P2 lifecycle: the per-surface
+  // SQLite store + config file must not outlive the surface).
+  try {
+    removeSurfaceState(name, opts.stateDir);
+  } catch (e) {
+    opts.logger?.warn(`[app-admin] state cleanup for "${name}" failed: ${(e as Error).message}`);
+  }
 
   // Re-scan + swap state.
   const scan = scanUis({ uisDir, logger: opts.logger });
