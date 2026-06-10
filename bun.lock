@@ -173,7 +173,7 @@
     },
     "packages/surface-server": {
       "name": "@openparachute/surface-server",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@openparachute/scope-guard": "^0.4.0-rc.1",
