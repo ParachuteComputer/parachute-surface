@@ -62,7 +62,6 @@ export async function fetchVaults(): Promise<HubResult<{ vaults: DiscoveredVault
   try {
     res = await fetch(`${hubOrigin()}/.well-known/parachute.json`, {
       headers: { accept: "application/json" },
-      credentials: "include",
     });
   } catch (e) {
     return { ok: false, error: `could not reach the hub: ${(e as Error).message}` };

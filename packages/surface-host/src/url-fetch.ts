@@ -305,6 +305,13 @@ export async function fetchUrlTarball(opts: UrlFetchOpts): Promise<UrlFetchResul
  */
 function locatePackageRoot(extractDir: string): string {
   if (existsSync(path.join(extractDir, "dist", "index.html"))) return extractDir;
+  // Note: `Dirent.isDirectory()` from a non-recursive `readdirSync(..., {
+  // withFileTypes: true })` does NOT follow symlinks — the dirent type comes
+  // from the directory entry itself (a symlink reports isSymbolicLink(), not
+  // isDirectory()). So a top-level symlink-to-directory can't be selected as
+  // the package root here. Contrast with the statSync pitfall fixed in
+  // npm-fetch's copyDirInner, where stat-following-symlinks let links be
+  // classified as directories.
   const entries = readdirSync(extractDir, { withFileTypes: true }).filter(
     (e) => e.isDirectory() && !e.name.startsWith("."),
   );

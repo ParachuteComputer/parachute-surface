@@ -45,10 +45,10 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import * as path from "node:path";
@@ -1796,12 +1796,21 @@ function copyServerFiles(
     return `server entry source not found in staged package: ${firstSeg} (looked in ${stagedRoot})`;
   }
   try {
-    const st = statSync(src);
+    // lstat, NOT stat — same discipline as copyDirInner: a top-level symlink
+    // in the staged package must not be followed (a symlink-to-directory
+    // would otherwise be copied as a tree from wherever it points). Skip it
+    // with a warning instead.
+    const st = lstatSync(src);
+    if (st.isSymbolicLink()) {
+      return `server entry source is a symlink — refusing to copy: ${firstSeg}`;
+    }
     if (st.isDirectory()) {
       copyDir(src, dest);
-    } else {
+    } else if (st.isFile()) {
       mkdirSync(path.dirname(dest), { recursive: true });
       copyFileSync(src, dest);
+    } else {
+      return `server entry source is not a regular file or directory: ${firstSeg}`;
     }
     logger?.log(`[app-admin] copied server files: ${firstSeg}/`);
     return undefined;

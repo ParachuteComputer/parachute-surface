@@ -11,6 +11,8 @@
  *   - missing dist/index.html → no_dist
  *   - corrupt tarball → extract_failed
  *   - staging cleanup on error paths
+ *   - symlink containment: a symlink in the tarball's dist/ pointing outside
+ *     the staging area is skipped by the install copy (#92 review fold)
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -18,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { copyDir } from "../npm-fetch.ts";
 import { UrlFetchError, fetchUrlTarball, looksLikeUrlSource } from "../url-fetch.ts";
 
 const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
@@ -272,5 +275,75 @@ describe("extraction", () => {
       "extract_failed",
     );
     expect(fs.readdirSync(stagingParent)).toHaveLength(0);
+  });
+});
+
+describe("symlink containment (#92 review fold)", () => {
+  /** Walk `root` without following symlinks; return regular files whose content contains `needle`. */
+  function regularFilesContaining(root: string, needle: string): string[] {
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir)) {
+        const p = path.join(dir, entry);
+        const st = fs.lstatSync(p);
+        if (st.isDirectory()) walk(p);
+        else if (st.isFile() && fs.readFileSync(p, "utf8").includes(needle)) hits.push(p);
+      }
+    };
+    walk(root);
+    return hits;
+  }
+
+  test("symlink-to-external-directory inside dist/ is skipped by the install copy — never followed", async () => {
+    // The escape target lives in its OWN tmpdir, outside the staging area.
+    // (Owned by this test — never a real system path.)
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), "url-fetch-escape-target-"));
+    try {
+      const sentinel = "SENTINEL-symlink-escape-pr92";
+      fs.writeFileSync(path.join(externalDir, "sentinel.txt"), sentinel);
+
+      // Build the tarball by hand — makeTarball only handles plain files, and
+      // we need dist/ to carry a real file AND a symlink at the external dir.
+      const srcDir = fs.mkdtempSync(path.join(tmpDir, "tar-src-"));
+      fs.mkdirSync(path.join(srcDir, "dist"), { recursive: true });
+      fs.writeFileSync(path.join(srcDir, "dist", "index.html"), "<html>legit</html>");
+      fs.symlinkSync(externalDir, path.join(srcDir, "dist", "escape"));
+      const out = path.join(tmpDir, "symlink-bundle.tgz");
+      const tarProc = Bun.spawn(["tar", "-czf", out, "-C", srcDir, "."], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(await tarProc.exited).toBe(0);
+      const tarball = new Uint8Array(fs.readFileSync(out));
+
+      const result = await fetchUrlTarball({
+        url: "https://example.com/evil.tgz",
+        stagingParent,
+        fetchFn: fetchReturning(tarball, { contentType: "application/gzip" }),
+        logger: silentLogger,
+      });
+
+      // Extraction keeps the symlink AS a symlink — not followed, not
+      // materialized as a directory. The sentinel content appears nowhere
+      // under staging as a regular file.
+      const extractedLink = path.join(result.distPath, "escape");
+      expect(fs.lstatSync(extractedLink).isSymbolicLink()).toBe(true);
+      expect(regularFilesContaining(result.stagingDir, sentinel)).toEqual([]);
+
+      // The install copy — the same copyDir that POST /surface/add runs to
+      // populate the served dist — must skip the symlink entirely.
+      const installDist = path.join(tmpDir, "install", "dist");
+      copyDir(result.distPath, installDist);
+      expect(fs.readdirSync(installDist)).toEqual(["index.html"]);
+      // Not materialized even as a link: lstat on the entry must throw ENOENT.
+      expect(() => fs.lstatSync(path.join(installDist, "escape"))).toThrow();
+      expect(regularFilesContaining(installDist, sentinel)).toEqual([]);
+      // And the escape target itself is untouched.
+      expect(fs.readFileSync(path.join(externalDir, "sentinel.txt"), "utf8")).toBe(sentinel);
+
+      result.cleanup();
+    } finally {
+      fs.rmSync(externalDir, { recursive: true, force: true });
+    }
   });
 });
