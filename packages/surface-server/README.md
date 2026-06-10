@@ -6,7 +6,8 @@ inside `createBackend(ctx)`. Never a host object: the host
 `SurfaceHostContext`; this kit builds the trust machinery on top of it.
 
 Part of the [Surface Runtime design](../../design/2026-06-10-surface-runtime-primitives.md)
-(R4: P7–P9). Companion pattern: `parachute-patterns/patterns/backed-surface.md`.
+(R4: P7–P9; R6 foundation: P10). Companion pattern:
+`parachute-patterns/patterns/backed-surface.md`.
 
 ## What's in the box
 
@@ -100,6 +101,68 @@ leaves a projection is what `shape` returns.
 Param specs are `'string' | 'number' | 'boolean' | 'date'` with a `?` suffix
 for optional (`date` values stay ISO strings). Validation is strict both
 ways: unknown params refuse, dates must actually parse.
+
+### P10 — `createVaultReconciler` (+ the `SurfaceStateStore` substrate)
+
+The corrected reconciliation machine (design §9) between a surface's live
+Y.Docs and their backing vault notes — the collaborative-editing foundation.
+The host's per-surface `SurfaceStateStore` (`ctx.store`, SQLite, deleted on
+surface removal) is the persistence substrate; the machine's internals
+(state layout, queues, debounce, version tracking) stay private. Surface
+authors see exactly two hooks and the conflict events:
+
+```ts
+import { createVaultReconciler } from "@openparachute/surface-server";
+import { docToMarkdown, markdownToDocJSON, schema } from "@openparachute/doc-schema";
+import { prosemirrorJSONToYDoc, yDocToProsemirrorJSON } from "y-prosemirror";
+
+const reconciler = createVaultReconciler(ctx, {
+  tag: "doc", // the surface's working tag — also the SSE watch scope
+  hooks: {
+    seed(doc, note) {
+      /* REPLACE the doc's content from note.content (markdown).
+         ALWAYS doc-schema's exported schema — node/mark names persist
+         inside Y.Docs, so an ad-hoc schema corrupts every doc it touches. */
+    },
+    serialize(doc) {
+      /* derive canonical markdown — doc-schema's docToMarkdown, never
+         an ad-hoc serializer (schema + codec version together). */
+    },
+  },
+});
+await reconciler.start(); // resolves on the first SSE snapshot
+reconciler.on((ev) => {
+  /* "external-edit" | "writeback-conflict" | "note-removed" | … */
+});
+// documentName = note id (e.g. Hocuspocus onLoadDocument):
+const doc = await reconciler.load(noteId, engineDoc);
+// shutdown(): await reconciler.stop()  — flushes + persists everything
+```
+
+The rules it enforces (Prism's load-bearing rules kept, both bug paths
+replaced — see the module doc for the full contract and the documented
+failure windows):
+
+- **Vault-as-source-of-truth, external-edit-WINS** — the external-edit
+  signal is the vault's live-query SSE on the working tag, not load-time
+  comparison.
+- **Writebacks send `if_updated_at` with the tracked `updatedAt` string
+  VERBATIM** — versions are opaque strings, equality is the only operation,
+  and no `force` flag ever rides a reconciler writeback (test-pinned).
+- **409 → fetch the winner → re-seed into the live Y.Doc in ONE
+  transaction** — connected clients observe a single atomic swap, never a
+  torn intermediate state.
+- **Populated re-seed guard** — a doc that already carries CRDT state is
+  never seeded over on load (the classic double-seed bug).
+- **Fail-closed on stream loss** — while degraded the machine revalidates
+  before the next writeback instead of assuming no external edits; it never
+  writes blind.
+
+One operational warning for collab engines: Hocuspocus's `onDisconnect`
+fires **twice** when the departing client had awareness state (upstream bug,
+recorded in the design appendix) — any disconnect-driven cleanup around this
+machine (presence counters, `unload()` calls) must be idempotent, deduped by
+socketId.
 
 ### Conformance suite (public export)
 

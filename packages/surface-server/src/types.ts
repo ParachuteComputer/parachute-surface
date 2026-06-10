@@ -23,6 +23,7 @@ import type { Note } from "@openparachute/surface-client";
 export type {
   SurfaceHostContext,
   SurfaceLogger,
+  SurfaceStateStore,
   TrustLayer,
 } from "@openparachute/surface";
 export type { Note } from "@openparachute/surface-client";

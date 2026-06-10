@@ -31,7 +31,8 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openparachute/scope-guard": "^0.4.0-rc.1",
     "@openparachute/surface": "^0.3.0",
-    "@openparachute/surface-client": "^0.2.0"
+    "@openparachute/surface-client": "^0.2.0",
+    "yjs": "^13.6.27"
   },
   "repository": {
     "type": "git",
