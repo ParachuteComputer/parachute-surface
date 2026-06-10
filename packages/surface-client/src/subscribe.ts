@@ -368,7 +368,11 @@ export function startSubscription(
       if (!res.ok || !res.body) {
         // 5xx / 503-cap / bodyless response — transient; back off and retry.
         // A non-auth response also ends any 401 streak: the next 401 gets a
-        // fresh refresh attempt.
+        // fresh refresh attempt. Deliberate consequence: 401→5xx→401 spends
+        // TWO refreshes — one per streak — because the intervening 5xx
+        // proves the second 401 is not "the refreshed token was rejected
+        // too"; the guard only caps refreshes per CONSECUTIVE auth-failure
+        // streak, which is what prevents a refresh→401→refresh spin.
         refreshedThisStreak = false;
         const bodyText = await res.text().catch(() => "");
         handlers.onError?.(

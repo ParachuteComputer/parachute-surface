@@ -144,6 +144,9 @@ describe("parseSSEStream — wire format", () => {
   });
 
   test("joins multi-line data with newlines", async () => {
+    // Intentionally pins the `\n` line-join itself, not JSON round-trip
+    // validity — the payload is split at an arbitrary point a real emitter
+    // wouldn't choose; the parse below just confirms the join is lossless.
     const events = await collect(streamOf(`event: upsert\ndata: {"note":\ndata: {"id":"x"}}\n\n`));
     expect(events).toHaveLength(1);
     expect(events[0]!.data).toBe(`{"note":\n{"id":"x"}}`);
@@ -319,6 +322,46 @@ describe("VaultClient.subscribe — transport + lifecycle", () => {
     const err = await within(errored.promise, 3_000, "auth error");
     expect(err).toBeInstanceOf(VaultAuthError);
     await within(closed.promise, 3_000, "closed status");
+    expect(statuses.at(-1)).toBe("closed");
+  });
+
+  test("onAuthError returning null (refresh impossible) terminates cleanly — no retry/spin", async () => {
+    // Distinct from the no-callback case above: the refresh SEAM exists but
+    // reports refresh-not-possible (e.g. no refresh token stored). Must be
+    // terminal — one connection, one refresh attempt, no reconnect loop.
+    let connections = 0;
+    const srv = sseServer(() => {
+      connections++;
+      return new Response(JSON.stringify({ error: "expired" }), { status: 401 });
+    });
+    let refreshCalls = 0;
+    const errored = deferred<unknown>();
+    const closed = deferred<void>();
+    const statuses: string[] = [];
+    makeClient(srv.url, {
+      onAuthError: async () => {
+        refreshCalls++;
+        return null; // refresh not possible
+      },
+    }).subscribe(
+      { tag: "#x" },
+      {
+        onSnapshot: () => {},
+        onUpsert: () => {},
+        onRemove: () => {},
+        onError: (e) => errored.resolve(e),
+        onStatus: (s) => {
+          statuses.push(s);
+          if (s === "closed") closed.resolve();
+        },
+      },
+      { initialBackoffMs: 5 },
+    );
+    expect(await within(errored.promise, 3_000, "auth error")).toBeInstanceOf(VaultAuthError);
+    await within(closed.promise, 3_000, "closed status");
+    await sleep(50); // would have reconnected several times at 5ms backoff
+    expect(connections).toBe(1);
+    expect(refreshCalls).toBe(1);
     expect(statuses.at(-1)).toBe("closed");
   });
 
