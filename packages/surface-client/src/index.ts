@@ -122,6 +122,8 @@ export type {
   TagUpsertPayload,
   UpdateNotePayload,
   CreateNotePayload,
+  NoteLinkAddPayload,
+  NoteLinkRemovePayload,
   FindPathResult,
   StorageUploadResult,
   UploadProgress,

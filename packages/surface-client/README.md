@@ -263,6 +263,14 @@ Things worth knowing:
 - **Token expiry is handled.** A 401 on (re)connect drives the client's `onAuthError` refresh seam once and resubscribes with the fresh token. If refresh isn't possible, the subscription terminates: `onError(VaultAuthError)` then `onStatus("closed")` — without a `"closed"`, it's still retrying.
 - **Stop it** via the returned unsubscribe function or an `AbortSignal` (`subscribe(query, handlers, { signal })`).
 
+### Typed links on create/update
+
+`UpdateNotePayload.links` mutates typed links: `{ add?: { target, relationship, metadata? }[], remove?: { target, relationship }[] }` (`target` is a note id *or* path; missing targets skip silently; vault echoes the hydrated `links` on the response when you mutate them). **`CreateNotePayload.links` is a flat array** — `{ target, relationship }[]`, no envelope and no per-link metadata, because that's what vault's POST branch actually reads; create first + `updateNote({ links: { add } })` when you need link metadata.
+
+### Auth'd media — `fetchAttachmentBlob()`
+
+`VaultClient.fetchAttachmentBlob(url)` GETs an attachment blob with the client's full auth contract (bearer header, refresh-on-401 retry, structured errors). It accepts an absolute URL, a vault-relative `/api/storage/<path>`, or a bare storage path. surface-render's `vaultClientFetchBlob` adapter prefers this method, so a plain `VaultClient` renders auth-gated images/audio with zero extra wiring. By design there is **no `getAccessToken` accessor** — the token stays inside the client (the same custody contract surface-host's scoped server-side client relies on).
+
 ### Don't redeclare the core types
 
 `Note`, `NoteSummary`, `NoteLink`, `NoteAttachment`, `TagRecord`, `TagUpsertPayload`, `UpdateNotePayload`, `CreateNotePayload`, `FindPathResult` (and more) are exported from the barrel and match vault's wire format byte-for-byte. Import them rather than hand-redeclaring — that drift is exactly what this package exists to kill.

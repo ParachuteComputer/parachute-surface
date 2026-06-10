@@ -1032,4 +1032,110 @@ export class VaultClient {
     const trimmed = p.startsWith("/") ? p.slice(1) : p;
     return `${this.baseUrl}/api/storage/${trimmed}`;
   }
+
+  /**
+   * Auth'd GET of an attachment blob (image/audio render). Accepts an
+   * absolute URL, a vault-relative path (`/api/storage/<path>`), or a
+   * bare storage path — the same resolution notes-ui's subclass
+   * established (which keeps its own override; this base implementation
+   * makes plain clients blob-capable too).
+   *
+   * Exists because the shared `request*` loop always `.json()`s the
+   * body; blobs need their own thin retry loop. Runs the full
+   * auth/refresh/error-classification contract: Authorization header,
+   * refresh-on-401 via `onAuthError` (retry once), reachability
+   * signals, and the structured error hierarchy.
+   *
+   * **This is the deliberate fetch-blob seam for surface-render** — its
+   * `vaultClientFetchBlob` adapter prefers `client.fetchAttachmentBlob`
+   * when present, so a base `VaultClient` now renders auth-gated media
+   * without the surface exposing a bearer accessor. The token stays
+   * inside the client *on purpose*: no `getAccessToken` is added, so
+   * the future no-token-accessor `ScopedVaultClient` (surface-host R3)
+   * can extend this class without violating its custody contract.
+   */
+  async fetchAttachmentBlob(url: string): Promise<Blob> {
+    const target = /^https?:\/\//.test(url)
+      ? url
+      : `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+    return this.requestBlobWithRetry(target, url, true);
+  }
+
+  /**
+   * Protected: the blob-returning analog of `requestWithRetry` —
+   * identical auth/refresh/reachability/error semantics, but resolves
+   * `res.blob()` instead of parsing JSON. Subclasses adding blob
+   * endpoints can reuse it.
+   */
+  protected async requestBlobWithRetry(
+    target: string,
+    original: string,
+    allowRetry: boolean,
+  ): Promise<Blob> {
+    const token = await this.resolveToken();
+    let res: Response;
+    try {
+      res = await this.fetchImpl(target, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      this.onReachability?.("unreachable", message);
+      throw new VaultUnreachableError(`GET ${original} failed: ${message}`, 0);
+    }
+    if (res.status >= 500) {
+      this.onReachability?.("unreachable", `HTTP ${res.status}`);
+      const bodyText = await res.text().catch(() => "");
+      throw new VaultServerError(
+        `GET ${original} → ${res.status}`,
+        res.status,
+        bodyText || undefined,
+      );
+    }
+    this.onReachability?.("healthy");
+    if (res.status === 401 || res.status === 403) {
+      const bodyText = await res.text().catch(() => "");
+      let errorType: string | undefined;
+      let serverMessage: string | undefined;
+      if (bodyText) {
+        try {
+          const parsed = JSON.parse(bodyText) as { error_type?: unknown; message?: unknown };
+          if (typeof parsed.error_type === "string") errorType = parsed.error_type;
+          if (typeof parsed.message === "string") serverMessage = parsed.message;
+        } catch {}
+      }
+      if (allowRetry && this.onAuthError) {
+        const fresh = await this.onAuthError();
+        if (fresh) {
+          this.token = fresh;
+          return this.requestBlobWithRetry(target, original, false);
+        }
+        // onAuthError returned null → caller's refresh path owns the halt
+        // (see onAuthRevoked JSDoc); skip onAuthRevoked here.
+      } else {
+        this.onAuthRevoked?.(res.status, { errorType, message: serverMessage });
+      }
+      const composed = errorType
+        ? `Vault rejected the token (${res.status}: ${errorType}${serverMessage ? ` — ${serverMessage}` : ""})`
+        : serverMessage
+          ? `Vault rejected the token (${res.status}: ${serverMessage})`
+          : `Vault rejected the token (${res.status})`;
+      const opts: { errorType?: string; body?: string } = {};
+      if (errorType !== undefined) opts.errorType = errorType;
+      if (bodyText) opts.body = bodyText;
+      if (res.status === 403) {
+        throw new VaultPermissionError(composed, opts);
+      }
+      throw new VaultAuthError(composed, res.status, opts);
+    }
+    if (res.status === 404) {
+      throw new VaultNotFoundError(`GET ${original} → 404`);
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`GET ${original} failed (${res.status}): ${text}`);
+    }
+    return res.blob();
+  }
 }
