@@ -68,6 +68,7 @@ function makeState(uis: RegisteredUi[] = []): AppState {
       dev_mode_allowed: true,
       bootstrap_default_apps: { enabled: false, apps: [] },
       auto_provision_required_schema: false,
+      credential_connections: {},
     },
     registeredUis: uis,
     skippedUis: [],

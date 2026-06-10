@@ -15,9 +15,12 @@
 import pkg from "../package.json" with { type: "json" };
 
 import { addUiInternal, buildSelfRegisterExtraFields } from "./admin-routes.ts";
+import { getHubOrigin } from "./auth.ts";
 import { BackendSupervisor } from "./backend-supervisor.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
+import { startCredentialRenewal } from "./credential-renewal.ts";
+import { createCredentialTokenProvider } from "./credential-store.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
 import { createHostContextBuilder } from "./host-context.ts";
@@ -72,6 +75,8 @@ export {
   type BackendSupervisorOpts,
 } from "./backend-supervisor.ts";
 export * from "./host-context.ts";
+export * from "./credential-store.ts";
+export * from "./credential-renewal.ts";
 export { ScopedVaultClient, type ScopedVaultClientOptions } from "./scoped-vault-client.ts";
 export {
   SurfaceStateStore,
@@ -137,6 +142,13 @@ export type ServeOptions = {
    * need this; bootstrap is fire-and-forget for the daemon.
    */
   awaitBootstrap?: boolean;
+  /**
+   * Override the credentials dir (tests). Defaults to
+   * `resolveCredentialsDir()` — `$PARACHUTE_HOME/surface/credentials/`.
+   */
+  credentialsDir?: string;
+  /** Skip the boot-time credential renewal sweep + loop (tests). */
+  skipCredentialRenewal?: boolean;
 };
 
 export type ServeHandle = {
@@ -204,19 +216,20 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
 
   // Backend supervisor (P5) — mounts every backed surface's server entry
   // with the full host context (P2): ScopedVaultClient + SurfaceStateStore
-  // + hub-stamped trust readers. The token provider is the commit-4 seam
-  // (credential custody): until a credential connection is provisioned for
-  // the surface, vault calls fail with a clear operator-actionable error —
-  // the backend itself still mounts and serves credential-free routes.
+  // + hub-stamped trust readers. The vault token provider reads the
+  // HOST-custodied credential store fresh per request (P3) — deliveries +
+  // renewals take effect without a remount; until a credential connection
+  // is provisioned, vault calls fail with a clear operator-actionable
+  // error while the backend still mounts and serves credential-free routes.
   const backends = new BackendSupervisor({
     buildContext: createHostContextBuilder({
       config,
       logger,
-      tokenProviderFor: (ui) => () => {
-        throw new Error(
-          `no vault credential provisioned for surface "${ui.meta.name}" — approve a credential connection in the hub admin (Connections → surface)`,
-        );
-      },
+      tokenProviderFor: (ui) =>
+        createCredentialTokenProvider(ui, {
+          ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+          getConfig: () => state.config,
+        }),
     }),
     logger,
   });
@@ -240,6 +253,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       npmSpawnFn: opts.npmSpawnFn,
       logger,
       skipSelfRegisterRefresh: opts.skipSelfRegister,
+      ...(opts.credentialsDir !== undefined ? { credentialsDir: opts.credentialsDir } : {}),
     },
   });
 
@@ -267,6 +281,19 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   const backendsReady = backends
     .sync(state.registeredUis)
     .catch((e) => logger.warn(`[app] backend mount pass failed: ${(e as Error).message}`));
+
+  // Credential renewal (P3): boot sweep + interval loop, renewing each
+  // custodied credential against the hub by proof of possession before it
+  // expires. Terminal 401s mark the credential needs-operator (no retry
+  // spin); the loop never pins the process (unref'd timer) and stops on
+  // shutdown.
+  const renewal = opts.skipCredentialRenewal
+    ? undefined
+    : startCredentialRenewal({
+        hubOrigin: getHubOrigin(config.hub_url),
+        ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+        logger,
+      });
 
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
@@ -316,6 +343,8 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     // The watcher slots own AbortControllers + FSWatchers; without this
     // the daemon can hang on shutdown until the FSEvents stream closes.
     stopAllWatchers();
+    // Stop the credential-renewal loop before the backends go down.
+    renewal?.stop();
     // Unmount every backed surface: ctx.shutdownSignal aborts, bounded
     // shutdown() awaited — before the HTTP server drops.
     await backends.stop();

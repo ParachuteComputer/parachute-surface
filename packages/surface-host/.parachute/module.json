@@ -24,5 +24,21 @@
       "surface:read",
       "surface:admin"
     ]
-  }
+  },
+  "credentials": [
+    {
+      "key": "vault",
+      "title": "Vault read credential",
+      "description": "Standing tag-scoped READ credential for a backed surface's server — projects vault content to the surface's audience without any vault token reaching a browser. Surface-host custodies it (0600) and renews it before expiry; backends get a scoped client, never the token.",
+      "scope": "vault:{vault}:read",
+      "endpoint": "/surface/api/credential"
+    },
+    {
+      "key": "vault-write",
+      "title": "Vault write credential",
+      "description": "Standing tag-scoped WRITE credential for surfaces that write back (collaborative editors). The hub requires a non-empty tag scope for write grants — tags are the sharing scope.",
+      "scope": "vault:{vault}:write",
+      "endpoint": "/surface/api/credential"
+    }
+  ]
 }

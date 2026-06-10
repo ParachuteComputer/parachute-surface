@@ -52,6 +52,16 @@ export type AppConfig = {
    * warn but don't fail the install. Default true. Per patterns#57.
    */
   auto_provision_required_schema: boolean;
+  /**
+   * Explicit surface → credential-connection binding (P3). The hub's
+   * credential delivery payload identifies the CONNECTION (module↔vault
+   * grant), not a surface instance — when more than one credential matches
+   * a surface's vault, this mapping disambiguates:
+   * `{ "<surface name>": "<connection id>" }`. Empty by default; the
+   * single-credential-per-vault case needs no entry (it binds
+   * automatically — see credential-store.ts `resolveCredentialForSurface`).
+   */
+  credential_connections: Record<string, string>;
 };
 
 export class ConfigError extends Error {
@@ -96,6 +106,7 @@ export const DEFAULTS: AppConfig = {
     apps: ["@openparachute/notes-ui"],
   },
   auto_provision_required_schema: true,
+  credential_connections: {},
 };
 
 export type LoadConfigOpts = {
@@ -261,6 +272,32 @@ export function validateConfig(raw: unknown, configPath = "<inline>"): AppConfig
     auto_provision_required_schema = o.auto_provision_required_schema;
   }
 
+  // credential_connections — object of surface-name → connection-id strings.
+  let credential_connections: Record<string, string> = {};
+  if (o.credential_connections !== undefined) {
+    if (
+      !o.credential_connections ||
+      typeof o.credential_connections !== "object" ||
+      Array.isArray(o.credential_connections)
+    ) {
+      throw new ConfigError(
+        "`credential_connections` must be an object mapping surface names to connection ids",
+        configPath,
+      );
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(o.credential_connections as Record<string, unknown>)) {
+      if (typeof v !== "string" || v.length === 0) {
+        throw new ConfigError(
+          `\`credential_connections["${k}"]\` must be a non-empty string (connection id)`,
+          configPath,
+        );
+      }
+      out[k] = v;
+    }
+    credential_connections = out;
+  }
+
   return {
     hub_url,
     auto_register_oauth_clients,
@@ -269,6 +306,7 @@ export function validateConfig(raw: unknown, configPath = "<inline>"): AppConfig
     dev_mode_allowed,
     bootstrap_default_apps,
     auto_provision_required_schema,
+    credential_connections,
   };
 }
 
@@ -281,6 +319,7 @@ function cloneDefaults(): AppConfig {
       enabled: DEFAULTS.bootstrap_default_apps.enabled,
       apps: [...DEFAULTS.bootstrap_default_apps.apps],
     },
+    credential_connections: { ...DEFAULTS.credential_connections },
   };
 }
 

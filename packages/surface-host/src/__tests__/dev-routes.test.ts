@@ -31,6 +31,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     dev_mode_allowed: true,
     bootstrap_default_apps: { enabled: false, apps: [] },
     auto_provision_required_schema: false,
+    credential_connections: {},
     ...overrides,
   };
 }

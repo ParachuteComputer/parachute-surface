@@ -65,11 +65,19 @@ export type ScanOpts = {
 };
 
 /**
- * Path the admin SPA reserves once Phase 1.2 lands. A meta.json that tries
- * to claim it is rejected at scan time. Kept as a const so Phase 1.2's
- * `add` flow can share the same check.
+ * Paths the HOST reserves. A meta.json that tries to claim one is rejected
+ * at scan time (the `add` flow shares the check):
+ *   - /surface/admin — the admin SPA
+ *   - /surface/dev   — dev-mode routes
+ *   - /surface/api   — host API namespace (the hub's credential-delivery
+ *     endpoint lives at /surface/api/credential — P3; a surface named
+ *     "api" could otherwise shadow it)
  */
-export const RESERVED_PATHS: ReadonlySet<string> = new Set(["/surface/admin", "/surface/dev"]);
+export const RESERVED_PATHS: ReadonlySet<string> = new Set([
+  "/surface/admin",
+  "/surface/dev",
+  "/surface/api",
+]);
 
 /**
  * Scan `uisDir` for declared UIs. Best-effort: a malformed UI is skipped +

@@ -50,6 +50,14 @@ import { SCOPE_ADMIN, SCOPE_READ, enforceScope as defaultEnforceScope } from "./
 import type { AppConfig } from "./config.ts";
 import { resolveUisDir } from "./config.ts";
 import {
+  CONNECTION_ID_RE,
+  CREDENTIAL_OPS,
+  type CredentialPayload,
+  applyCredentialPayload,
+  deleteCredential,
+  resolveCredentialForSurface,
+} from "./credential-store.ts";
+import {
   DcrError,
   type OauthClientRecord,
   readOauthClientFile,
@@ -63,7 +71,7 @@ import { NpmFetchError, copyDir, fetchNpmPackage, parseNpmSpec } from "./npm-fet
 import { readOperatorToken } from "./operator-token.ts";
 import { type ProvisionSchemaResult, provisionSchemaForUi } from "./provision-schema.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
-import { type RegisteredUi, type SkippedUi, scanUis } from "./ui-registry.ts";
+import { RESERVED_PATHS, type RegisteredUi, type SkippedUi, scanUis } from "./ui-registry.ts";
 
 import type { AppState } from "./http-server.ts";
 
@@ -113,6 +121,11 @@ export type AdminHandlerOpts = {
    * `resolveSurfaceStateDir()` — `$PARACHUTE_HOME/surface/state/`.
    */
   stateDir?: string;
+  /**
+   * Override the credentials dir (tests). Defaults to
+   * `resolveCredentialsDir()` — `$PARACHUTE_HOME/surface/credentials/`.
+   */
+  credentialsDir?: string;
 };
 
 type RouteOutcome = { handled: false } | { handled: true; response: Promise<Response> | Response };
@@ -138,6 +151,14 @@ export function routeAdmin(req: Request, opts: AdminHandlerOpts): RouteOutcome {
   // POST /surface/add
   if (pathname === "/surface/add" && method === "POST") {
     return { handled: true, response: handleAdd(req, opts) };
+  }
+
+  // POST /surface/api/credential — the hub's credential delivery/renewal/
+  // removal endpoint (P3/H4). `/surface/api` is a RESERVED namespace (no
+  // surface can claim it — see ui-registry RESERVED_PATHS), so this route
+  // can never shadow a hosted surface.
+  if (pathname === "/surface/api/credential" && method === "POST") {
+    return { handled: true, response: handleCredentialDelivery(req, opts) };
   }
 
   // GET /surface/<name>/oauth-client — unauthenticated.
@@ -318,6 +339,58 @@ async function handleOauthClient(name: string, opts: AdminHandlerOpts): Promise<
     scope: oauth.scope,
     redirect_uris: oauth.redirect_uris,
   });
+}
+
+// --- POST /surface/api/credential (P3/H4 — hub credential delivery) ----------
+
+/**
+ * Receive a hub `CredentialPayload` (provisioned / renewed / removed —
+ * parachute-hub/src/admin-connections.ts). AUTH: the hub authenticates its
+ * deliveries with a short-lived `surface:admin` bearer (aud "surface") —
+ * exactly what `enforceScope(SCOPE_ADMIN)` validates, so a random on-box
+ * process can't plant a forged credential.
+ *
+ * `provisioned`/`renewed` persist the credential (0600, keyed by
+ * connection id); `removed` drops our copy (the hub's best-effort teardown
+ * notify — the authoritative kill is the jti revocation list).
+ */
+async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  let body: CredentialPayload;
+  try {
+    body = (await req.json()) as CredentialPayload;
+  } catch (e) {
+    return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
+  }
+
+  const bad = (message: string) =>
+    Response.json({ error: "invalid_payload", message }, { status: 400 });
+  if (body?.kind !== "credential") return bad('expected kind: "credential"');
+  if (!(CREDENTIAL_OPS as readonly string[]).includes(body.op as string)) {
+    return bad(`op must be one of ${CREDENTIAL_OPS.join(", ")}`);
+  }
+  if (typeof body.connection_id !== "string" || !CONNECTION_ID_RE.test(body.connection_id)) {
+    return bad("connection_id must be a valid identifier");
+  }
+  for (const field of ["key", "vault", "scope"] as const) {
+    if (typeof body[field] !== "string" || body[field].length === 0) {
+      return bad(`${field} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(body.scoped_tags) || body.scoped_tags.some((t) => typeof t !== "string")) {
+    return bad("scoped_tags must be an array of strings");
+  }
+
+  try {
+    const line = applyCredentialPayload(body, opts.credentialsDir);
+    opts.logger?.log(`[app-admin] ${line}`);
+  } catch (e) {
+    // Missing token/jti/expires_at on a provisioned/renewed op.
+    return bad((e as Error).message);
+  }
+  return Response.json({ ok: true, op: body.op, connection_id: body.connection_id });
 }
 
 // --- POST /surface/add -------------------------------------------------------
@@ -557,10 +630,13 @@ export async function addUiInternal(
         ),
       };
     }
-    if (parsedMeta.path === "/surface/admin") {
+    if (RESERVED_PATHS.has(parsedMeta.path)) {
       return {
         response: Response.json(
-          { error: "reserved_path", message: "`/surface/admin` is reserved for the admin SPA" },
+          {
+            error: "reserved_path",
+            message: `\`${parsedMeta.path}\` is reserved by the surface host (admin SPA / dev routes / host API)`,
+          },
           { status: 409 },
         ),
       };
@@ -799,6 +875,18 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
     logger: opts.logger,
   });
 
+  // Capture the surface's credential binding BEFORE the scan swap drops it
+  // from state (P3 removal: the host drops its COPY; tearing down the
+  // connection itself is operator-driven via the hub).
+  const removedUi = opts.state.registeredUis.find((u) => u.meta.name === name);
+  const removedCredential =
+    removedUi?.meta.server !== undefined
+      ? resolveCredentialForSurface(removedUi, {
+          ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+          config: opts.state.config,
+        })
+      : undefined;
+
   // Unmount the backend FIRST (shutdownSignal aborts, bounded shutdown
   // awaits) so in-flight work isn't pulling files out from under rmSync.
   await opts.state.backends?.unmount(name);
@@ -825,6 +913,28 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
 
   // Reconcile any remaining backed surfaces (no-op for unrelated mounts).
   await opts.state.backends?.sync(opts.state.registeredUis);
+
+  // Drop the local credential copy iff no remaining BACKED surface resolves
+  // to the same connection (a credential is a module↔vault grant that may
+  // be shared). We never call DELETE /admin/connections — connection
+  // teardown is the operator's act in the hub; this only removes our copy.
+  if (removedCredential?.ok) {
+    const connectionId = removedCredential.record.connection_id;
+    const stillReferenced = opts.state.registeredUis.some((u) => {
+      if (!u.meta.server) return false;
+      const r = resolveCredentialForSurface(u, {
+        ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+        config: opts.state.config,
+      });
+      return r.ok && r.record.connection_id === connectionId;
+    });
+    if (!stillReferenced) {
+      deleteCredential(connectionId, opts.credentialsDir);
+      opts.logger?.log(
+        `[app-admin] dropped local credential copy "${connectionId}" (no remaining surface uses it; the connection itself is torn down from the hub admin)`,
+      );
+    }
+  }
 
   if (!opts.skipSelfRegisterRefresh) {
     try {
