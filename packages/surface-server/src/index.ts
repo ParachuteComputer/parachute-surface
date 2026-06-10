@@ -1,6 +1,6 @@
 /**
  * @openparachute/surface-server — the server kit for backed surfaces
- * (surface-runtime design R4: P7–P9).
+ * (surface-runtime design R4: P7–P9, R6 foundation: P10).
  *
  * A LIBRARY a surface backend imports inside `createBackend(ctx)` — never
  * a host object. The host (`@openparachute/surface`) injects the
@@ -16,6 +16,11 @@
  *     domain query once; the kit derives BOTH the audience-gated REST
  *     endpoint AND an MCP tool on the per-surface Streamable-HTTP
  *     endpoint, all riding the same gateway.
+ *   - **P10 `createVaultReconciler`** — the corrected reconciliation
+ *     machine (§9) between live Y.Docs and their backing vault notes,
+ *     over the host's per-surface `SurfaceStateStore` (`ctx.store`).
+ *     Surface authors see only `serialize`/`seed` hooks + conflict
+ *     events; the machine's internals stay private.
  *   - **conformance** (`./conformance` subpath) — the gateway invariants
  *     as a runnable suite any surface points at its own routes.
  *
@@ -63,6 +68,7 @@ export {
   type ResourceType,
   type SurfaceHostContext,
   type SurfaceLogger,
+  type SurfaceStateStore,
   type TrustLayer,
 } from "./types.ts";
 
@@ -158,6 +164,16 @@ export {
   type SurfaceProjections,
   type SurfaceProjectionsOptions,
 } from "./projection/projections.ts";
+
+// P10 — createVaultReconciler over the SurfaceStateStore substrate
+export {
+  createVaultReconciler,
+  RECONCILER_ORIGIN,
+  type ReconcilerEvent,
+  type ReconcilerHooks,
+  type VaultReconciler,
+  type VaultReconcilerOptions,
+} from "./reconciler/reconciler.ts";
 
 // Conformance suite (also importable via the `./conformance` subpath)
 export {

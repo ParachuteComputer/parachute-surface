@@ -11,12 +11,15 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { type SurfaceHostContext, SurfaceStateStore } from "@openparachute/surface";
-import type {
-  CreateNotePayload,
-  Note,
-  NotesQueryInput,
-  SubscribeHandlers,
-  SubscribeOptions,
+import {
+  type CreateNotePayload,
+  type Note,
+  type NotesQueryInput,
+  type SubscribeHandlers,
+  type SubscribeOptions,
+  type UpdateNotePayload,
+  VaultConflictError,
+  VaultNotFoundError,
 } from "@openparachute/surface-client";
 
 export interface FakeSubscription {
@@ -38,7 +41,48 @@ export class FakeVault {
   queryInputs: NotesQueryInput[] = [];
   createdNotes: CreateNotePayload[] = [];
   deletedIds: string[] = [];
+  /** Every updateNote call, in order — payloads recorded VERBATIM. */
+  updateCalls: { id: string; payload: UpdateNotePayload }[] = [];
+  /** When set, updateNote throws it (transient-failure path). */
+  updateError: Error | null = null;
+  /** When set, updateNote awaits it before applying (in-flight race tests). */
+  updateGate: Promise<void> | null = null;
+  getNoteCalls = 0;
+  /** When set, getNote throws (degraded-revalidation failure path). */
+  getNoteError: Error | null = null;
   #idCounter = 0;
+  #versionCounter = 0;
+
+  /**
+   * Deliberately OPAQUE version strings (`v-1`, `v-2`, …) — not ISO
+   * timestamps. Any consumer that parses/normalizes `updatedAt` instead
+   * of treating it as a verbatim string breaks against this fake (§9).
+   */
+  nextVersion(): string {
+    return `v-${++this.#versionCounter}`;
+  }
+
+  /** Seed a note with content + a fresh opaque version. */
+  noteFixture(id: string, content: string, extra: Partial<Note> = {}): Note {
+    const note: Note = {
+      id,
+      createdAt: new Date().toISOString(),
+      updatedAt: this.nextVersion(),
+      content,
+      ...extra,
+    };
+    this.notes.set(id, note);
+    return note;
+  }
+
+  /** Simulate another writer (agent, sync job, sibling surface). */
+  externalEdit(id: string, content: string): Note {
+    const existing = this.notes.get(id);
+    if (!existing) throw new Error(`externalEdit: no note ${id}`);
+    const updated: Note = { ...existing, content, updatedAt: this.nextVersion() };
+    this.notes.set(id, updated);
+    return updated;
+  }
 
   subscribe(
     query: NotesQueryInput,
@@ -60,7 +104,43 @@ export class FakeVault {
   }
 
   async getNote(id: string): Promise<Note | null> {
+    this.getNoteCalls++;
+    if (this.getNoteError) throw this.getNoteError;
     return this.notes.get(id) ?? null;
+  }
+
+  /**
+   * Mirrors vault's PATCH optimistic-concurrency contract: `if_updated_at`
+   * (or `force`) is REQUIRED, and a stale baseline 409s with
+   * `VaultConflictError` — so reconciler tests exercise the real conflict
+   * path, not a scripted stub.
+   */
+  async updateNote(id: string, payload: UpdateNotePayload): Promise<Note> {
+    this.updateCalls.push({ id, payload });
+    if (this.updateError) throw this.updateError;
+    const existing = this.notes.get(id);
+    if (!existing) throw new VaultNotFoundError(`note ${id} not found`);
+    if (payload.force !== true) {
+      if (payload.if_updated_at === undefined) {
+        throw new Error("FakeVault.updateNote: if_updated_at or force is required");
+      }
+      if (payload.if_updated_at !== existing.updatedAt) {
+        throw new VaultConflictError({
+          current_updated_at: existing.updatedAt ?? null,
+          expected_updated_at: payload.if_updated_at,
+        });
+      }
+    }
+    const updated: Note = {
+      ...existing,
+      ...(payload.content !== undefined ? { content: payload.content } : {}),
+      updatedAt: this.nextVersion(),
+    };
+    this.notes.set(id, updated);
+    // The commit is already visible (vault's SSE would fire now); the gate
+    // models HTTP response latency AFTER the commit — the echo-race window.
+    if (this.updateGate) await this.updateGate;
+    return updated;
   }
 
   async createNote(payload: CreateNotePayload): Promise<Note> {
