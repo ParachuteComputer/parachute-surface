@@ -1,0 +1,3 @@
+# Scope a package-local `bun test` (no args) to this package's `src/`.
+[test]
+root = "src"
