@@ -38,6 +38,12 @@
  *     match what the modern fetch-style callers want.
  */
 
+import {
+  assertSubscribableQuery,
+  startSubscription,
+  type SubscribeHandlers,
+  type SubscribeOptions,
+} from "./subscribe.js";
 import type {
   CreateNotePayload,
   FindPathResult,
@@ -609,6 +615,74 @@ export class VaultClient {
     const out: { items: Note[]; nextCursor?: string } = { items };
     if (headerCursor) out.nextCursor = headerCursor;
     return out;
+  }
+
+  /**
+   * Live-query subscription over vault's `GET /api/subscribe` SSE endpoint
+   * (vault's live-query SSE design, 2026-06-08). Delivers one
+   * `onSnapshot(notes)` — the complete matching set — then `onUpsert(note)` /
+   * `onRemove(id)` as notes enter/change/leave the set. Returns the
+   * unsubscribe function.
+   *
+   * - **Query grammar** is the same as `queryNotes` (same server-side
+   *   parser), except `search`, `near`, and `cursor` are not
+   *   live-evaluable — this method throws on them synchronously (the
+   *   vault would 400).
+   * - **Transport is fetch-stream, not EventSource** — the bearer rides
+   *   the `Authorization` header instead of a `?key=` query param
+   *   (no token in proxy logs / browser history), and the method works
+   *   server-side (Bun/Node) where `EventSource` may not exist.
+   * - **Reconnects are self-correcting**: vault has no event replay, so a
+   *   reconnect re-delivers a *fresh snapshot* that replaces the
+   *   consumer's set — anything missed while disconnected is reconciled
+   *   wholesale. Backoff is exponential and capped (see
+   *   {@link SubscribeOptions}).
+   * - **Auth expiry**: a 401/403 on (re)connect drives the client's
+   *   `onAuthError` refresh seam once, then resubscribes with the fresh
+   *   token (also rotated into the client). Unrecoverable auth → the
+   *   subscription terminates with `onError(VaultAuthError)` +
+   *   `onStatus("closed")`.
+   *
+   * @example
+   * ```ts
+   * const unsubscribe = vault.subscribe(
+   *   { tag: "#channel-message", "meta[channel][eq]": "general" },
+   *   {
+   *     onSnapshot: (notes) => render(notes),
+   *     onUpsert: (note) => upsertRow(note),
+   *     onRemove: (id) => dropRow(id),
+   *     onStatus: (s) => setLive(s === "open"),
+   *   },
+   * );
+   * // later: unsubscribe();
+   * ```
+   */
+  subscribe(
+    query: URLSearchParams | Record<string, string>,
+    handlers: SubscribeHandlers,
+    opts: SubscribeOptions = {},
+  ): () => void {
+    const qs = new URLSearchParams(query);
+    assertSubscribableQuery(qs);
+    const s = qs.toString();
+    return startSubscription(
+      {
+        url: `${this.baseUrl}/api/subscribe${s ? `?${s}` : ""}`,
+        resolveToken: () => this.resolveToken(),
+        // Reuse the request path's refresh-on-401 seam; rotate the cached
+        // token the same way `requestWithRetry` does on a successful refresh.
+        refreshToken: this.onAuthError
+          ? async () => {
+              const fresh = await this.onAuthError?.();
+              if (fresh) this.token = fresh;
+              return fresh ?? null;
+            }
+          : undefined,
+        fetchImpl: this.fetchImpl,
+      },
+      handlers,
+      opts,
+    );
   }
 
   async getNote(

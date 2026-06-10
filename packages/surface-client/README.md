@@ -20,6 +20,7 @@ import {
 | `oauth`                       | `ParachuteOAuth` driver class — PKCE + same-hub auto-trust                        |
 | `discovery`                   | `discoverAuthServer` (RFC 8414) + `registerClient` (RFC 7591 DCR)                |
 | `vault-client`                | `VaultClient` REST client with auto-refresh on 401 + a typed error hierarchy     |
+| `subscribe`                   | `VaultClient.subscribe()` — live-query SSE (snapshot + upsert/remove, auto-reconnect) |
 | `token-storage`               | `loadToken` / `saveToken` / `clearToken` / `clearAllTokensForApp`                |
 | `mount`                       | runtime-tenancy readers — `getMountBase` / `getTenantId` / `getHubOrigin` / `getVaultUrl` |
 | `sw-reload`                   | `reloadAfterServiceWorkerUpdate` — PWA-mode SW reload helper                      |
@@ -205,6 +206,32 @@ if (stored) {
 ```
 
 For scripts (Bun / Node), `VaultClient.fromHub({ hubOrigin, vaultName, token })` composes the canonical URL for you.
+
+### Live queries — `subscribe()`
+
+Any view that polls `queryNotes` on a timer can subscribe instead. `VaultClient.subscribe()` opens vault's live-query SSE endpoint (`GET /api/subscribe`): you get one `onSnapshot(notes)` with the complete matching set, then `onUpsert(note)` / `onRemove(id)` as notes enter, change, or leave the set.
+
+```ts
+const unsubscribe = vault.subscribe(
+  { tag: "#channel-message", "meta[channel][eq]": "general" },
+  {
+    onSnapshot: (notes) => render(notes),      // replaces your whole set
+    onUpsert:   (note)  => upsertRow(note),
+    onRemove:   (id)    => dropRow(id),         // idempotent — ignore unknown ids
+    onStatus:   (s)     => setLive(s === "open"), // connecting | open | reconnecting | closed
+    onError:    (err)   => console.warn(err),
+  },
+);
+// later: unsubscribe();
+```
+
+Things worth knowing:
+
+- **Query grammar is the same as `queryNotes`** (same server-side parser), except `search`, `near`, and `cursor` aren't live-evaluable — `subscribe()` throws on them synchronously rather than letting the vault 400.
+- **The bearer rides the `Authorization` header, not the URL.** The transport is a `fetch` stream with hand-parsed SSE frames, *not* `EventSource` — `EventSource` can't set headers, which would force the token into a `?key=` query param (proxy logs, browser history). This also makes `subscribe()` work server-side (Bun/Node) where `EventSource` may not exist.
+- **Reconnects are self-correcting.** Vault has no event replay; on reconnect (capped exponential backoff) the client re-subscribes and the fresh `onSnapshot` *replaces* your set, reconciling anything missed while disconnected. Treat every snapshot as the new truth, not a delta.
+- **Token expiry is handled.** A 401 on (re)connect drives the client's `onAuthError` refresh seam once and resubscribes with the fresh token. If refresh isn't possible, the subscription terminates: `onError(VaultAuthError)` then `onStatus("closed")` — without a `"closed"`, it's still retrying.
+- **Stop it** via the returned unsubscribe function or an `AbortSignal` (`subscribe(query, handlers, { signal })`).
 
 ### Don't redeclare the core types
 

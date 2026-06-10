@@ -79,6 +79,19 @@ export {
   type VaultClientOptions,
 } from "./vault-client.js";
 
+// Live-query SSE subscription — `VaultClient.subscribe()` is the consumer
+// API; the parser + loop primitives are exported for advanced/raw use.
+export {
+  parseSSEStream,
+  startSubscription,
+  assertSubscribableQuery,
+  type SSEEvent,
+  type SubscribeHandlers,
+  type SubscribeOptions,
+  type SubscribeStatus,
+  type SubscribeTransport,
+} from "./subscribe.js";
+
 // Vault REST resource types.
 export type {
   VaultInfo,
