@@ -9,7 +9,7 @@ Dependency-range fix, no code changes.
   exists in surface-client ≥ 0.3.0 — under the 0.1.0 ranges, npm resolved
   surface-client 0.2.0 and the subscribe path failed at runtime.
 - `@openparachute/surface` range corrected `^0.3.0` → `^0.3.1` for the same
-  reason (`SurfaceStateStore` / `SurfaceHostContext` ship in 0.3.1).
+  reason (the host's `SurfaceStateStore` export ships in 0.3.1).
 
 **Do not use 0.1.0** — it was published manually ahead of the range fix and
 installs a broken dependency graph in a fresh project.
