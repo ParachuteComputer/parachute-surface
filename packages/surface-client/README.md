@@ -73,6 +73,11 @@ const surface = createVaultSurface({
 
 The returned `VaultSurface` is `{ oauth, bootstrap, hubUrl, vaultName, login(), handleCallback(), getClient(), logout() }`. `oauth` is the underlying `ParachuteOAuth` if you need to drop down to the low-level dance. Everything below this section is that low-level layer — reach for it when the factory's defaults don't fit.
 
+**Session resilience (return visits just work).** Hub access tokens live ~15 minutes, so *every* return visit starts with an expired-but-refreshable token. Two behaviors make that path safe without app-side workarounds:
+
+- **Cold-load refresh** — `getClient()`'s refresh seam re-seeds the DCR client_id from the factory's durable cache (`parachute_surface_dcr:<appName>` in localStorage) before exchanging the refresh token, so the first 401 on a fresh page load refreshes instead of throwing. If the cache is gone (or the hub issuer changed), refresh reports "not possible" and your UI falls back to `login()` — a fresh registration is never attempted mid-refresh, because the refresh token is bound to the original client_id.
+- **Single-flight refresh** — N parallel queries hitting N 401s collapse into **one** token-endpoint exchange (shared promise per vault). This is correctness, not polish: the hub rotates refresh tokens and treats a concurrent re-use as replay/theft, revoking the whole token family — i.e. a second concurrent refresh used to kill the session.
+
 ---
 
 ## Two deployment shapes — read this first

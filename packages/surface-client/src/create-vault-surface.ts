@@ -40,7 +40,7 @@
  * `handleCallback()` / `getClient()` into its own components.
  */
 
-import { discoverAuthServer, registerClient } from "./discovery.js";
+import { registerClient } from "./discovery.js";
 import { getHubOrigin, getMountBase, getTenantId } from "./mount.js";
 import { type OAuthClientInfo, ParachuteOAuth } from "./oauth.js";
 import type { TokenStorageLike } from "./oauth.js";
@@ -252,29 +252,74 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
     opts.fetchImpl ?? (typeof fetch !== "undefined" ? fetch.bind(globalThis) : undefined);
   const dcrCache = resolveDcrCache(opts.dcrCacheStorage);
 
-  /**
-   * For the standalone path: ensure a DCR client_id is registered + seeded
-   * into the driver. No-op (returns early) for the hosted path, which fetches
-   * its client_id lazily from the host endpoint inside `beginFlow`.
-   */
-  async function ensureClientId(): Promise<void> {
-    if (bootstrap === "hosted") return;
-    const metadata = await discoverAuthServer(hubUrl, fetchImpl);
-    let clientId = loadCachedClientId(dcrCache, appName, metadata.issuer, redirectUri);
-    if (!clientId) {
-      const registration = await registerClient(
-        metadata.registration_endpoint,
-        { clientName: opts.clientName, redirectUri },
-        fetchImpl,
-      );
-      clientId = registration.client_id;
-      saveCachedClientId(dcrCache, appName, metadata.issuer, redirectUri, clientId);
-    }
-    const info: OAuthClientInfo = {
+  /** Seeded-this-page-load guard so repeat seeds skip the discovery hop. */
+  let clientIdSeeded = false;
+
+  function seedInfo(clientId: string): OAuthClientInfo {
+    return {
       client_id: clientId,
       scopes: scope.split(/\s+/).filter(Boolean),
     };
-    oauth.useClientId(info);
+  }
+
+  /**
+   * Seed the DCR client_id from the **durable cache only** — never
+   * registers. The cold-load fix: `refreshAccessToken` needs a client_id,
+   * but only `login()` / `handleCallback()` used to seed it, so the FIRST
+   * refresh on a fresh page load (the common path — hub access tokens
+   * live ~15 minutes, every return visit starts expired) threw before
+   * reaching the network. `getClient()`'s refresh seam calls this first,
+   * recovering the client_id registered on a previous visit from
+   * `parachute_surface_dcr:<appName>` in localStorage.
+   *
+   * Registration is deliberately NOT a fallback here: a refresh token is
+   * bound to the client_id it was issued to, so refreshing with a
+   * freshly-registered client would be rejected anyway. Cache miss →
+   * `false` → the caller reports "refresh not possible" and the UX falls
+   * back to a fresh `login()`.
+   *
+   * Returns true when a client_id is available for the refresh path
+   * (hosted bootstrap always qualifies — its driver fetches the id from
+   * the host endpoint on demand).
+   */
+  async function seedClientIdFromCache(): Promise<boolean> {
+    if (bootstrap === "hosted") return true;
+    if (clientIdSeeded) return true;
+    // Already seeded directly on the driver (the documented advanced path:
+    // `surface.oauth.useClientId(...)`)? That identity wins — don't demand
+    // a factory-cache entry that path never wrote.
+    if (oauth.peekClientId()) {
+      clientIdSeeded = true;
+      return true;
+    }
+    // `oauth.getMetadata()` (not a bare discoverAuthServer) so discovery is
+    // shared with the driver's own cache — at most one round-trip per page.
+    const metadata = await oauth.getMetadata();
+    const clientId = loadCachedClientId(dcrCache, appName, metadata.issuer, redirectUri);
+    if (!clientId) return false;
+    oauth.useClientId(seedInfo(clientId));
+    clientIdSeeded = true;
+    return true;
+  }
+
+  /**
+   * For the standalone path: ensure a DCR client_id is registered + seeded
+   * into the driver — cache first, full registration on miss. No-op
+   * (returns early) for the hosted path, which fetches its client_id
+   * lazily from the host endpoint inside `beginFlow`.
+   */
+  async function ensureClientId(): Promise<void> {
+    if (bootstrap === "hosted") return;
+    if (await seedClientIdFromCache()) return;
+    const metadata = await oauth.getMetadata();
+    const registration = await registerClient(
+      metadata.registration_endpoint,
+      { clientName: opts.clientName, redirectUri },
+      fetchImpl,
+    );
+    saveCachedClientId(dcrCache, appName, metadata.issuer, redirectUri, registration.client_id);
+    oauth.useClientId(seedInfo(registration.client_id));
+    clientIdSeeded = true;
   }
 
   return {
@@ -318,11 +363,19 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
         accessToken: stored.accessToken,
         // Refresh-on-401: re-read the latest stored refresh token (it may have
         // rotated since this client was built), exchange it, return the fresh
-        // access token. Returns null when refresh isn't possible.
+        // access token. Returns null when refresh isn't possible. Concurrent
+        // 401s collapse into ONE exchange via ParachuteOAuth's single-flight
+        // (the hub's rotation replay-detection revokes the token family on a
+        // duplicate concurrent refresh).
         onAuthError: async () => {
           const current = oauth.getToken(vaultName);
           const refreshToken = current?.refreshToken;
           if (!refreshToken) return null;
+          // Cold-load fix: on a fresh page load nothing has seeded the DCR
+          // client_id yet — recover it from the durable cache before the
+          // exchange. Cache miss = refresh not possible (a new registration
+          // couldn't redeem this refresh token anyway) → null → sign-in.
+          if (!(await seedClientIdFromCache())) return null;
           const { token } = await oauth.refreshAccessToken(refreshToken, vaultName);
           return token.access_token;
         },
