@@ -62,8 +62,8 @@ describe("App shell", () => {
     expect(heading).toHaveTextContent(/Parachute/);
     expect(heading).toHaveTextContent(/surface/);
     expect(screen.getByRole("link", { name: "Parachute · surface" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Modules" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add UI" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Surfaces" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add surface" })).toBeInTheDocument();
   });
 });
 

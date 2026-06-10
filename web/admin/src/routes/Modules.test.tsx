@@ -78,7 +78,7 @@ describe("Modules", () => {
   test("renders empty state when no UIs", async () => {
     withFetchMock(buildFetch({}));
     renderWithRouter();
-    expect(await screen.findByText(/No UIs installed yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No surfaces installed yet/)).toBeInTheDocument();
   });
 
   test("renders rows for installed UIs", async () => {
@@ -426,6 +426,246 @@ describe("Modules", () => {
     renderWithRouter();
     await screen.findByText("Alpha");
     expect(screen.queryByText(/Schema requirements/)).toBeNull();
+  });
+
+  // --- R3b: list chips ----------------------------------------------------
+
+  test("rows show real status, audience badge, backed indicator + credential chip", async () => {
+    withFetchMock(
+      buildFetch({
+        uis: [
+          {
+            name: "boulder",
+            dirName: "boulder",
+            displayName: "Woven Boulder",
+            path: "/surface/boulder",
+            scopes_required: ["vault:*:read"],
+            pwa: false,
+            audience: "public",
+            public: true,
+            status: "backend-error",
+            statusReason: "factory threw",
+            server: {
+              entry: "server/index.js",
+              format: "markdown",
+              capabilities: [],
+              timeoutMs: 30000,
+            },
+            credential: {
+              state: "ok",
+              connection_id: "cred-surface-vault-default",
+              vault: "default",
+              scope: "vault:default:read",
+              scoped_tags: ["meeting"],
+            },
+          },
+        ],
+      }),
+    );
+    renderWithRouter();
+    expect(await screen.findByText("backend error")).toBeInTheDocument();
+    expect(screen.getByText("public")).toBeInTheDocument();
+    expect(screen.getByText("backed")).toBeInTheDocument();
+    expect(screen.getByText("vault: default")).toBeInTheDocument();
+  });
+
+  // --- R3b: composed remove ------------------------------------------------
+
+  /** A backed UI whose credential connection is exclusively bound. */
+  function backedUi(credential: Record<string, unknown> | null) {
+    return {
+      name: "backed",
+      dirName: "backed",
+      displayName: "Backed",
+      path: "/surface/backed",
+      scopes_required: [],
+      pwa: false,
+      audience: "hub-users",
+      public: false,
+      status: "active",
+      server: { entry: "server/index.js", format: "markdown", capabilities: [], timeoutMs: 30000 },
+      credential,
+    };
+  }
+
+  function composedFetch(opts: {
+    uis: unknown[];
+    log: Array<{ url: string; method: string }>;
+    connectionDeleteStatus?: number;
+    removeBody?: unknown;
+  }): typeof fetch {
+    return vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      opts.log.push({ url, method });
+      if (method === "DELETE" && url.includes("/admin/connections/")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              opts.connectionDeleteStatus === 200 ? { ok: true } : { error: "unauthorized" },
+            ),
+            {
+              status: opts.connectionDeleteStatus ?? 200,
+            },
+          ),
+        );
+      }
+      if (method === "DELETE") {
+        return Promise.resolve(
+          new Response(JSON.stringify(opts.removeBody ?? { ok: true, removed: "backed" }), {
+            status: 200,
+          }),
+        );
+      }
+      if (url.endsWith("/surface/dev/list")) {
+        return Promise.resolve(new Response(JSON.stringify({ uis: [] }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ uis: opts.uis, skipped: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as unknown as typeof fetch;
+  }
+
+  test("uninstalling a backed surface tears down its hub connection FIRST, then the host removal", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const log: Array<{ url: string; method: string }> = [];
+    withFetchMock(
+      composedFetch({
+        uis: [
+          backedUi({
+            state: "ok",
+            connection_id: "cred-surface-vault-default",
+            vault: "default",
+          }),
+        ],
+        log,
+        connectionDeleteStatus: 200,
+      }),
+    );
+    renderWithRouter();
+    await userEvent.click(await screen.findByRole("button", { name: /Uninstall/ }));
+    await waitFor(() => {
+      const deletes = log.filter((c) => c.method === "DELETE");
+      expect(deletes).toHaveLength(2);
+      expect(deletes[0]?.url).toContain("/admin/connections/cred-surface-vault-default");
+      expect(deletes[1]?.url).toContain("/surface/backed");
+    });
+    expect(await screen.findByText(/torn down — credential revoked/)).toBeInTheDocument();
+  });
+
+  test("hub teardown failure + operator declines → nothing removed (two-step honest ask)", async () => {
+    const confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true) // intent confirm
+      .mockReturnValueOnce(false); // decline proceed-without-teardown
+    const log: Array<{ url: string; method: string }> = [];
+    withFetchMock(
+      composedFetch({
+        uis: [backedUi({ state: "ok", connection_id: "cred-x", vault: "default" })],
+        log,
+        connectionDeleteStatus: 401,
+      }),
+    );
+    renderWithRouter();
+    await userEvent.click(await screen.findByRole("button", { name: /Uninstall/ }));
+    await screen.findByText(/Removal cancelled/);
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    // The second confirm carried the failure detail + the explicit choice.
+    expect(String(confirmSpy.mock.calls[1]?.[0])).toContain("Hub teardown failed");
+    // The host DELETE never ran.
+    expect(
+      log.find((c) => c.method === "DELETE" && c.url.includes("/surface/backed")),
+    ).toBeUndefined();
+  });
+
+  test("hub teardown failure + operator proceeds → host removal runs, banner says hub side did NOT run", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const log: Array<{ url: string; method: string }> = [];
+    withFetchMock(
+      composedFetch({
+        uis: [backedUi({ state: "ok", connection_id: "cred-x", vault: "default" })],
+        log,
+        connectionDeleteStatus: 500,
+        removeBody: { ok: true, removed: "backed" },
+      }),
+    );
+    renderWithRouter();
+    await userEvent.click(await screen.findByRole("button", { name: /Uninstall/ }));
+    await waitFor(() => {
+      expect(
+        log.find((c) => c.method === "DELETE" && c.url.includes("/surface/backed")),
+      ).toBeTruthy();
+    });
+    expect(await screen.findByText(/Hub teardown did NOT run/)).toBeInTheDocument();
+    expect(screen.getByText(/hub admin → Connections/)).toBeInTheDocument();
+  });
+
+  test("shared credential → connection left standing, no hub DELETE", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const log: Array<{ url: string; method: string }> = [];
+    withFetchMock(
+      composedFetch({
+        uis: [
+          backedUi({
+            state: "ok",
+            connection_id: "cred-shared",
+            vault: "default",
+            shared_with: ["other-surface"],
+          }),
+        ],
+        log,
+      }),
+    );
+    renderWithRouter();
+    await userEvent.click(await screen.findByRole("button", { name: /Uninstall/ }));
+    await waitFor(() => {
+      expect(
+        log.find((c) => c.method === "DELETE" && c.url.includes("/surface/backed")),
+      ).toBeTruthy();
+    });
+    expect(log.find((c) => c.url.includes("/admin/connections/"))).toBeUndefined();
+    expect(
+      await screen.findByText(/left standing \(shared with other-surface\)/),
+    ).toBeInTheDocument();
+  });
+
+  test("DCR orphan case (hub can't delete clients) is surfaced, not swallowed", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const log: Array<{ url: string; method: string }> = [];
+    withFetchMock(
+      composedFetch({
+        uis: [
+          {
+            name: "backed",
+            dirName: "backed",
+            displayName: "Backed",
+            path: "/surface/backed",
+            scopes_required: [],
+            pwa: false,
+            public: false,
+            status: "static-only",
+            credential: null,
+          },
+        ],
+        log,
+        removeBody: {
+          ok: true,
+          removed: "backed",
+          oauth_revoke: {
+            localFileRemoved: true,
+            hubDeleteStatus: "unsupported",
+            detail: "hub returned 405; DELETE not supported",
+          },
+        },
+      }),
+    );
+    renderWithRouter();
+    await userEvent.click(await screen.findByRole("button", { name: /Uninstall/ }));
+    expect(
+      await screen.findByText(/OAuth client record may remain registered/),
+    ).toBeInTheDocument();
   });
 
   test("Disable dev button POSTs /dev/disable", async () => {

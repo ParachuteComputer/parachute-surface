@@ -2,9 +2,9 @@
  * parachute-surface admin SPA.
  *
  * Three routes:
- *   - `/`         — Modules (list installed UIs)
- *   - `/add`      — Add UI form
- *   - `/info/:n`  — Per-UI detail
+ *   - `/`         — Surfaces (list installed surfaces)
+ *   - `/add`      — Add-surface flow (inspect → confirm, R3b)
+ *   - `/info/:n`  — Per-surface detail (status / audience / OAuth / credential)
  *
  * Auth (boundary C4): every API call carries a Bearer resolved by
  * `lib/api.ts` — a `surface:admin` JWT silently minted from the hub session
@@ -37,8 +37,8 @@ export function App() {
           </Link>
         </h1>
         <nav className="app-nav">
-          <Link to="/">Modules</Link>
-          <Link to="/add">Add UI</Link>
+          <Link to="/">Surfaces</Link>
+          <Link to="/add">Add surface</Link>
           <a href="/">Back to hub</a>
         </nav>
       </header>

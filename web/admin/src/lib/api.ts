@@ -39,6 +39,33 @@ export type {
 
 export const TOKEN_STORAGE_KEY = "parachute_operator_token";
 
+export type UiAudience = "public" | "hub-users" | "operator";
+
+/** The validated `server` block of a backed surface (meta-schema P1). */
+export type UiServerBlock = {
+  entry: string;
+  format: "markdown" | "opaque";
+  capabilities: string[];
+  timeoutMs: number;
+  csp?: Record<string, string[]>;
+};
+
+/**
+ * Credential lifecycle summary for a backed surface (R3b — mirrors
+ * surface-host's `CredentialSummary`). `null` for static surfaces.
+ */
+export type CredentialSummary = {
+  state: "ok" | "expiring" | "expired" | "needs-operator" | "none" | "ambiguous" | "missing";
+  connection_id?: string;
+  vault: string;
+  scope?: string;
+  scoped_tags?: string[];
+  expires_at?: string;
+  reason?: string;
+  candidates?: string[];
+  shared_with?: string[];
+};
+
 export type UiSummary = {
   name: string;
   dirName: string;
@@ -50,8 +77,10 @@ export type UiSummary = {
   scopes_required: string[];
   pwa: boolean;
   /** Audience exposure (canonical; `public` is the derived legacy view). */
-  audience?: "public" | "hub-users" | "operator";
+  audience?: UiAudience;
   public: boolean;
+  /** The validated server block when the surface is backed; null/absent otherwise. */
+  server?: UiServerBlock | null;
   /**
    * Real per-surface status (surface-runtime P5): static surfaces report
    * "static-only"; backed surfaces report their backend lifecycle state.
@@ -59,6 +88,8 @@ export type UiSummary = {
   status: "static-only" | "active" | "failing" | "backend-error" | "backend-disabled";
   /** Operator-facing reason for a non-healthy backend, when any. */
   statusReason?: string;
+  /** Credential lifecycle at a glance (R3b). Null/absent for static surfaces. */
+  credential?: CredentialSummary | null;
   oauthClientId?: string;
   oauthStatus?: string;
   required_schema?: RequiredSchemaDeclaration;
@@ -83,6 +114,8 @@ export type AddRequestBody = {
   tagline?: string;
   scopes_required?: string[];
   vault_default?: string;
+  /** Audience exposure chosen in the add form (default hub-users). */
+  audience?: UiAudience;
   force?: boolean;
 };
 
@@ -156,7 +189,7 @@ async function resolveBearer(): Promise<string | null> {
 }
 
 async function call<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PATCH",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -179,7 +212,7 @@ type CallOutcome<T> =
   | { unauthorized: true; error: ApiError; bearer: string | null };
 
 async function callOnce<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "DELETE" | "PATCH",
   path: string,
   body: unknown,
   bearer: string | null,
@@ -219,8 +252,100 @@ export function addUi(body: AddRequestBody): Promise<AddResponse> {
   return call("POST", "/surface/add", body);
 }
 
-export function removeUi(name: string): Promise<{ ok: boolean; removed: string }> {
+// --- R3b: inspect-before-install ------------------------------------------
+
+export type InspectResponse = {
+  ok: boolean;
+  source_kind: "path" | "npm" | "url";
+  has_meta: boolean;
+  /** Validated meta (defaults filled) — null when absent or invalid. */
+  meta: {
+    name: string;
+    displayName: string;
+    tagline?: string;
+    path: string;
+    version?: string;
+    scopes_required: string[];
+    vault_default?: string;
+    pwa: boolean;
+    audience: UiAudience;
+    server?: UiServerBlock;
+    required_schema?: RequiredSchemaDeclaration;
+  } | null;
+  /** Field-level validation problems when the staged meta.json is invalid. */
+  meta_errors: Array<{ path: string; message: string }> | null;
+  warnings: string[];
+  /** The server block — the trust act to render BEFORE install. */
+  server: UiServerBlock | null;
+};
+
+export function inspectSource(source: string): Promise<InspectResponse> {
+  return call("POST", "/surface/inspect", { source });
+}
+
+/** Composed-remove response: the DCR-unregister outcome rides along. */
+export type RemoveResponse = {
+  ok: boolean;
+  removed: string;
+  oauth_revoke?: {
+    localFileRemoved: boolean;
+    hubDeleteStatus: "ok" | "not_found" | "unsupported" | "error" | "unreachable" | "skipped";
+    detail?: string;
+  };
+};
+
+export function removeUi(name: string): Promise<RemoveResponse> {
   return call("DELETE", `/surface/${encodeURIComponent(name)}`);
+}
+
+// --- R3b: post-install edits + DCR retry + credential visibility -----------
+
+export function patchUi(
+  name: string,
+  body: { audience: UiAudience },
+): Promise<{ ok: boolean; ui: UiSummary }> {
+  return call("PATCH", `/surface/${encodeURIComponent(name)}`, body);
+}
+
+export type RegisterOauthResponse = {
+  ok: boolean;
+  oauth_client: {
+    client_id: string;
+    client_name: string;
+    redirect_uris: string[];
+    scope: string;
+    status?: string;
+    registered_at: string;
+    hub_url: string;
+  };
+};
+
+export function registerOauth(name: string): Promise<RegisterOauthResponse> {
+  return call("POST", `/surface/${encodeURIComponent(name)}/register-oauth`);
+}
+
+export type HostCredential = {
+  connection_id: string;
+  key: string;
+  vault: string;
+  scope: string;
+  scoped_tags: string[];
+  expires_at: string;
+  renew_path: string;
+  status: "ok" | "needs-operator";
+  updated_at: string;
+  /** Installed backed surfaces currently resolving to this connection. */
+  used_by: string[];
+};
+
+export function listHostCredentials(): Promise<{ ok: boolean; credentials: HostCredential[] }> {
+  return call("GET", "/surface/api/credentials");
+}
+
+export function patchHostConfig(body: {
+  credential_connections: Record<string, string | null>;
+}): Promise<{ ok: boolean; credential_connections: Record<string, string> }> {
+  return call("PATCH", "/surface/api/config", body);
 }
 
 export function reloadUi(name: string): Promise<{ ok: boolean; ui: UiSummary | null }> {
