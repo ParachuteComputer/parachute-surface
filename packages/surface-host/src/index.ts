@@ -14,11 +14,16 @@
 
 import pkg from "../package.json" with { type: "json" };
 
-import { addUiInternal, buildUisExtraFieldForBoot } from "./admin-routes.ts";
+import { addUiInternal, buildSelfRegisterExtraFields } from "./admin-routes.ts";
+import { getHubOrigin } from "./auth.ts";
+import { BackendSupervisor } from "./backend-supervisor.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
+import { startCredentialRenewal } from "./credential-renewal.ts";
+import { createCredentialTokenProvider } from "./credential-store.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
+import { createHostContextBuilder } from "./host-context.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { scanUis } from "./ui-registry.ts";
@@ -40,6 +45,7 @@ export * from "./dev-watcher.ts";
 export {
   routeAdmin,
   buildUisExtraFieldForBoot,
+  buildSelfRegisterExtraFields,
   addUiInternal,
   type AdminHandlerOpts,
   type AdminMutableState,
@@ -59,6 +65,26 @@ export {
   type ProvisionSchemaResult,
 } from "./provision-schema.ts";
 export { routeDev, type DevRoutesOpts } from "./dev-routes.ts";
+export * from "./backend-types.ts";
+export {
+  BackendSupervisor,
+  mountSpecFor,
+  DEFAULT_CRASH_LOOP_MAX,
+  DEFAULT_CRASH_LOOP_WINDOW_MS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  type BackendSupervisorOpts,
+} from "./backend-supervisor.ts";
+export * from "./host-context.ts";
+export * from "./credential-store.ts";
+export * from "./credential-renewal.ts";
+export * from "./security-headers.ts";
+export { createSurfaceWsHandlers, type SurfaceWsData, type SurfaceWsDeps } from "./backend-ws.ts";
+export { ScopedVaultClient, type ScopedVaultClientOptions } from "./scoped-vault-client.ts";
+export {
+  SurfaceStateStore,
+  type SurfaceStateEntry,
+  type SurfaceStateEntryMeta,
+} from "./surface-state-store.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
 export { startHttpServer } from "./http-server.ts";
@@ -118,6 +144,13 @@ export type ServeOptions = {
    * need this; bootstrap is fire-and-forget for the daemon.
    */
   awaitBootstrap?: boolean;
+  /**
+   * Override the credentials dir (tests). Defaults to
+   * `resolveCredentialsDir()` — `$PARACHUTE_HOME/surface/credentials/`.
+   */
+  credentialsDir?: string;
+  /** Skip the boot-time credential renewal sweep + loop (tests). */
+  skipCredentialRenewal?: boolean;
 };
 
 export type ServeHandle = {
@@ -135,6 +168,13 @@ export type ServeHandle = {
    * Tests `await handle.bootstrap` to assert post-bootstrap state.
    */
   bootstrap?: Promise<import("./bootstrap.ts").BootstrapResult>;
+  /**
+   * Resolves once the boot-time backend mount pass (P5) completes.
+   * Mounting is fire-and-forget for the daemon (the HTTP server is up
+   * first; a backed surface 503s its api namespace until mounted); tests
+   * await this to assert post-mount state.
+   */
+  backendsReady?: Promise<void>;
 };
 
 /**
@@ -176,6 +216,27 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     })),
   };
 
+  // Backend supervisor (P5) — mounts every backed surface's server entry
+  // with the full host context (P2): ScopedVaultClient + SurfaceStateStore
+  // + hub-stamped trust readers. The vault token provider reads the
+  // HOST-custodied credential store fresh per request (P3) — deliveries +
+  // renewals take effect without a remount; until a credential connection
+  // is provisioned, vault calls fail with a clear operator-actionable
+  // error while the backend still mounts and serves credential-free routes.
+  const backends = new BackendSupervisor({
+    buildContext: createHostContextBuilder({
+      config,
+      logger,
+      tokenProviderFor: (ui) =>
+        createCredentialTokenProvider(ui, {
+          ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+          getConfig: () => state.config,
+        }),
+    }),
+    logger,
+  });
+  state.backends = backends;
+
   const startedAt = new Date();
   const server = startHttpServer({
     state,
@@ -194,6 +255,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       npmSpawnFn: opts.npmSpawnFn,
       logger,
       skipSelfRegisterRefresh: opts.skipSelfRegister,
+      ...(opts.credentialsDir !== undefined ? { credentialsDir: opts.credentialsDir } : {}),
     },
   });
 
@@ -214,6 +276,26 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   // when the server uses unix sockets, which we don't here) — fall back to
   // the operator's requested port. Both paths produce a `number`.
   const portWritten = server.port ?? port;
+
+  // Boot-time backend mount pass (P5). Fire-and-forget: the HTTP server is
+  // already up (a backed surface 503s its api namespace until its mount
+  // lands); failures are contained per-surface inside sync().
+  const backendsReady = backends
+    .sync(state.registeredUis)
+    .catch((e) => logger.warn(`[app] backend mount pass failed: ${(e as Error).message}`));
+
+  // Credential renewal (P3): boot sweep + interval loop, renewing each
+  // custodied credential against the hub by proof of possession before it
+  // expires. Terminal 401s mark the credential needs-operator (no retry
+  // spin); the loop never pins the process (unref'd timer) and stops on
+  // shutdown.
+  const renewal = opts.skipCredentialRenewal
+    ? undefined
+    : startCredentialRenewal({
+        hubOrigin: getHubOrigin(config.hub_url),
+        ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+        logger,
+      });
 
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
@@ -252,7 +334,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       boundPort: portWritten,
       installDir: resolveProjectRoot(),
       manifestPath: opts.manifestPath,
-      extraFields: { uis: buildUisExtraFieldForBoot(state.registeredUis) },
+      extraFields: buildSelfRegisterExtraFields(state.registeredUis),
       logger,
     });
   }
@@ -263,6 +345,11 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     // The watcher slots own AbortControllers + FSWatchers; without this
     // the daemon can hang on shutdown until the FSEvents stream closes.
     stopAllWatchers();
+    // Stop the credential-renewal loop before the backends go down.
+    renewal?.stop();
+    // Unmount every backed surface: ctx.shutdownSignal aborts, bounded
+    // shutdown() awaited — before the HTTP server drops.
+    await backends.stop();
     server.stop();
     logger.log("[app] stopped");
   };
@@ -272,6 +359,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     server,
     state,
     stop,
+    backendsReady,
     ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
   };
 }
@@ -394,7 +482,7 @@ export async function runBootstrap(args: {
         boundPort: args.boundPort,
         installDir: resolveProjectRoot(),
         manifestPath: args.manifestPath,
-        extraFields: { uis: buildUisExtraFieldForBoot(args.adminOpts.state.registeredUis) },
+        extraFields: buildSelfRegisterExtraFields(args.adminOpts.state.registeredUis),
         logger,
       });
     } catch (e) {

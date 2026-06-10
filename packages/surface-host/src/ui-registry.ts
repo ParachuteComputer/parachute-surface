@@ -22,7 +22,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import { resolveUisDir } from "./config.ts";
-import { InvalidMetaError, type UiMeta, parseMeta } from "./meta-schema.ts";
+import { InvalidMetaError, type UiMeta, parseMetaWithDiagnostics } from "./meta-schema.ts";
 
 export type UiStatus =
   | "active"
@@ -65,11 +65,19 @@ export type ScanOpts = {
 };
 
 /**
- * Path the admin SPA reserves once Phase 1.2 lands. A meta.json that tries
- * to claim it is rejected at scan time. Kept as a const so Phase 1.2's
- * `add` flow can share the same check.
+ * Paths the HOST reserves. A meta.json that tries to claim one is rejected
+ * at scan time (the `add` flow shares the check):
+ *   - /surface/admin — the admin SPA
+ *   - /surface/dev   — dev-mode routes
+ *   - /surface/api   — host API namespace (the hub's credential-delivery
+ *     endpoint lives at /surface/api/credential — P3; a surface named
+ *     "api" could otherwise shadow it)
  */
-export const RESERVED_PATHS: ReadonlySet<string> = new Set(["/surface/admin", "/surface/dev"]);
+export const RESERVED_PATHS: ReadonlySet<string> = new Set([
+  "/surface/admin",
+  "/surface/dev",
+  "/surface/api",
+]);
 
 /**
  * Scan `uisDir` for declared UIs. Best-effort: a malformed UI is skipped +
@@ -138,7 +146,13 @@ export function scanUis(opts: ScanOpts = {}): ScanResult {
 
     let meta: UiMeta;
     try {
-      meta = parseMeta(raw);
+      const parsed = parseMetaWithDiagnostics(raw);
+      meta = parsed.meta;
+      // Non-fatal diagnostics (e.g. the legacy-`public` deprecation note) —
+      // surfaced in the daemon log / `parachute-surface list`, never a skip.
+      for (const w of parsed.warnings) {
+        logger.warn(`[app] ${dirName}: ${w}`);
+      }
     } catch (e) {
       const reason =
         e instanceof InvalidMetaError

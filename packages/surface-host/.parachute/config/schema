@@ -56,6 +56,12 @@
       "type": "boolean",
       "default": true,
       "description": "When a UI's meta.json declares required_schema, auto-provision its tags in vault on add. Best-effort: errors log + warn but don't fail the install. See patterns#57."
+    },
+    "credential_connections": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {},
+      "description": "Explicit surface-name -> credential-connection-id binding (surface-runtime P3). Needed only when more than one hub-delivered credential matches a surface's vault; the single-credential case binds automatically."
     }
   },
   "x-scopes": ["app:read", "app:admin"]

@@ -46,6 +46,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     dev_mode_allowed: true,
     bootstrap_default_apps: { enabled: true, apps: ["@openparachute/notes-ui"] },
     auto_provision_required_schema: false,
+    credential_connections: {},
     ...overrides,
   };
 }

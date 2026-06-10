@@ -268,6 +268,7 @@ describe("metaSchemaJson", () => {
     const props = schema.properties as Record<string, unknown>;
     expect(Object.keys(props).sort()).toEqual(
       [
+        "audience",
         "dev_build_cmd",
         "dev_debounce_ms",
         "dev_watch_dir",
@@ -280,6 +281,7 @@ describe("metaSchemaJson", () => {
         "pwa_service_worker",
         "required_schema",
         "scopes_required",
+        "server",
         "tagline",
         "vault_default",
         "version",

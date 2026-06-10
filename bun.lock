@@ -85,13 +85,13 @@
     },
     "packages/surface-host": {
       "name": "@openparachute/surface",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "bin": {
         "parachute-surface": "bin/parachute-surface.ts",
       },
       "dependencies": {
         "@openparachute/scope-guard": "^0.4.0-rc.1",
-        "@openparachute/surface-client": "^0.1.0",
+        "@openparachute/surface-client": "^0.2.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -1714,8 +1714,6 @@
     "@babel/preset-env/semver": ["semver@6.3.1", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
-
-    "@openparachute/surface/@openparachute/surface-client": ["@openparachute/surface-client@0.1.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-X929FaVXFRwwirLTSKsZFMbsG9+adsONsOO/aWjUmwKs+kpwsDIiExioG/c/gGPj5vFtTy3VVayZz03Q2YM7Rg=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

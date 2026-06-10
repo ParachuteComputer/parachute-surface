@@ -36,6 +36,107 @@ export const PATH_PATTERN = /^\/surface\/[a-z0-9-]+$/;
 export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
 
 /**
+ * Audience exposure for a hosted surface (surface-runtime design §12; the
+ * hub's audience gate H3 enforces it at the proxy BEFORE forwarding):
+ *
+ *   "public"    — anyone; no hub identity required (chrome strip off).
+ *   "hub-users" — a valid hub session OR a hub-issued Bearer whose scopes
+ *                 satisfy `scopes_required`. THE DEFAULT when absent.
+ *   "operator"  — the first-admin session only.
+ *
+ * The legacy boolean `public` field is accepted as an alias for one release
+ * window (`public: true` → `"public"`, `public: false` → the default) with a
+ * deprecation note in the validation diagnostics. When both are declared
+ * they must agree — a meta.json saying `public: true` AND
+ * `audience: "operator"` is a contradiction we refuse rather than guess.
+ */
+export const UI_AUDIENCES = ["public", "hub-users", "operator"] as const;
+export type UiAudience = (typeof UI_AUDIENCES)[number];
+
+/** Default audience when neither `audience` nor legacy `public` is declared. */
+export const DEFAULT_AUDIENCE: UiAudience = "hub-users";
+
+/**
+ * Capabilities a surface's server entry may declare (P1). Host-gated,
+ * deny-by-default: an undeclared capability is refused at the routing layer
+ * (a WS upgrade for a surface without `"websocket"` → 426), and the
+ * services.json row only sets `websocket: true` (the hub bridge's
+ * deny-by-default forwarding flag) when at least one installed surface
+ * declares it.
+ */
+export const SERVER_CAPABILITIES = ["websocket"] as const;
+export type ServerCapability = (typeof SERVER_CAPABILITIES)[number];
+
+/**
+ * Canonical persisted-content format for a backed surface (backed-surface
+ * pattern, "Content contract"): `"markdown"` (the default — vaults are
+ * markdown; every other consumer assumes it) or `"opaque"` (e.g. Excalidraw
+ * scenes — the surface must mark the note's format in metadata and accept
+ * degraded siblings).
+ */
+export const SERVER_FORMATS = ["markdown", "opaque"] as const;
+export type ServerFormat = (typeof SERVER_FORMATS)[number];
+
+/** Bounds + default for the per-request containment timeout (P5/§11). */
+export const SERVER_TIMEOUT_MIN_MS = 1_000;
+export const SERVER_TIMEOUT_MAX_MS = 120_000;
+export const SERVER_TIMEOUT_DEFAULT_MS = 30_000;
+
+/**
+ * CSP directives a surface's `server.csp` override may ADD sources to
+ * (P6/§13). v1 is strict: an override can only APPEND source entries to
+ * these fetch-class directives — it can never touch `default-src`,
+ * `object-src`, `frame-ancestors`, `base-uri`, or `form-action`, and it
+ * can never LOOSEN (no `'unsafe-eval'` anywhere, no `'unsafe-inline'` for
+ * scripts). Wider override semantics need an explicit allowlist design.
+ */
+export const CSP_OVERRIDABLE_DIRECTIVES = [
+  "script-src",
+  "style-src",
+  "img-src",
+  "font-src",
+  "connect-src",
+  "media-src",
+  "worker-src",
+  "frame-src",
+] as const;
+export type CspOverridableDirective = (typeof CSP_OVERRIDABLE_DIRECTIVES)[number];
+
+/**
+ * One CSP source entry: a single token (no whitespace — that would smuggle
+ * extra sources/directives), no `;`/`,` (directive/header injection).
+ */
+const CSP_SOURCE_RE = /^[^\s;,]+$/;
+
+/**
+ * The `server` block (P1) — a surface package that ships server logic
+ * alongside its bundle declares it here. surface-host mounts the entry
+ * in-process (see `backend-supervisor.ts`) under the surface's namespace.
+ *
+ * `entry` is a path WITHIN the surface package (relative to the surface's
+ * installed root directory, `<uis>/<name>/`). Traversal is rejected at
+ * parse time (no leading `/`, no `..` segments, no NUL, no backslashes) —
+ * the mount path resolution re-checks containment as defense in depth.
+ */
+export type UiServerBlock = {
+  /** Path within the package to the server entry (e.g. `"server/index.js"`). */
+  entry: string;
+  /** Canonical persisted format. Default `"markdown"`. */
+  format: ServerFormat;
+  /** Declared capabilities, host-gated. Default `[]`. */
+  capabilities: ServerCapability[];
+  /** Per-request containment timeout override, bounded 1s–120s. Default 30s. */
+  timeoutMs: number;
+  /**
+   * CSP override (P6/§13): ADDITIONAL source entries per directive,
+   * merged into the host's strict defaults (e.g.
+   * `{ "connect-src": ["https://api.example.com"] }`). Add-only — see
+   * {@link CSP_OVERRIDABLE_DIRECTIVES} for the rules.
+   */
+  csp?: Partial<Record<CspOverridableDirective, string[]>>;
+};
+
+/**
  * Allowed field types for `required_schema.tags[].fields`. Mirrors what
  * vault's tag-identity schema accepts on the `fields` column — `string`,
  * `number`, `boolean`, `date`. New types should be added here AND in
@@ -126,8 +227,25 @@ export type UiMeta = {
   pwa: boolean;
   /** Path within `dist/` to the SW file (e.g. `"sw.js"`). Required when `pwa: true`. */
   pwa_service_worker?: string;
-  /** If `true`, hub does NOT enforce a session gate at `/surface/<name>/*`. Defaults to `false`. */
+  /**
+   * Audience exposure (surface-runtime design §12). Canonical field; filled
+   * with `"hub-users"` when neither it nor the legacy `public` alias is
+   * declared. Transported to the hub via the services.json `uis{}` map and
+   * ENFORCED at the hub proxy (audience gate, H3).
+   */
+  audience: UiAudience;
+  /**
+   * DERIVED legacy view of `audience` (`audience === "public"`), kept so
+   * existing consumers (admin SPA list rows, older readers of the written
+   * meta.json) don't break during the alias window. The canonical field is
+   * `audience`; declaring `public` in meta.json emits a deprecation note.
+   */
   public: boolean;
+  /**
+   * Optional server entry (P1) — present iff the surface is a BACKED
+   * surface. See {@link UiServerBlock}.
+   */
+  server?: UiServerBlock;
   /**
    * Optional declaration of vault schema this app needs to function.
    * Phase 2.0 lands the shape (validate + surface in admin SPA); the
@@ -186,10 +304,26 @@ export class InvalidMetaError extends Error {
  * Defaults filled at parse time:
  *   - `scopes_required` → `["vault:*:read"]` when absent
  *   - `pwa` → `false` when absent
- *   - `public` → `false` when absent
+ *   - `audience` → `"hub-users"` when absent (`public` derived from it)
+ *   - `server.format` → `"markdown"`, `server.capabilities` → `[]`,
+ *     `server.timeoutMs` → 30000 when a `server` block is present
+ *
+ * Non-fatal diagnostics (the legacy-`public` deprecation note) are dropped
+ * here; callers that surface them use {@link parseMetaWithDiagnostics}.
  */
 export function parseMeta(raw: unknown): UiMeta {
+  return parseMetaWithDiagnostics(raw).meta;
+}
+
+/**
+ * Like {@link parseMeta} but also returns non-fatal `warnings` — today the
+ * legacy-`public`-alias deprecation note. The UI scanner logs these so
+ * operators see the note in `parachute-surface list` / daemon logs without
+ * the meta.json being rejected.
+ */
+export function parseMetaWithDiagnostics(raw: unknown): { meta: UiMeta; warnings: string[] } {
   const errors: Array<{ path: string; message: string }> = [];
+  const warnings: string[] = [];
 
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new InvalidMetaError("meta.json", [{ path: "", message: "must be a JSON object" }]);
@@ -324,15 +458,47 @@ export function parseMeta(raw: unknown): UiMeta {
     });
   }
 
-  // public — optional boolean; default false.
-  let publicField = false;
+  // audience — optional enum; legacy boolean `public` accepted as an alias
+  // (true → "public") with a deprecation note. When both are declared they
+  // must agree — refuse the contradiction rather than guess.
+  let audience: UiAudience = DEFAULT_AUDIENCE;
+  let audienceDeclared = false;
+  if (o.audience !== undefined) {
+    if (
+      typeof o.audience !== "string" ||
+      !(UI_AUDIENCES as readonly string[]).includes(o.audience)
+    ) {
+      errors.push({
+        path: "audience",
+        message: `must be one of ${UI_AUDIENCES.map((a) => `"${a}"`).join(", ")}`,
+      });
+    } else {
+      audience = o.audience as UiAudience;
+      audienceDeclared = true;
+    }
+  }
   if (o.public !== undefined) {
     if (typeof o.public !== "boolean") {
       errors.push({ path: "public", message: "must be a boolean" });
+    } else if (audienceDeclared) {
+      const consistent = o.public === (audience === "public");
+      if (!consistent) {
+        errors.push({
+          path: "public",
+          message: `conflicts with audience "${audience}" — drop the legacy boolean (audience is canonical)`,
+        });
+      }
     } else {
-      publicField = o.public;
+      audience = o.public ? "public" : DEFAULT_AUDIENCE;
+      warnings.push(
+        `meta.json: "public" (boolean) is deprecated — declare audience: "${o.public ? "public" : DEFAULT_AUDIENCE}" instead`,
+      );
     }
   }
+  const publicField = audience === "public";
+
+  // server — optional block (P1). See `UiServerBlock`.
+  const server = parseServerBlock(o.server, errors);
 
   // required_schema — optional object; patterns#57 (Phase 2.0 lands shape,
   // Phase 2.1+ auto-provisions).
@@ -395,7 +561,7 @@ export function parseMeta(raw: unknown): UiMeta {
     throw new InvalidMetaError("meta.json", errors);
   }
 
-  return {
+  const meta: UiMeta = {
     name,
     displayName,
     tagline,
@@ -406,12 +572,192 @@ export function parseMeta(raw: unknown): UiMeta {
     vault_default,
     pwa,
     pwa_service_worker,
+    audience,
     public: publicField,
+    ...(server ? { server } : {}),
     ...(required_schema ? { required_schema } : {}),
     ...(dev_watch_dir !== undefined ? { dev_watch_dir } : {}),
     ...(dev_build_cmd !== undefined ? { dev_build_cmd } : {}),
     ...(dev_debounce_ms !== undefined ? { dev_debounce_ms } : {}),
   };
+  return { meta, warnings };
+}
+
+/**
+ * Parse + validate the optional `server` block (P1). Returns `undefined`
+ * when absent; appends field-level errors otherwise. Defaults filled:
+ * `format: "markdown"`, `capabilities: []`, `timeoutMs: 30000`.
+ *
+ * The `entry` no-traversal rule is the load-bearing line: the entry is
+ * dynamically imported into the daemon process at mount time, so a meta.json
+ * must not be able to point it outside the surface's own package directory.
+ * The mount path re-checks resolved containment as defense in depth
+ * (`backend-supervisor.ts`).
+ */
+function parseServerBlock(
+  raw: unknown,
+  errors: Array<{ path: string; message: string }>,
+): UiServerBlock | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push({ path: "server", message: "must be an object" });
+    return undefined;
+  }
+  const s = raw as Record<string, unknown>;
+
+  // entry — required; a relative path within the package, traversal-free.
+  let entry = "";
+  if (typeof s.entry !== "string" || s.entry.length === 0) {
+    errors.push({ path: "server.entry", message: "is required (non-empty string)" });
+  } else if (s.entry.startsWith("/")) {
+    errors.push({
+      path: "server.entry",
+      message: "must be a relative path within the surface package (no leading slash)",
+    });
+  } else if (
+    s.entry.includes("\0") ||
+    s.entry.includes("\\") ||
+    s.entry.split("/").some((seg) => seg === ".." || seg === "")
+  ) {
+    errors.push({
+      path: "server.entry",
+      message: "must not contain traversal segments ('..'), backslashes, or NUL",
+    });
+  } else {
+    entry = s.entry;
+  }
+
+  // format — optional enum; default "markdown".
+  let format: ServerFormat = "markdown";
+  if (s.format !== undefined) {
+    if (typeof s.format !== "string" || !(SERVER_FORMATS as readonly string[]).includes(s.format)) {
+      errors.push({
+        path: "server.format",
+        message: `must be one of ${SERVER_FORMATS.map((f) => `"${f}"`).join(", ")}`,
+      });
+    } else {
+      format = s.format as ServerFormat;
+    }
+  }
+
+  // capabilities — optional array of declared capabilities; default [].
+  let capabilities: ServerCapability[] = [];
+  if (s.capabilities !== undefined) {
+    if (!Array.isArray(s.capabilities)) {
+      errors.push({ path: "server.capabilities", message: "must be an array" });
+    } else {
+      const out: ServerCapability[] = [];
+      let bad = false;
+      for (let i = 0; i < s.capabilities.length; i++) {
+        const v = s.capabilities[i];
+        if (typeof v !== "string" || !(SERVER_CAPABILITIES as readonly string[]).includes(v)) {
+          errors.push({
+            path: `server.capabilities[${i}]`,
+            message: `must be one of ${SERVER_CAPABILITIES.map((c) => `"${c}"`).join(", ")}`,
+          });
+          bad = true;
+          break;
+        }
+        if (!out.includes(v as ServerCapability)) out.push(v as ServerCapability);
+      }
+      if (!bad) capabilities = out;
+    }
+  }
+
+  // timeoutMs — optional integer, bounded [1s, 120s]; default 30s.
+  let timeoutMs = SERVER_TIMEOUT_DEFAULT_MS;
+  if (s.timeoutMs !== undefined) {
+    if (
+      typeof s.timeoutMs !== "number" ||
+      !Number.isInteger(s.timeoutMs) ||
+      s.timeoutMs < SERVER_TIMEOUT_MIN_MS ||
+      s.timeoutMs > SERVER_TIMEOUT_MAX_MS
+    ) {
+      errors.push({
+        path: "server.timeoutMs",
+        message: `must be an integer between ${SERVER_TIMEOUT_MIN_MS} and ${SERVER_TIMEOUT_MAX_MS} (milliseconds)`,
+      });
+    } else {
+      timeoutMs = s.timeoutMs;
+    }
+  }
+
+  // csp — optional add-only override (P6/§13).
+  const csp = parseCspOverride(s.csp, errors);
+
+  if (entry === "") return undefined; // entry error already recorded
+  return { entry, format, capabilities, timeoutMs, ...(csp ? { csp } : {}) };
+}
+
+/**
+ * Validate the `server.csp` override: only ADD source entries to the
+ * overridable fetch-class directives, never loosen. Rejected outright:
+ * unknown directives, non-token entries (whitespace / `;` / `,` —
+ * injection shapes), `'unsafe-eval'` anywhere, `'unsafe-inline'` for
+ * `script-src`. v1 keeps this strict by design — a wider override grammar
+ * needs an explicit allowlist design, not incremental loosening here.
+ */
+function parseCspOverride(
+  raw: unknown,
+  errors: Array<{ path: string; message: string }>,
+): Partial<Record<CspOverridableDirective, string[]>> | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push({ path: "server.csp", message: "must be an object (directive → source list)" });
+    return undefined;
+  }
+  const out: Partial<Record<CspOverridableDirective, string[]>> = {};
+  let bad = false;
+  for (const [directive, sources] of Object.entries(raw as Record<string, unknown>)) {
+    const at = `server.csp["${directive}"]`;
+    if (!(CSP_OVERRIDABLE_DIRECTIVES as readonly string[]).includes(directive)) {
+      errors.push({
+        path: at,
+        message: `directive is not overridable — overrides may only ADD sources to: ${CSP_OVERRIDABLE_DIRECTIVES.join(", ")}`,
+      });
+      bad = true;
+      continue;
+    }
+    if (!Array.isArray(sources)) {
+      errors.push({ path: at, message: "must be an array of source strings" });
+      bad = true;
+      continue;
+    }
+    const entries: string[] = [];
+    for (let i = 0; i < sources.length; i++) {
+      const v = sources[i];
+      if (typeof v !== "string" || v.length === 0 || !CSP_SOURCE_RE.test(v)) {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "must be a single CSP source token (no whitespace, ';' or ',')",
+        });
+        bad = true;
+        break;
+      }
+      const lower = v.toLowerCase();
+      if (lower === "'unsafe-eval'" || lower === "'wasm-unsafe-eval'") {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "'unsafe-eval'-class sources are not permitted (v1 keeps CSP strict)",
+        });
+        bad = true;
+        break;
+      }
+      if (directive === "script-src" && lower === "'unsafe-inline'") {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "'unsafe-inline' is not permitted for script-src",
+        });
+        bad = true;
+        break;
+      }
+      if (!entries.includes(v)) entries.push(v);
+    }
+    if (bad) continue;
+    if (entries.length > 0) out[directive as CspOverridableDirective] = entries;
+  }
+  if (bad) return undefined;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -603,7 +949,8 @@ export function metaSchemaJson(): Record<string, unknown> {
       path: {
         type: "string",
         pattern: PATH_PATTERN.source,
-        description: "Mount path under hub origin, always under /surface/ (e.g. '/surface/gitcoin-brain').",
+        description:
+          "Mount path under hub origin, always under /surface/ (e.g. '/surface/gitcoin-brain').",
       },
       version: {
         type: "string",
@@ -632,10 +979,59 @@ export function metaSchemaJson(): Record<string, unknown> {
         type: "string",
         description: "Path within dist/ to the SW file (e.g. 'sw.js'). Required when pwa: true.",
       },
+      audience: {
+        type: "string",
+        enum: [...UI_AUDIENCES],
+        default: DEFAULT_AUDIENCE,
+        description:
+          "Audience exposure, enforced at the hub proxy (surface-runtime design §12): 'public' (anyone), 'hub-users' (hub session or scoped Bearer — the default), 'operator' (first admin only).",
+      },
       public: {
         type: "boolean",
         default: false,
-        description: "If true, hub does not enforce a session gate at /surface/<name>/*.",
+        description:
+          "DEPRECATED legacy alias for audience (true → 'public'). Declare `audience` instead; when both are present they must agree.",
+      },
+      server: {
+        type: "object",
+        additionalProperties: false,
+        required: ["entry"],
+        description:
+          "Server entry for a BACKED surface (surface-runtime design P1). surface-host mounts it in-process; default export is `(ctx) => SurfaceBackend`.",
+        properties: {
+          entry: {
+            type: "string",
+            description:
+              "Path within the surface package to the server entry (e.g. 'server/index.js'). Relative, traversal-free.",
+          },
+          format: {
+            type: "string",
+            enum: [...SERVER_FORMATS],
+            default: "markdown",
+            description:
+              "Canonical persisted-content format. 'opaque' formats must mark the note's format in metadata.",
+          },
+          capabilities: {
+            type: "array",
+            items: { type: "string", enum: [...SERVER_CAPABILITIES] },
+            default: [],
+            description: "Declared capabilities, host-gated (deny-by-default).",
+          },
+          timeoutMs: {
+            type: "integer",
+            minimum: SERVER_TIMEOUT_MIN_MS,
+            maximum: SERVER_TIMEOUT_MAX_MS,
+            default: SERVER_TIMEOUT_DEFAULT_MS,
+            description: "Per-request containment timeout override (bounded 1s–120s).",
+          },
+          csp: {
+            type: "object",
+            description:
+              "Add-only CSP override: extra source entries per fetch-class directive, merged into the host's strict defaults. Never loosens (no 'unsafe-eval'; no 'unsafe-inline' for script-src).",
+            propertyNames: { enum: [...CSP_OVERRIDABLE_DIRECTIVES] },
+            additionalProperties: { type: "array", items: { type: "string" } },
+          },
+        },
       },
       dev_watch_dir: {
         type: "string",
