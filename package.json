@@ -10,16 +10,16 @@
     "web/admin"
   ],
   "scripts": {
-    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build",
+    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build",
     "build:admin": "bun run --filter '@openparachute/surface-admin-ui' build",
-    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ && bun run --filter \"@openparachute/notes-ui\" test && bun run --filter \"@openparachute/surface-render\" test",
+    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ && bun run --filter \"@openparachute/notes-ui\" test && bun run --filter \"@openparachute/surface-render\" test",
     "test:host": "bun test packages/surface-host/src/",
     "test:client": "bun test packages/surface-client/src/",
     "test:server": "bun test packages/surface-server/src/",
     "test:render": "bun run --filter '@openparachute/surface-render' test",
     "test:admin": "bun run --filter '@openparachute/surface-admin-ui' test",
     "test:all": "bun run test && cd web/admin && bun run test",
-    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../notes-ui && tsc -b --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json",
+    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../notes-ui && tsc -b --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json && cd ../docs-editor && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
     "build:render": "bun run --filter '@openparachute/surface-render' build",
     "typecheck:admin": "cd web/admin && bun run typecheck",
     "typecheck:all": "bun run typecheck && bun run typecheck:admin",
@@ -31,7 +31,9 @@
     "test:pebble-config": "bun run --filter '@openparachute/pebble-config' test",
     "build:pebble-config": "bun run --filter '@openparachute/pebble-config' build",
     "test:doc-schema": "bun test packages/doc-schema/src/",
-    "build:doc-schema": "bun run --filter '@openparachute/doc-schema' build"
+    "build:doc-schema": "bun run --filter '@openparachute/doc-schema' build",
+    "test:docs-editor": "bun test packages/docs-editor/server/",
+    "build:docs-editor": "bun run --filter '@openparachute/docs-editor' build"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

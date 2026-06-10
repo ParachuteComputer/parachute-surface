@@ -1,0 +1,292 @@
+/* Docs — minimal reference styling. */
+
+:root {
+  --ink: #1c1917;
+  --muted: #78716c;
+  --line: #e7e5e4;
+  --paper: #fafaf9;
+  --accent: #0e7490;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.centered {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  display: flex;
+  text-align: center;
+  padding: 2rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.notice {
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+input,
+select {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  border-right: 1px solid var(--line);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: white;
+}
+
+.sidebar header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.sidebar h1 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.doc {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+}
+
+.doc:hover {
+  background: var(--paper);
+}
+
+.doc.active {
+  background: #ecfeff;
+}
+
+.doc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-level {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* Content */
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 2rem;
+  gap: 1rem;
+  max-width: 60rem;
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.editor-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.conn {
+  padding: 0.1rem 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.conn-connected {
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+
+.conn-denied {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.peers {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.peer {
+  border-bottom: 2px solid;
+  font-size: 0.8rem;
+}
+
+.editor-content .tiptap {
+  outline: none;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  min-height: 50vh;
+  line-height: 1.6;
+}
+
+.editor-content .tiptap p {
+  margin: 0.4rem 0;
+}
+
+.editor-content .tiptap pre {
+  background: #f5f5f4;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  overflow-x: auto;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+
+.editor-content .tiptap ul[data-type="taskList"] li {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Collaboration carets */
+.editor-content .collaboration-carets__caret {
+  border-left: 1px solid;
+  border-right: 1px solid;
+  margin-left: -1px;
+  margin-right: -1px;
+  position: relative;
+}
+
+.editor-content .collaboration-carets__label {
+  border-radius: 3px 3px 3px 0;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 600;
+  left: -1px;
+  padding: 0.05rem 0.3rem;
+  position: absolute;
+  top: -1.3em;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Share panel */
+.share-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.share-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.share-mint {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.share-mint input {
+  flex: 1;
+  min-width: 14rem;
+}
+
+.share-minted {
+  margin-top: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.share-minted code {
+  background: #f5f5f4;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.share-grants {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.share-grants li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.name-input {
+  width: 100%;
+}
+
+.create {
+  width: 100%;
+}
