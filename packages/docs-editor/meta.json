@@ -1,0 +1,23 @@
+{
+  "name": "docs",
+  "displayName": "Docs",
+  "tagline": "Collaborative markdown docs — live multi-cursor editing over vault notes, shared by capability link.",
+  "path": "/surface/docs",
+  "version": "0.1.0",
+  "audience": "hub-users",
+  "vault_default": "default",
+  "scopes_required": ["vault:default:write"],
+  "server": {
+    "entry": "server/index.ts",
+    "format": "markdown",
+    "capabilities": ["websocket"]
+  },
+  "required_schema": {
+    "tags": [
+      {
+        "name": "doc",
+        "description": "Working tag for the Docs surface — notes carrying it appear in the doc list and are editable collaboratively."
+      }
+    ]
+  }
+}
