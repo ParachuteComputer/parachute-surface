@@ -1,17 +1,21 @@
 /**
- * Modules — list of installed UIs.
+ * Surfaces — the list view (R3b polish: dense + scannable, channel's list is
+ * the bar).
  *
- * Each row shows displayName, mount path, version, scopes, OAuth client
- * state, and dev-mode status (Phase 1.3). Per-row actions: Reload (re-scan
- * from disk), Uninstall (delete + revoke), and the dev-mode triad — Enable
- * dev / Disable dev / Trigger reload. The dev-status map is fetched in
- * parallel with the UI list and re-fetched on every refresh; a row shows
- * a "Dev" badge when the UI's name is in the active set.
+ * Each row: displayName + mount, REAL status chip (R3a lifecycle), audience
+ * badge, backed-vs-static indicator, credential state at a glance, OAuth
+ * state, dev-mode badge. Per-row actions: Reload, the dev triad, Uninstall.
  *
- * "Uninstall" matches the canonical verb vocabulary
- * (parachute-patterns/patterns/design-system.md §5) for removing a module
- * — the action revokes the OAuth client + deletes the files, exactly the
- * same shape as `parachute uninstall <short>`.
+ * Uninstall is COMPOSED for a backed surface holding an exclusively-bound
+ * credential connection (channel#46's lifecycle-symmetry shape): the hub
+ * teardown runs FIRST — `DELETE /admin/connections/<id>` with the operator's
+ * session cookie (the hub revokes the minted credential + notifies the host
+ * to drop its copy) — then the host removal (bundle + state + local
+ * credential copy + DCR unregister). A hub-side failure surfaces an explicit
+ * two-step ask (proceed host-only / keep the surface) — never a silent
+ * fallthrough. A credential shared with other surfaces is left standing,
+ * with a note. The DCR orphan case (hub has no client-delete endpoint, E5)
+ * is surfaced in the result message rather than swallowed.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -19,6 +23,7 @@ import { SchemaRequirements } from "../components/SchemaRequirements.tsx";
 import {
   type DevModeStatus,
   type ListResponse,
+  type UiSummary,
   disableDevMode,
   enableDevMode,
   formatError,
@@ -28,6 +33,7 @@ import {
   removeUi,
   triggerReload,
 } from "../lib/api.ts";
+import { deleteConnection } from "../lib/hub.ts";
 
 /**
  * Render a watcher's absolute path in compressed form — keeps the
@@ -42,10 +48,91 @@ function shortenPath(p: string): string {
   return `…/${parts.slice(-2).join("/")}`;
 }
 
+/** Compact status-chip mapping for the list (full copy lives on the detail page). */
+function statusChip(u: UiSummary): { label: string; tone: string; title?: string } {
+  switch (u.status) {
+    case "static-only":
+      return { label: "static", tone: "inactive" };
+    case "active":
+      return { label: "active", tone: "active" };
+    case "failing":
+      return {
+        label: "failing",
+        tone: "pending",
+        ...(u.statusReason ? { title: u.statusReason } : {}),
+      };
+    case "backend-error":
+      return {
+        label: "backend error",
+        tone: "failing",
+        ...(u.statusReason ? { title: u.statusReason } : {}),
+      };
+    case "backend-disabled":
+      return {
+        label: "quarantined",
+        tone: "failing",
+        ...(u.statusReason ? { title: u.statusReason } : {}),
+      };
+  }
+}
+
+/** Credential at-a-glance chip for backed rows. */
+function credentialChip(u: UiSummary): { label: string; tone: string; title?: string } | null {
+  const c = u.credential;
+  if (!u.server || !c) return null;
+  switch (c.state) {
+    case "ok":
+      return {
+        label: `vault: ${c.vault}`,
+        tone: "active",
+        title: `${c.scope ?? ""}${c.scoped_tags?.length ? ` · tags: ${c.scoped_tags.join(", ")}` : ""}`,
+      };
+    case "expiring":
+      return {
+        label: "credential renewing",
+        tone: "pending",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+    case "expired":
+      return {
+        label: "credential expired",
+        tone: "failing",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+    case "needs-operator":
+      return {
+        label: "credential needs you",
+        tone: "failing",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+    case "none":
+      return {
+        label: "no vault linked",
+        tone: "inactive",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+    case "ambiguous":
+      return {
+        label: "credential ambiguous",
+        tone: "failing",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+    case "missing":
+      return {
+        label: "credential missing",
+        tone: "failing",
+        ...(c.reason ? { title: c.reason } : {}),
+      };
+  }
+}
+
+type Banner = { kind: "success" | "warn" | "error"; text: string };
+
 export function Modules() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [devMap, setDevMap] = useState<Map<string, DevModeStatus>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<Banner | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -87,19 +174,96 @@ export function Modules() {
     }
   };
 
-  const onUninstall = async (name: string) => {
-    if (
-      !window.confirm(`Uninstall "${name}"? This deletes its files + revokes its OAuth client.`)
-    ) {
-      return;
+  /**
+   * The composed remove. See the module docstring for the shape; every
+   * branch ends in an explicit banner naming which halves ran.
+   */
+  const onUninstall = async (u: UiSummary) => {
+    const cred = u.credential;
+    const sharedWith = cred?.shared_with ?? [];
+    const exclusiveConnection =
+      u.server && cred?.connection_id && sharedWith.length === 0 ? cred.connection_id : null;
+
+    const lines = [`Uninstall "${u.name}"? This deletes its files + revokes its OAuth client.`];
+    if (exclusiveConnection) {
+      lines.push(
+        `Its vault credential connection (${exclusiveConnection}) will be torn down at the hub first — the standing credential is revoked.`,
+      );
+    } else if (u.server && cred?.connection_id && sharedWith.length > 0) {
+      lines.push(
+        `Its vault credential connection (${cred.connection_id}) stays — still used by: ${sharedWith.join(", ")}.`,
+      );
     }
-    setBusy(`remove:${name}`);
+    if (!window.confirm(lines.join("\n\n"))) return;
+
+    setBusy(`remove:${u.name}`);
     setError(null);
+    setBanner(null);
+
+    // --- Step 1: hub credential teardown (exclusive connections only). ----
+    let credentialNote = "";
+    if (exclusiveConnection) {
+      const teardown = await deleteConnection(exclusiveConnection);
+      if (!teardown.ok) {
+        const detail =
+          "auth" in teardown && teardown.auth
+            ? "not signed in to the hub (the teardown returned 401) — open this page through the hub portal, signed in, for a full teardown"
+            : (teardown as { error: string }).error;
+        const proceed = window.confirm(
+          `Hub teardown failed for connection ${exclusiveConnection}:\n${detail}\n\nRemove the surface anyway (host side only)? Its credential connection stays live until cleaned up in hub admin → Connections.\n\nOK = remove the surface only. Cancel = keep everything.`,
+        );
+        if (!proceed) {
+          setBanner({
+            kind: "warn",
+            text: `Removal cancelled — "${u.name}" was left intact. Hub teardown failed: ${detail}.`,
+          });
+          setBusy(null);
+          return;
+        }
+        credentialNote = ` Hub teardown did NOT run (${detail}) — connection ${exclusiveConnection} may still be live: clean up in hub admin → Connections.`;
+      } else if (teardown.alreadyGone) {
+        credentialNote = ` Connection ${exclusiveConnection} was already gone at the hub.`;
+      } else {
+        credentialNote = ` Connection ${exclusiveConnection} torn down — credential revoked.`;
+        if (teardown.warnings.length > 0) {
+          credentialNote += ` Partial-teardown notes: ${teardown.warnings.join("; ")}.`;
+        }
+      }
+    } else if (u.server && cred?.connection_id && sharedWith.length > 0) {
+      credentialNote = ` Connection ${cred.connection_id} left standing (shared with ${sharedWith.join(", ")}).`;
+    }
+
+    // --- Step 2: host removal (bundle + state + local credential copy). ---
     try {
-      await removeUi(name);
+      const res = await removeUi(u.name);
+      // DCR orphan honesty (E5): the hub may not support client deletion.
+      let dcrNote = "";
+      const revoke = res.oauth_revoke;
+      if (revoke) {
+        if (revoke.hubDeleteStatus === "ok") {
+          dcrNote = " OAuth client revoked.";
+        } else if (revoke.hubDeleteStatus === "skipped") {
+          dcrNote = "";
+        } else if (
+          revoke.hubDeleteStatus === "unsupported" ||
+          revoke.hubDeleteStatus === "not_found"
+        ) {
+          dcrNote =
+            " The OAuth client record may remain registered at the hub (it doesn't support client deletion yet) — remove it in hub admin → Clients if it lingers.";
+        } else {
+          dcrNote = ` OAuth client revocation failed (${revoke.detail ?? revoke.hubDeleteStatus}) — remove it in hub admin → Clients.`;
+        }
+      }
+      setBanner({
+        kind: credentialNote.includes("did NOT run") ? "warn" : "success",
+        text: `Removed "${u.name}".${credentialNote}${dcrNote}`,
+      });
       await refresh();
     } catch (e) {
-      setError(formatError(e));
+      const failText = credentialNote.includes("torn down")
+        ? `Host removal failed: ${formatError(e)}. The hub credential teardown already completed${credentialNote} Retry Uninstall to finish the host side.`
+        : `Remove failed: ${formatError(e)}.${credentialNote}`;
+      setBanner({ kind: "error", text: failText });
     } finally {
       setBusy(null);
     }
@@ -154,20 +318,20 @@ export function Modules() {
     <section className="modules" data-route-content>
       <header className="page-header">
         <div className="page-header__title">
-          <h1>Installed UIs</h1>
+          <h1>Surfaces</h1>
           <p className="page-header__sub">
-            UIs hosted by this <code>parachute-surface</code> instance.
+            Surfaces hosted by this <code>parachute-surface</code> instance.
             {data && data.uis.length > 0 && (
               <>
                 {" "}
                 Currently <strong>{data.uis.length}</strong>{" "}
-                {data.uis.length === 1 ? "UI" : "UIs"} live.
+                {data.uis.length === 1 ? "surface" : "surfaces"} live.
               </>
             )}
           </p>
         </div>
         <Link to="/add" className="btn btn-primary">
-          Add UI
+          Add surface
         </Link>
       </header>
 
@@ -176,16 +340,27 @@ export function Modules() {
           {error}
         </p>
       )}
+      {banner && (
+        <p
+          role={banner.kind === "error" ? "alert" : "status"}
+          className={
+            banner.kind === "success" ? "success" : banner.kind === "warn" ? "warning" : "error"
+          }
+        >
+          {banner.text}
+        </p>
+      )}
 
       {data && data.uis.length === 0 && (
         <div className="empty empty-rich">
-          <p className="empty-headline">No UIs installed yet.</p>
+          <p className="empty-headline">No surfaces installed yet.</p>
           <p className="muted">
-            UIs are React or static bundles that mount under <code>/surface/&lt;name&gt;/</code>.
-            Notes ships as the canonical first UI; add your own to host bespoke apps next to it.
+            Surfaces are React or static bundles that mount under{" "}
+            <code>/surface/&lt;name&gt;/</code>— and may ship a server for backed surfaces. Notes
+            ships as the canonical first one; add your own next to it.
           </p>
           <Link to="/add" className="btn btn-primary" style={{ marginTop: "0.75rem" }}>
-            Add your first UI
+            Add your first surface
           </Link>
         </div>
       )}
@@ -195,11 +370,14 @@ export function Modules() {
           {data.uis.map((u) => {
             const dev = devMap.get(u.name);
             const devOn = dev?.enabled === true;
-            const oauthBadge: { label: string; status: "active" | "pending" | "inactive" } = u.oauthClientId
-              ? u.oauthStatus === "approved"
-                ? { label: "OAuth connected", status: "active" }
-                : { label: `OAuth ${u.oauthStatus ?? "pending"}`, status: "pending" }
-              : { label: "OAuth not registered", status: "inactive" };
+            const chip = statusChip(u);
+            const cred = credentialChip(u);
+            const oauthBadge: { label: string; status: "active" | "pending" | "inactive" } =
+              u.oauthClientId
+                ? u.oauthStatus === "approved"
+                  ? { label: "OAuth connected", status: "active" }
+                  : { label: `OAuth ${u.oauthStatus ?? "pending"}`, status: "pending" }
+                : { label: "OAuth not registered", status: "inactive" };
             return (
               <li key={u.name} className="ui-card">
                 <div className="ui-card__head">
@@ -212,14 +390,26 @@ export function Modules() {
                     </a>
                   </div>
                   <div className="ui-card__badges">
+                    <span className={`status status-${chip.tone}`} title={chip.title}>
+                      {chip.label}
+                    </span>
+                    <span className="badge badge-audience">{u.audience ?? "hub-users"}</span>
+                    {u.server && <span className="badge badge-backed">backed</span>}
+                    {cred && (
+                      <span className={`status status-${cred.tone}`} title={cred.title}>
+                        {cred.label}
+                      </span>
+                    )}
                     {u.pwa && <span className="badge">PWA</span>}
-                    {u.public && <span className="badge">public</span>}
                     {devOn && (
                       <span className="badge badge-dev" aria-label={`dev mode on for ${u.name}`}>
                         Dev ON
                       </span>
                     )}
-                    <span className={`status status-${oauthBadge.status}`} title={u.oauthClientId ?? "no client registered"}>
+                    <span
+                      className={`status status-${oauthBadge.status}`}
+                      title={u.oauthClientId ?? "no client registered"}
+                    >
                       {oauthBadge.label}
                     </span>
                   </div>
@@ -276,14 +466,15 @@ export function Modules() {
                       </span>
                     )}
                     {dev?.watcher && !dev.watcher.watching && (
-                      <>
-                        Watcher off{dev.watcher.warning ? `: ${dev.watcher.warning}` : ""}.
-                      </>
+                      <>Watcher off{dev.watcher.warning ? `: ${dev.watcher.warning}` : ""}.</>
                     )}
                   </p>
                 )}
 
                 <div className="ui-card__actions">
+                  <Link to={`/info/${u.name}`} className="btn btn-secondary">
+                    Details
+                  </Link>
                   <button
                     type="button"
                     onClick={() => void onReload(u.name)}
@@ -323,7 +514,7 @@ export function Modules() {
                   <button
                     type="button"
                     className="destructive ui-card__uninstall"
-                    onClick={() => void onUninstall(u.name)}
+                    onClick={() => void onUninstall(u)}
                     disabled={busy === `remove:${u.name}`}
                   >
                     Uninstall

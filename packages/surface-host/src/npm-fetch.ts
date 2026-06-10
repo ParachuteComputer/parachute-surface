@@ -28,11 +28,11 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
@@ -308,7 +308,12 @@ function copyDirInner(src: string, dest: string): void {
   for (const entry of readdirSync(src)) {
     const s = path.join(src, entry);
     const d = path.join(dest, entry);
-    const st = statSync(s);
+    // lstat, NOT stat: stat follows symlinks, so a symlink-to-directory inside
+    // an extracted tarball would classify as a directory and get recursed into,
+    // copying the link target's contents (potentially outside the staging
+    // area) into the served dist. lstat reports the symlink itself, so links
+    // fall through to the skip below.
+    const st = lstatSync(s);
     if (st.isDirectory()) {
       mkdirSync(d, { recursive: true });
       copyDirInner(s, d);

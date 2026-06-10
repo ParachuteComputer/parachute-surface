@@ -79,8 +79,14 @@ code {
  * so routes feel settled rather than slammed when their data arrives.
  * Respects prefers-reduced-motion. */
 @keyframes pc-route-fade-up {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 [data-route-content] {
   animation: pc-route-fade-up 0.32s ease forwards;
@@ -1004,6 +1010,134 @@ input[type="password"] {
 .status-failing {
   background: var(--error-soft);
   color: var(--error);
+}
+
+/* --- R3b admin revamp ----------------------------------------------------- */
+
+/* Source-kind selector on the add form. */
+.kind-select {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.kind-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  background: var(--bg);
+}
+.kind-option input[type="radio"] {
+  accent-color: var(--accent);
+}
+.kind-option--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Inline field-level validation message (channel's .field-error shape). */
+.field-error {
+  font-size: 0.8rem;
+  color: var(--error);
+  font-weight: 500;
+}
+
+/* Audience selector — radio cards with plain-language descriptions. */
+.audience-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.audience-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--bg);
+}
+.audience-option--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.audience-option input[type="radio"] {
+  grid-row: 1 / span 2;
+  accent-color: var(--accent);
+}
+.audience-option__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.audience-option__desc {
+  grid-column: 2;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+/* The "this surface ships a server" trust card on the add confirm step. */
+.trust-card {
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  padding: 0.75rem 1rem;
+}
+
+/* Derived-from-meta key/value block on the add confirm step. */
+.add__derived {
+  margin: 0;
+}
+.add__confirm {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Left-aligned action rows inside info cards. */
+.form-actions--start {
+  justify-content: flex-start;
+  margin-top: 0.5rem;
+}
+
+/* Credential panel (detail page). */
+.credential-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-light, var(--border));
+}
+.credential-panel__bind {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin: 0.5rem 0;
+}
+.credential-panel__bind .form-field {
+  flex: 1;
+  margin: 0;
+}
+
+/* List badges: audience + backed indicators. */
+.badge-audience {
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  text-transform: none;
+}
+.badge-backed {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Dark mode tokens — per design-system.md §3 dark-mode table. */
