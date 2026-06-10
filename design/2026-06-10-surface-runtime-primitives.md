@@ -283,10 +283,19 @@ and neither blocks the other.
 
 ## Open questions (tracked into the build)
 
-- Hocuspocus v4 under Bun via manual pumping — verify early in R6; fallback is
-  y-protocols direct (the pumping technique is transport-agnostic).
-- prosemirror-markdown `[` escaping vs `[[wikilinks]]` — serializer rule
-  needed in the codec (R6).
+- ~~Hocuspocus v4 under Bun via manual pumping~~ **RESOLVED (2026-06-10,
+  sandboxed spike): HOCUSPOCUS-VIABLE, high confidence.** @hocuspocus/server
+  4.1.1 runs under Bun 1.3.13 on Bun.serve NATIVE WebSockets with manual
+  pumping, zero shims — convergence verified 7/7, y-protocols-direct fallback
+  NOT needed. One upstream double-`onDisconnect` bug ⇒ hook logic must be
+  idempotent. Wiring contract + bug details in the appendix
+  ([Resolved: Hocuspocus under Bun](#resolved-hocuspocus-under-bun)).
+- ~~prosemirror-markdown `[` escaping vs `[[wikilinks]]`~~ **RESOLVED
+  (2026-06-10): the serializer rule ships in `packages/doc-schema`** —
+  `[[...]]` spans survive `docToMarkdown` verbatim while ordinary bracket
+  text keeps its escaping; test-pinned (wikilinks adjacent to `[links](...)`,
+  literal brackets, aliases) in
+  `packages/doc-schema/src/__tests__/wikilinks.test.ts`.
 - `aud` claim for hub JWTs presented to surface backends (v1 accepts
   `aud=vault.<name>` + `vault:<name>:write` for the owner branch; cleaner
   per-surface audience is an issuance evolution).
@@ -297,3 +306,40 @@ and neither blocks the other.
 - Email for personal links: per module-credential-ownership the surface owns
   its outbound-email credential (operator-configured, optional — links render
   inline for copy-paste without it).
+
+## Appendix
+
+### Resolved: Hocuspocus under Bun
+
+**Verdict (sandboxed spike, 2026-06-10): HOCUSPOCUS-VIABLE, high
+confidence.** `@hocuspocus/server@4.1.1` works under Bun 1.3.13 with
+Bun.serve **native** WebSockets and manual pumping — zero shims, no
+y-protocols-direct fallback needed.
+
+**The wiring contract.** Use the Hocuspocus **engine class** (NOT `Server` —
+never `listen()`):
+
+- `hocuspocus.handleConnection(ws, request)` from Bun's `open` handler. The
+  expected `WebSocketLike` is `{ send, close, readyState }` — Bun's
+  `ServerWebSocket` satisfies it directly (and is named in the v4
+  doc-comment).
+- `conn.handleMessage(view)` from Bun's `message` handler, where `view` is an
+  **exact-bounds `Uint8Array` view** over the incoming Buffer.
+- `conn.handleClose({ code, reason })` from Bun's `close` handler.
+- Document routing rides the message envelope: **one endpoint, all docs**.
+- `getParameters` handles web-`Request` URLs, so token-in-query auth works.
+
+Convergence verified **7/7**: initial sync · concurrent-edit CRDT
+convergence · awareness propagation · disconnect → offline-edit → reconnect
+catch-up · `onAuthenticate` rejection through the pumped path · multi-doc
+isolation · debounced `onStoreDocument`.
+
+**Upstream bug (affects Node/ws too, so Prism has it):** `onDisconnect`
+fires **twice** per disconnect when the departing client had awareness
+state — `Document.removeConnection` calls `removeAwarenessStates` *before*
+`connections.delete`, the awareness broadcast hits the dying socket,
+`send()` fails and re-enters `Connection.close()` while the connection is
+still in the map. The upstream fix is a one-line reorder.
+
+**R6 requirement:** all `onDisconnect`-hook logic (presence counters,
+cleanup) MUST be idempotent — dedupe by socketId.
