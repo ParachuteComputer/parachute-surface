@@ -77,6 +77,8 @@ export {
 export * from "./host-context.ts";
 export * from "./credential-store.ts";
 export * from "./credential-renewal.ts";
+export * from "./security-headers.ts";
+export { createSurfaceWsHandlers, type SurfaceWsData, type SurfaceWsDeps } from "./backend-ws.ts";
 export { ScopedVaultClient, type ScopedVaultClientOptions } from "./scoped-vault-client.ts";
 export {
   SurfaceStateStore,

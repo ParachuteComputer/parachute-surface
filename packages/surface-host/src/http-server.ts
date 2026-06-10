@@ -36,12 +36,15 @@ import * as path from "node:path";
 
 import { type AdminHandlerOpts, routeAdmin } from "./admin-routes.ts";
 import { getHubOrigin } from "./auth.ts";
+import { type SurfaceWsData, createSurfaceWsHandlers } from "./backend-ws.ts";
 import { cacheHeadersFor } from "./cache-headers.ts";
 import { type AppConfig, loadConfig } from "./config.ts";
 import { injectDevReloadScript } from "./dev-injection.ts";
 import { isDevMode } from "./dev-mode.ts";
 import { type DevRoutesOpts, routeDev } from "./dev-routes.ts";
+import { clientIpFromRequest, layerFromRequest } from "./host-context.ts";
 import type { UiMeta } from "./meta-schema.ts";
+import { applySecurityHeaders } from "./security-headers.ts";
 import { injectTenancyContract } from "./tenancy-injection.ts";
 import { type RegisteredUi, scanUis } from "./ui-registry.ts";
 
@@ -119,10 +122,32 @@ export function startHttpServer(opts: HttpServerOpts): ReturnType<typeof Bun.ser
   return serve({
     port,
     hostname,
-    fetch: (req) =>
-      handle(req, opts.state, { startedAt, parachuteDir, logger, adminDir, adminOpts, devOpts }),
+    fetch: (req, server) =>
+      handle(req, opts.state, {
+        startedAt,
+        parachuteDir,
+        logger,
+        adminDir,
+        adminOpts,
+        devOpts,
+        server,
+      }),
+    // Backed-surface WebSocket multiplexing (P4): one handler set serves
+    // every surface; per-connection data carries the owning surface +
+    // trust signals captured at upgrade time. Dispatch (in `handle`) only
+    // upgrades `${mount}/ws` for capability-declaring surfaces with a
+    // mounted backend — deny-by-default, mirroring the hub bridge.
+    websocket: createSurfaceWsHandlers({
+      getSupervisor: () => opts.state.backends,
+      logger,
+    }),
   });
 }
+
+/** Narrow upgrade-capable server view (test seams stub Bun.serve). */
+type UpgradableServer = {
+  upgrade?: (req: Request, opts: { data: SurfaceWsData }) => boolean;
+};
 
 type HandleCtx = {
   startedAt: Date;
@@ -131,9 +156,19 @@ type HandleCtx = {
   adminDir: string;
   adminOpts: Omit<AdminHandlerOpts, "state">;
   devOpts: Omit<DevRoutesOpts, "state">;
+  /** The Bun server (for WS upgrades). Absent in some unit tests. */
+  server?: UpgradableServer;
 };
 
-function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promise<Response> {
+/**
+ * Returns `undefined` ONLY when a WebSocket upgrade succeeded (Bun's
+ * contract: an upgraded request must not produce a Response).
+ */
+function handle(
+  req: Request,
+  state: AppState,
+  ctx: HandleCtx,
+): Response | undefined | Promise<Response | undefined> {
   const url = new URL(req.url);
   const pathname = url.pathname;
   const method = req.method;
@@ -178,7 +213,9 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
   // prevent that, but defense-in-depth).
   if (
     (method === "GET" || method === "HEAD") &&
-    (pathname === "/surface/admin" || pathname === "/surface/admin/" || pathname.startsWith("/surface/admin/"))
+    (pathname === "/surface/admin" ||
+      pathname === "/surface/admin/" ||
+      pathname.startsWith("/surface/admin/"))
   ) {
     return serveAdminAsset(req, ctx.adminDir, pathname);
   }
@@ -197,6 +234,43 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
     return admin.response;
   }
 
+  // Backed-surface namespaces (P4 — STRUCTURAL containment). The host
+  // forwards EXACTLY two namespaces to a surface's backend:
+  // `${mount}/api/*` (any method) and `${mount}/ws` (the WebSocket
+  // upgrade). Everything else — the static dist, /oauth-client, the meta
+  // endpoints above, the admin SPA, sibling surfaces — is host-served and
+  // unreachable from a backend's router BY CONSTRUCTION: this dispatch
+  // runs AFTER every host route and only ever hands the backend its two
+  // namespaces. Every response on these paths (and the backed surface's
+  // static responses below) carries the P6 security headers.
+  {
+    const ui = matchUi(pathname, state.registeredUis);
+    if (ui?.meta.server) {
+      const mount = ui.meta.path;
+      const isWs = pathname === `${mount}/ws`;
+      const isApi = pathname === `${mount}/api` || pathname.startsWith(`${mount}/api/`);
+
+      if (isWs) {
+        return handleWsRoute(req, ui, state, ctx);
+      }
+      if (isApi) {
+        const backends = state.backends;
+        const dispatch = backends
+          ? backends.handleRequest(ui, req)
+          : Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  error: "backend_unavailable",
+                  error_description: "no backend supervisor is running",
+                }),
+                { status: 503, headers: { "content-type": "application/json" } },
+              ),
+            );
+        return dispatch.then((res) => applySecurityHeaders(res, ui.meta));
+      }
+    }
+  }
+
   // Per-UI mount paths. Find the matching UI (longest mount-path wins,
   // though Phase 1.1's PATH_PATTERN constrains mounts to single-segment
   // so there's no overlap in practice — the longest-prefix loop is
@@ -209,7 +283,11 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
       // very next index.html serve. Read by `injectTenancyContract` below
       // via `serveFileWithHeaders`'s `hubOrigin` parameter.
       const hubOrigin = getHubOrigin(state.config.hub_url);
-      return serveUiAsset(req, ui, pathname, hubOrigin, ctx.logger);
+      const res = serveUiAsset(req, ui, pathname, hubOrigin, ctx.logger);
+      // P6: a BACKED surface's static responses carry the security headers
+      // too (the design's "every backed-surface response"); static-only
+      // surfaces keep their current behavior.
+      return ui.meta.server ? applySecurityHeaders(res, ui.meta) : res;
     }
   }
 
@@ -218,6 +296,62 @@ function handle(req: Request, state: AppState, ctx: HandleCtx): Response | Promi
     return new Response("Method Not Allowed", { status: 405 });
   }
   return new Response("Not Found", { status: 404 });
+}
+
+/**
+ * `${mount}/ws` (P4/P6): upgrade iff the surface DECLARED the websocket
+ * capability AND its mounted backend exports websocket handlers; anything
+ * else is 426 — deny-by-default, mirroring the hub bridge (which only
+ * forwards upgrades here when our services.json row carries
+ * `websocket: true`, itself derived from the installed surfaces'
+ * declarations). Trust signals are captured from the hub stamps at upgrade
+ * time and ride the connection (`SurfaceWsData`); refusals carry the P6
+ * headers like every other backed-surface response.
+ */
+function handleWsRoute(
+  req: Request,
+  ui: RegisteredUi,
+  state: AppState,
+  ctx: HandleCtx,
+): Response | undefined {
+  const refuse = (status: number, error: string, description: string): Response =>
+    applySecurityHeaders(
+      new Response(JSON.stringify({ error, error_description: description }), {
+        status,
+        headers: {
+          "content-type": "application/json",
+          ...(status === 426 ? { upgrade: "websocket" } : {}),
+        },
+      }),
+      ui.meta,
+    );
+
+  const declared = ui.meta.server?.capabilities.includes("websocket") === true;
+  const handlers = state.backends?.websocketHandlersFor(ui.meta.name);
+  if (!declared || !handlers) {
+    return refuse(
+      426,
+      "websocket_not_supported",
+      declared
+        ? `surface "${ui.meta.name}" has no active websocket backend`
+        : `surface "${ui.meta.name}" does not declare the websocket capability`,
+    );
+  }
+  if ((req.headers.get("upgrade") ?? "").toLowerCase() !== "websocket") {
+    return refuse(426, "upgrade_required", "this endpoint only accepts WebSocket upgrades");
+  }
+  if (!ctx.server?.upgrade) {
+    return refuse(503, "service_unavailable", "websocket upgrade unavailable on this server");
+  }
+  const upgraded = ctx.server.upgrade(req, {
+    data: {
+      surface: ui.meta.name,
+      layer: layerFromRequest(req),
+      clientIp: clientIpFromRequest(req),
+    },
+  });
+  if (upgraded) return undefined; // Bun contract: no Response after upgrade
+  return refuse(400, "upgrade_failed", "WebSocket handshake was malformed");
 }
 
 /**

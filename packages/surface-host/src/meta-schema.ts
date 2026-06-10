@@ -83,6 +83,32 @@ export const SERVER_TIMEOUT_MAX_MS = 120_000;
 export const SERVER_TIMEOUT_DEFAULT_MS = 30_000;
 
 /**
+ * CSP directives a surface's `server.csp` override may ADD sources to
+ * (P6/§13). v1 is strict: an override can only APPEND source entries to
+ * these fetch-class directives — it can never touch `default-src`,
+ * `object-src`, `frame-ancestors`, `base-uri`, or `form-action`, and it
+ * can never LOOSEN (no `'unsafe-eval'` anywhere, no `'unsafe-inline'` for
+ * scripts). Wider override semantics need an explicit allowlist design.
+ */
+export const CSP_OVERRIDABLE_DIRECTIVES = [
+  "script-src",
+  "style-src",
+  "img-src",
+  "font-src",
+  "connect-src",
+  "media-src",
+  "worker-src",
+  "frame-src",
+] as const;
+export type CspOverridableDirective = (typeof CSP_OVERRIDABLE_DIRECTIVES)[number];
+
+/**
+ * One CSP source entry: a single token (no whitespace — that would smuggle
+ * extra sources/directives), no `;`/`,` (directive/header injection).
+ */
+const CSP_SOURCE_RE = /^[^\s;,]+$/;
+
+/**
  * The `server` block (P1) — a surface package that ships server logic
  * alongside its bundle declares it here. surface-host mounts the entry
  * in-process (see `backend-supervisor.ts`) under the surface's namespace.
@@ -101,6 +127,13 @@ export type UiServerBlock = {
   capabilities: ServerCapability[];
   /** Per-request containment timeout override, bounded 1s–120s. Default 30s. */
   timeoutMs: number;
+  /**
+   * CSP override (P6/§13): ADDITIONAL source entries per directive,
+   * merged into the host's strict defaults (e.g.
+   * `{ "connect-src": ["https://api.example.com"] }`). Add-only — see
+   * {@link CSP_OVERRIDABLE_DIRECTIVES} for the rules.
+   */
+  csp?: Partial<Record<CspOverridableDirective, string[]>>;
 };
 
 /**
@@ -649,8 +682,82 @@ function parseServerBlock(
     }
   }
 
+  // csp — optional add-only override (P6/§13).
+  const csp = parseCspOverride(s.csp, errors);
+
   if (entry === "") return undefined; // entry error already recorded
-  return { entry, format, capabilities, timeoutMs };
+  return { entry, format, capabilities, timeoutMs, ...(csp ? { csp } : {}) };
+}
+
+/**
+ * Validate the `server.csp` override: only ADD source entries to the
+ * overridable fetch-class directives, never loosen. Rejected outright:
+ * unknown directives, non-token entries (whitespace / `;` / `,` —
+ * injection shapes), `'unsafe-eval'` anywhere, `'unsafe-inline'` for
+ * `script-src`. v1 keeps this strict by design — a wider override grammar
+ * needs an explicit allowlist design, not incremental loosening here.
+ */
+function parseCspOverride(
+  raw: unknown,
+  errors: Array<{ path: string; message: string }>,
+): Partial<Record<CspOverridableDirective, string[]>> | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    errors.push({ path: "server.csp", message: "must be an object (directive → source list)" });
+    return undefined;
+  }
+  const out: Partial<Record<CspOverridableDirective, string[]>> = {};
+  let bad = false;
+  for (const [directive, sources] of Object.entries(raw as Record<string, unknown>)) {
+    const at = `server.csp["${directive}"]`;
+    if (!(CSP_OVERRIDABLE_DIRECTIVES as readonly string[]).includes(directive)) {
+      errors.push({
+        path: at,
+        message: `directive is not overridable — overrides may only ADD sources to: ${CSP_OVERRIDABLE_DIRECTIVES.join(", ")}`,
+      });
+      bad = true;
+      continue;
+    }
+    if (!Array.isArray(sources)) {
+      errors.push({ path: at, message: "must be an array of source strings" });
+      bad = true;
+      continue;
+    }
+    const entries: string[] = [];
+    for (let i = 0; i < sources.length; i++) {
+      const v = sources[i];
+      if (typeof v !== "string" || v.length === 0 || !CSP_SOURCE_RE.test(v)) {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "must be a single CSP source token (no whitespace, ';' or ',')",
+        });
+        bad = true;
+        break;
+      }
+      const lower = v.toLowerCase();
+      if (lower === "'unsafe-eval'" || lower === "'wasm-unsafe-eval'") {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "'unsafe-eval'-class sources are not permitted (v1 keeps CSP strict)",
+        });
+        bad = true;
+        break;
+      }
+      if (directive === "script-src" && lower === "'unsafe-inline'") {
+        errors.push({
+          path: `${at}[${i}]`,
+          message: "'unsafe-inline' is not permitted for script-src",
+        });
+        bad = true;
+        break;
+      }
+      if (!entries.includes(v)) entries.push(v);
+    }
+    if (bad) continue;
+    if (entries.length > 0) out[directive as CspOverridableDirective] = entries;
+  }
+  if (bad) return undefined;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -842,7 +949,8 @@ export function metaSchemaJson(): Record<string, unknown> {
       path: {
         type: "string",
         pattern: PATH_PATTERN.source,
-        description: "Mount path under hub origin, always under /surface/ (e.g. '/surface/gitcoin-brain').",
+        description:
+          "Mount path under hub origin, always under /surface/ (e.g. '/surface/gitcoin-brain').",
       },
       version: {
         type: "string",
@@ -915,6 +1023,13 @@ export function metaSchemaJson(): Record<string, unknown> {
             maximum: SERVER_TIMEOUT_MAX_MS,
             default: SERVER_TIMEOUT_DEFAULT_MS,
             description: "Per-request containment timeout override (bounded 1s–120s).",
+          },
+          csp: {
+            type: "object",
+            description:
+              "Add-only CSP override: extra source entries per fetch-class directive, merged into the host's strict defaults. Never loosens (no 'unsafe-eval'; no 'unsafe-inline' for script-src).",
+            propertyNames: { enum: [...CSP_OVERRIDABLE_DIRECTIVES] },
+            additionalProperties: { type: "array", items: { type: "string" } },
           },
         },
       },
