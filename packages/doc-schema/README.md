@@ -27,6 +27,10 @@ Concretely:
 - TipTap extension dependencies are **exact-pinned** in package.json — the
   extension list is a schema definition, and a floating range could silently
   change the schema out from under persisted docs.
+- Schema-or-serialization-affecting deps (prosemirror-markdown,
+  prosemirror-model, markdown-it) are **exact-pinned** too — they define
+  canonical serialization/escape behavior that the byte-stability tests pin;
+  bump deliberately and re-run the round-trip suite.
 - `src/__tests__/tiptap-parity.test.ts` pins structural equivalence between
   the hand-built codec schema and `getSchema(docSchemaExtensions)`: node/mark
   names, content expressions, groups, attrs + defaults, and mark rank order.

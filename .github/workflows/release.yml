@@ -1,11 +1,13 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes FOUR packages on different tag namespaces:
+# This workflow publishes SIX packages on different tag namespaces:
 #
-#   - @openparachute/surface      ← tag prefix `v...`          (from packages/surface-host)
-#   - @openparachute/surface-client ← tag prefix `client-v...`   (from packages/surface-client)
-#   - @openparachute/surface-render ← tag prefix `render-v...`   (from packages/surface-render)
-#   - @openparachute/notes-ui     ← tag prefix `notes-ui-v...` (from packages/notes-ui)
+#   - @openparachute/surface        ← tag prefix `v...`           (from packages/surface-host)
+#   - @openparachute/surface-client ← tag prefix `client-v...`    (from packages/surface-client)
+#   - @openparachute/surface-render ← tag prefix `render-v...`    (from packages/surface-render)
+#   - @openparachute/notes-ui       ← tag prefix `notes-ui-v...`  (from packages/notes-ui)
+#   - @openparachute/doc-schema     ← tag prefix `doc-schema-v...` (from packages/doc-schema)
+#   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
 #
 # All packages have npm Trusted Publisher rules pointing at this workflow
 # file. Jobs gate on the tag prefix so only one package publishes per tag
@@ -15,9 +17,13 @@
 #   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.2.0-rc.10)
 #                                          (client-v0.1.0-rc.4)
 #                                          (notes-ui-v0.1.4-rc.1)
+#                                          (doc-schema-v0.1.0-rc.1)
+#                                          (server-v0.1.0-rc.1)
 #   - stable: v<X>.<Y>.<Z>                 (e.g. v0.2.0)
 #                                          (client-v0.1.0)
 #                                          (notes-ui-v0.1.4)
+#                                          (doc-schema-v0.1.0)
+#                                          (server-v0.1.0)
 #
 # Release flow:
 #   1. When ready to ship: bump version in the relevant package.json on main.
@@ -31,13 +37,19 @@
 #        # for notes-ui
 #        VERSION="notes-ui-v$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
+#        # for doc-schema
+#        VERSION="doc-schema-v$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
+#        # for surface-server
+#        VERSION="server-v$(bun -e "console.log(require('./packages/surface-server/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
 #   3. CI runs tests once (workspace-wide), then publishes the package matching
 #      the tag prefix.
 #
 # Operator setup (one-time) — see RELEASING.md:
 #   - npm Trusted Publisher rules: one per package (surface, surface-client,
-#     surface-render, notes-ui).
-#     All four rules point at: org=ParachuteComputer, repo=parachute-surface,
+#     surface-render, notes-ui, doc-schema, surface-server).
+#     All six rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -58,6 +70,12 @@ on:
       # Notes-ui release tags
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
       - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Doc-schema release tags
+      - 'doc-schema-v[0-9]+.[0-9]+.[0-9]+'
+      - 'doc-schema-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Surface-server release tags
+      - 'server-v[0-9]+.[0-9]+.[0-9]+'
+      - 'server-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   # Don't let two releases race on the same tag.
@@ -74,23 +92,27 @@ jobs:
         with:
           bun-version: 1.3
       - name: install deps
-        # Workspace root install — picks up packages/surface-host, packages/surface-client,
-        # and web/admin (the bundled admin SPA).
+        # Workspace root install — picks up every packages/* workspace and
+        # web/admin (the bundled admin SPA).
         run: bun install --frozen-lockfile
       - name: typecheck
-        # Root script typechecks all four packages (surface-host, surface-client,
-        # surface-render, notes-ui).
+        # Root script typechecks all workspace packages (surface-host,
+        # surface-client, surface-server, surface-render, notes-ui,
+        # pebble-config, doc-schema incl. its no-DOM codec tsconfig).
         run: bun run typecheck
       - name: tests
-        # Root script runs all four suites: surface-host (bun test), surface-client
-        # (bun test), surface-render (vitest), and notes-ui (vitest via `bun run --filter`).
+        # Root script runs every suite: surface-host, surface-client,
+        # surface-server, pebble-config, doc-schema (bun test), plus notes-ui
+        # and surface-render (vitest via `bun run --filter`).
         run: bun run test
 
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client-, render-, and notes-ui- tags.
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') }}
+    # App-only: skip on client-, render-, notes-ui-, doc-schema-, and server- tags.
+    # (The bare `v...` namespace is the catch-all: every NEW tag prefix MUST be
+    # excluded here, or its tag would fire this job too.)
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -306,4 +328,104 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/notes-ui with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
+  publish-doc-schema-npm:
+    name: publish @openparachute/doc-schema to npm
+    needs: test
+    # doc-schema-only: gate on the `doc-schema-v...` tag prefix.
+    if: ${{ startsWith(github.ref_name, 'doc-schema-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against doc-schema's package.json; tag prefix is `doc-schema-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#doc-schema-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/doc-schema/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: publish
+        # doc-schema's package.json has `prepublishOnly: bun run build` (tsc →
+        # dist/, the published artifact), so `npm publish` builds just-in-time.
+        working-directory: packages/doc-schema
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/doc-schema with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
+  publish-surface-server-npm:
+    name: publish @openparachute/surface-server to npm
+    needs: test
+    # surface-server-only: gate on the `server-v...` tag prefix.
+    if: ${{ startsWith(github.ref_name, 'server-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Pin against surface-server's package.json; tag prefix is `server-v...`.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/surface-server/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#server-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/surface-server/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: "guard against workspace:/link: protocol in published manifest"
+        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
+        # do, on their own publish path). A leaked protocol breaks every `npm install`
+        # of the published package. surface-server depends on @openparachute/surface
+        # and @openparachute/surface-client — fail loudly before publish if any dep
+        # still carries a protocol.
+        working-directory: packages/surface-server
+        run: |
+          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
+            echo "no workspace:/link: protocols in published manifest"
+          else
+            echo "::error::packages/surface-server/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
+            exit 1
+          fi
+      - name: publish
+        # surface-server publishes raw TypeScript sources (`files: src/**/*.ts`,
+        # exports point at src/) — no build step, nothing to compile before pack.
+        working-directory: packages/surface-server
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+            DIST_TAG=rc
+          else
+            DIST_TAG=latest
+          fi
+          echo "publishing @openparachute/surface-server with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance

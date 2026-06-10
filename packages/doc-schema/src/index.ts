@@ -19,6 +19,6 @@ export {
   markdownToDocJSON,
 } from "./codec";
 export { parser, tokenizer } from "./markdown/parser";
-export { serializer, WIKILINK_PATTERN } from "./markdown/serializer";
+export { serializer, wikilinkPattern } from "./markdown/serializer";
 export { schema } from "./schema";
 export { DOC_SCHEMA_VERSION } from "./version";

@@ -1,6 +1,6 @@
 # Releasing
 
-The `parachute-app` repo is a monorepo with four publishable packages, all shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
+The `parachute-app` repo is a monorepo with six publishable packages, all shipped via [`.github/workflows/release.yml`](./.github/workflows/release.yml):
 
 | Package | Path | Tag prefix |
 |---|---|---|
@@ -8,10 +8,12 @@ The `parachute-app` repo is a monorepo with four publishable packages, all shipp
 | `@openparachute/app-client` | `packages/app-client/` | `client-v...` (e.g. `client-v0.1.0-rc.4`) |
 | `@openparachute/surface-render` | `packages/surface-render/` | `render-v...` (e.g. `render-v0.1.0-rc.1`) |
 | `@openparachute/notes-ui` | `packages/notes-ui/` | `notes-ui-v...` (e.g. `notes-ui-v0.1.4-rc.1`) |
+| `@openparachute/doc-schema` | `packages/doc-schema/` | `doc-schema-v...` (e.g. `doc-schema-v0.1.0-rc.1`) |
+| `@openparachute/surface-server` | `packages/surface-server/` | `server-v...` (e.g. `server-v0.1.0-rc.1`) |
 
 The workspace root (`@openparachute/app-monorepo`) is intentionally `private: true` and should NEVER publish. The admin SPA (`web/admin/` → `@openparachute/app-admin-ui`) is also `private: true` — it's bundled into app-host's `dist/`, not separately published.
 
-All four packages run on independent release cadences. Each tag pushes only the matching package.
+All six packages run on independent release cadences. Each tag pushes only the matching package.
 
 > **notes-ui migration history (2026-05-24)**: notes-ui moved here from `parachute-notes/packages/notes-ui` to consolidate "host module + reference apps" in one repo. parachute-notes is being archived (notes-daemon was already deprecated per its [DEPRECATED.md](https://github.com/ParachuteComputer/parachute-notes/blob/main/packages/notes-daemon/DEPRECATED.md)). See workspace `CLAUDE.md` for context.
 
@@ -29,6 +31,10 @@ Per [parachute-patterns governance rule 2](https://github.com/ParachuteComputer/
 | `render-vX.Y.Z` | `@openparachute/surface-render` | `latest` |
 | `notes-ui-vX.Y.Z-rc.N` | `@openparachute/notes-ui` | `rc` |
 | `notes-ui-vX.Y.Z` | `@openparachute/notes-ui` | `latest` |
+| `doc-schema-vX.Y.Z-rc.N` | `@openparachute/doc-schema` | `rc` |
+| `doc-schema-vX.Y.Z` | `@openparachute/doc-schema` | `latest` |
+| `server-vX.Y.Z-rc.N` | `@openparachute/surface-server` | `rc` |
+| `server-vX.Y.Z` | `@openparachute/surface-server` | `latest` |
 
 The workflow auto-detects rc vs stable from the `-rc.` substring; jobs gate by tag prefix via `startsWith(github.ref_name, '<prefix>-')`.
 
@@ -84,6 +90,30 @@ git push origin "$VERSION"
 
 The other publish jobs skip on these tags. notes-ui's `prepublishOnly` hook runs `tsc -b && vite build` to produce `dist/` before packing.
 
+### Releasing `@openparachute/doc-schema`
+
+```sh
+git fetch && git checkout main && git pull --ff-only
+# Bump packages/doc-schema/package.json, commit, push.
+VERSION="doc-schema-v$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")"
+git tag "$VERSION"
+git push origin "$VERSION"
+```
+
+The other publish jobs skip on these tags. doc-schema's `prepublishOnly` hook builds via `tsc` before packing. Its serialization-affecting deps (prosemirror-markdown, prosemirror-model, markdown-it) are exact-pinned — see the package README before bumping them.
+
+### Releasing `@openparachute/surface-server`
+
+```sh
+git fetch && git checkout main && git pull --ff-only
+# Bump packages/surface-server/package.json, commit, push.
+VERSION="server-v$(bun -e "console.log(require('./packages/surface-server/package.json').version)")"
+git tag "$VERSION"
+git push origin "$VERSION"
+```
+
+The other publish jobs skip on these tags. surface-server publishes raw TypeScript sources (no build step). It depends on `@openparachute/surface` and `@openparachute/surface-client` by concrete semver — if shipping those too, publish them FIRST.
+
 ### Promoting an rc chain to stable
 
 Open a PR (or commit directly) that drops the `-rc.N` suffix from the relevant `package.json`, merge, then tag with the bare version (`vX.Y.Z` for app, `client-vX.Y.Z` for app-client, `notes-ui-vX.Y.Z` for notes-ui). CI publishes with `dist-tag=latest`.
@@ -108,8 +138,10 @@ Before the workflow can publish, this repo needs **npm Trusted Publisher rules �
 2. Same for `@openparachute/app-client` — same workflow file.
 3. Same for `@openparachute/surface-render` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-app`, workflow `release.yml`, env blank) before the first `render-v...` tag is pushed, or the publish job will fail with 403.
 4. Same for `@openparachute/notes-ui` — **this rule may currently be configured against `parachute-notes` from before the migration** (notes-ui's prior home). Update it to point at `parachute-app` per the values above. The publisher rule verifies `workflow_ref`, so a mismatched repo/workflow combo will fail with 403 on tag push.
+5. Same for `@openparachute/doc-schema` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-surface`, workflow `release.yml`, env blank) before the first `doc-schema-v...` tag is pushed.
+6. Same for `@openparachute/surface-server` — **new package, no rule exists yet.** Same values, before the first `server-v...` tag is pushed.
 
-All four packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
+All six packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
 
 No `NPM_TOKEN` secret needed — the workflow uses OIDC.
 

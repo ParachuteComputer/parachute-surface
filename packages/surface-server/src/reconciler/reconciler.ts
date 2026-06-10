@@ -91,6 +91,13 @@
  * fires TWICE when the departing client had awareness state — any
  * disconnect-driven cleanup a surface wires around this machine (presence
  * counters, `unload()` calls) MUST be idempotent, deduped by socketId.
+ *
+ * Version anchor: the Hocuspocus-under-Bun spike was verified on
+ * **Bun 1.3.13 + @hocuspocus/server 4.1.1** (sandboxed spike, 2026-06-10).
+ * On a Bun (or Hocuspocus) upgrade, re-verify the manual-pumping wiring
+ * contract (`handleConnection` / `handleMessage` / `handleClose` over
+ * Bun.serve native WebSockets) and the double-`onDisconnect` upstream bug
+ * — see the design appendix for the 7-case convergence checklist.
  */
 
 import type {
@@ -165,6 +172,9 @@ export interface VaultReconciler {
    * have the machine adopt it; omitted, a fresh `Y.Doc` is created.
    * Restores the persisted snapshot when one exists; otherwise fetches
    * the note and seeds — never over a populated doc (the guard).
+   * Rejects after `stop()` — an engine must not load documents during or
+   * after shutdown (a silently-accepted late load would register a doc
+   * no subscription reconciles, hiding teardown-ordering bugs).
    */
   load(noteId: string, doc?: Y.Doc): Promise<Y.Doc>;
   /** Flush pending writeback, persist the snapshot, drop the live doc. */
@@ -412,6 +422,14 @@ class Reconciler implements VaultReconciler {
   // -------------------------------------------------------------------
 
   load(noteId: string, doc?: Y.Doc): Promise<Y.Doc> {
+    if (this.#stopped) {
+      // Loading after stop() would register a doc with an update observer
+      // but no subscription reconciling it — surface the teardown-ordering
+      // bug loudly instead of stubbing it silently.
+      return Promise.reject(
+        new Error(`reconciler is stopped: cannot load note ${noteId} after stop()`),
+      );
+    }
     return this.#enqueue(noteId, () => this.#load(noteId, doc));
   }
 

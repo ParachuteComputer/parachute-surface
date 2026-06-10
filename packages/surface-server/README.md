@@ -162,7 +162,10 @@ One operational warning for collab engines: Hocuspocus's `onDisconnect`
 fires **twice** when the departing client had awareness state (upstream bug,
 recorded in the design appendix) — any disconnect-driven cleanup around this
 machine (presence counters, `unload()` calls) must be idempotent, deduped by
-socketId.
+socketId. Version anchor: the Hocuspocus-under-Bun spike was verified on
+**Bun 1.3.13 + @hocuspocus/server 4.1.1** — on a Bun (or Hocuspocus)
+upgrade, re-verify the manual-pumping contract and that double-`onDisconnect`
+behavior before trusting disconnect-driven cleanup.
 
 ### Conformance suite (public export)
 

@@ -500,6 +500,19 @@ describe("persistence over ctx.store (the SurfaceStateStore substrate)", () => {
     expect(t.store.get("ydoc/n1")?.dirty).toBe(false);
     expectNoForce(t);
   });
+
+  test("load() after stop() rejects loudly — no untracked observer entry", async () => {
+    const t = makeTestCtx();
+    t.vault.noteFixture("n1", "base");
+    const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks, debounceMs: 5 });
+    await startLive(rec, t, [t.vault.notes.get("n1") as Note]);
+    await rec.stop();
+
+    await expect(rec.load("n1")).rejects.toThrow(/reconciler is stopped/);
+    // Nothing got registered: no doc state persisted, no vault fetch fired.
+    expect(t.store.get("ydoc/n1")).toBeNull();
+    expect(t.vault.updateCalls.length).toBe(0);
+  });
 });
 
 describe("events + origins", () => {

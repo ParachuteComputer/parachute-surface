@@ -22,8 +22,25 @@ import type { Mark, Node } from "prosemirror-model";
 /**
  * The wikilink pattern the serializer protects from escaping: `[[target]]`
  * or `[[target|alias]]` — no nested brackets, no newlines.
+ *
+ * Deliberately NOT exported: it carries the `g` flag, and a shared global
+ * RegExp is stateful — a downstream `.test()`/`.exec()` caller would mutate
+ * `lastIndex` under the serializer. Consumers get {@link wikilinkPattern},
+ * a factory returning a fresh instance per call.
  */
-export const WIKILINK_PATTERN = /\[\[[^[\]\n]+\]\]/g;
+const WIKILINK_PATTERN = /\[\[[^[\]\n]+\]\]/g;
+
+/**
+ * A fresh RegExp matching the wikilink syntax the serializer protects:
+ * `[[target]]` or `[[target|alias]]` — no nested brackets, no newlines.
+ *
+ * Every call returns a new instance (global-flagged), so callers may
+ * freely `.test()`/`.exec()`/`.matchAll()` without sharing `lastIndex`
+ * state with the serializer or each other.
+ */
+export function wikilinkPattern(): RegExp {
+  return new RegExp(WIKILINK_PATTERN.source, WIKILINK_PATTERN.flags);
+}
 
 /**
  * prosemirror-markdown's default serializer threads an `inAutolink` flag

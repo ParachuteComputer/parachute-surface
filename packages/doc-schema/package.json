@@ -45,9 +45,9 @@
     "@tiptap/extension-paragraph": "3.26.0",
     "@tiptap/extension-strike": "3.26.0",
     "@tiptap/extension-text": "3.26.0",
-    "markdown-it": "^14.1.0",
-    "prosemirror-markdown": "^1.13.1",
-    "prosemirror-model": "^1.24.1"
+    "markdown-it": "14.2.0",
+    "prosemirror-markdown": "1.13.4",
+    "prosemirror-model": "1.25.8"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

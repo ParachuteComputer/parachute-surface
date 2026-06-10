@@ -6,7 +6,7 @@
  * escaping (so it never becomes a link on re-parse).
  */
 import { describe, expect, test } from "bun:test";
-import { docToMarkdown, markdownToDoc } from "../index";
+import { docToMarkdown, markdownToDoc, wikilinkPattern } from "../index";
 
 const roundTrip = (md: string) => docToMarkdown(markdownToDoc(md));
 
@@ -101,5 +101,29 @@ describe("wikilinks through the full loop", () => {
   test("doc → md → doc structural equality with mixed brackets", () => {
     const doc = markdownToDoc("[[A|alias]] beside [b](https://c.d) and e[5]");
     expect(markdownToDoc(docToMarkdown(doc)).eq(doc)).toBe(true);
+  });
+});
+
+describe("wikilinkPattern factory", () => {
+  test("matches the serializer's wikilink syntax", () => {
+    const re = wikilinkPattern();
+    expect(re.test("[[Some Note]]")).toBe(true);
+    expect(wikilinkPattern().test("[[A|alias]]")).toBe(true);
+    expect(wikilinkPattern().test("[[]]")).toBe(false); // empty — not a wikilink
+    expect(wikilinkPattern().test("[[dangling")).toBe(false);
+  });
+
+  test("returns a FRESH global RegExp per call — no shared lastIndex state", () => {
+    const a = wikilinkPattern();
+    const b = wikilinkPattern();
+    expect(a).not.toBe(b);
+    expect(a.global).toBe(true);
+    // A stateful .test() on one instance must not affect the other — and
+    // must never affect the serializer (which holds its own instance).
+    a.test("[[One]] [[Two]]");
+    expect(a.lastIndex).toBeGreaterThan(0);
+    expect(b.lastIndex).toBe(0);
+    // The serializer stays correct even after downstream .test()/.exec() use.
+    expect(roundTrip("[[One]] then [[Two]]")).toBe("[[One]] then [[Two]]");
   });
 });
