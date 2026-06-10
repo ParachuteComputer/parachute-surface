@@ -9,6 +9,14 @@
  * model one specific resource server.
  */
 
+/**
+ * Tag-expansion axis on notes queries (vault's `?expand=` param):
+ * `"subtypes"` (default — parent_names descendants), `"namespace"`
+ * (slash-prefix children), `"both"`, `"exact"`. Mirrors vault's
+ * `TAG_EXPAND_MODES` (`core/src/tag-hierarchy.ts`).
+ */
+export type TagExpandMode = "subtypes" | "namespace" | "both" | "exact";
+
 export interface VaultInfo {
   name: string;
   description: string;

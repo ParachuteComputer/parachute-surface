@@ -38,6 +38,7 @@
  *     match what the modern fetch-style callers want.
  */
 
+import { toNotesSearchParams, type NotesQueryInput } from "./notes-query.js";
 import {
   assertSubscribableQuery,
   startSubscription,
@@ -513,9 +514,27 @@ export class VaultClient {
 
   // ---------- notes ----------
 
-  async queryNotes(params: URLSearchParams | Record<string, string>): Promise<Note[]> {
-    const qs = params instanceof URLSearchParams ? params : new URLSearchParams(params);
-    const s = qs.toString();
+  /**
+   * Query notes. Accepts the typed `NotesQuery` shape (see
+   * `notes-query.ts` — serialized to vault's exact wire grammar by
+   * `buildNotesQuery`) or the raw `URLSearchParams | Record<string,
+   * string>` forms (back-compat; also the escape hatch for `search` /
+   * `near`, which the typed shape deliberately doesn't model).
+   *
+   * @example
+   * ```ts
+   * await vault.queryNotes({
+   *   tag: ["#work", "#decision"],
+   *   tagMatch: "any",
+   *   metadata: { status: { eq: "in-progress" } },
+   *   orderBy: "updated_at",
+   *   sort: "desc",
+   *   limit: 20,
+   * });
+   * ```
+   */
+  async queryNotes(params: NotesQueryInput): Promise<Note[]> {
+    const s = toNotesSearchParams(params).toString();
     return this.request<Note[]>(`/api/notes${s ? `?${s}` : ""}`);
   }
 
@@ -529,11 +548,11 @@ export class VaultClient {
    * preserves the Response so we can read the `X-Next-Cursor` header.
    */
   async queryNotesCursor(
-    params: URLSearchParams | Record<string, string>,
+    params: NotesQueryInput,
     cursor?: string,
     limit?: number,
   ): Promise<{ items: Note[]; nextCursor?: string }> {
-    const qs = params instanceof URLSearchParams ? params : new URLSearchParams(params);
+    const qs = toNotesSearchParams(params);
     if (cursor) qs.set("cursor", cursor);
     if (typeof limit === "number") qs.set("limit", String(limit));
     const s = qs.toString();
@@ -658,11 +677,11 @@ export class VaultClient {
    * ```
    */
   subscribe(
-    query: URLSearchParams | Record<string, string>,
+    query: NotesQueryInput,
     handlers: SubscribeHandlers,
     opts: SubscribeOptions = {},
   ): () => void {
-    const qs = new URLSearchParams(query);
+    const qs = toNotesSearchParams(query);
     assertSubscribableQuery(qs);
     const s = qs.toString();
     return startSubscription(

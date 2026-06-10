@@ -21,6 +21,7 @@ import {
 | `discovery`                   | `discoverAuthServer` (RFC 8414) + `registerClient` (RFC 7591 DCR)                |
 | `vault-client`                | `VaultClient` REST client with auto-refresh on 401 + a typed error hierarchy     |
 | `subscribe`                   | `VaultClient.subscribe()` — live-query SSE (snapshot + upsert/remove, auto-reconnect) |
+| `notes-query`                 | `NotesQuery` typed query builder — `buildNotesQuery` serializes to vault's exact wire grammar |
 | `token-storage`               | `loadToken` / `saveToken` / `clearToken` / `clearAllTokensForApp`                |
 | `mount`                       | runtime-tenancy readers — `getMountBase` / `getTenantId` / `getHubOrigin` / `getVaultUrl` |
 | `sw-reload`                   | `reloadAfterServiceWorkerUpdate` — PWA-mode SW reload helper                      |
@@ -206,6 +207,35 @@ if (stored) {
 ```
 
 For scripts (Bun / Node), `VaultClient.fromHub({ hubOrigin, vaultName, token })` composes the canonical URL for you.
+
+### Typed queries — `NotesQuery`
+
+`queryNotes`, `queryNotesCursor`, and `subscribe` accept a typed `NotesQuery` object alongside the raw `URLSearchParams | Record<string,string>` forms (which remain fully supported — existing callers are untouched). The typed shape covers vault's structured-query grammar so you don't memorize the wire spelling:
+
+```ts
+const notes = await vault.queryNotes({
+  tag: ["#work", "#decision"],          // comma-joined into one param (vault's grammar)
+  tagMatch: "any",                       // → tag_match
+  expand: "subtypes",                    // | "namespace" | "both" | "exact"
+  excludeTag: "#archived",               // → exclude_tag
+  pathPrefix: "Work/",                   // → path_prefix
+  metadata: {
+    status: { in: ["in-progress", "in-review"] },  // operator query → meta[status][in][]
+    priority: "now",                               // scalar = shorthand equality → meta[priority]
+  },
+  date: { field: "updated_at", from: "2026-06-01" }, // half-open: from inclusive, to exclusive
+  orderBy: "updated_at",
+  sort: "desc",
+  limit: 50,
+});
+```
+
+Notes on the mapping (all pinned by tests against vault's parser):
+
+- **Metadata scalar vs operator object.** A scalar (`priority: "now"`) is shorthand equality — a JSON scan that works on *non-indexed* fields. An operator object (`{ eq, ne, gt, gte, lt, lte, in, not_in, exists }`) routes through the indexed column — vault 400s with `FIELD_NOT_INDEXED` if the field isn't declared in a tag schema.
+- **`date`** serializes to the canonical bracket bridge (`meta[updated_at][gte]=…`), never the deprecated flat `date_field`/`date_from` params. Bounds are half-open: `from` inclusive, `to` exclusive.
+- **`search` / `near` are deliberately not modeled** — they're separate query shapes (and invalid for subscriptions). Use the raw forms for them. Unknown keys with string values pass through verbatim, so mixing typed keys with a raw `"meta[...]"` param also works.
+- `buildNotesQuery(q)` / `toNotesSearchParams(input)` are exported if you want the `URLSearchParams` yourself.
 
 ### Live queries — `subscribe()`
 
