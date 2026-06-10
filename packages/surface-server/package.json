@@ -1,0 +1,41 @@
+{
+  "name": "@openparachute/surface-server",
+  "version": "0.1.0",
+  "description": "Server kit for backed Parachute surfaces — actor resolution (hub JWT / capability links / anon), audience store, vault-native grants with live SSE cache, deny-by-default routing, and a public conformance suite. A library surface backends import inside createBackend(ctx); never a host object.",
+  "module": "src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./conformance": "./src/conformance.ts"
+  },
+  "private": false,
+  "license": "AGPL-3.0",
+  "files": ["src/**/*.ts", "!src/__tests__/**", "README.md", "LICENSE", "CHANGELOG.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openparachute/scope-guard": "^0.4.0-rc.1",
+    "@openparachute/surface": "^0.3.0",
+    "@openparachute/surface-client": "^0.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/surface-server"
+  }
+}
