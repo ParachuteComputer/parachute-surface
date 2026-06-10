@@ -20,6 +20,8 @@ import {
 | `oauth`                       | `ParachuteOAuth` driver class — PKCE + same-hub auto-trust                        |
 | `discovery`                   | `discoverAuthServer` (RFC 8414) + `registerClient` (RFC 7591 DCR)                |
 | `vault-client`                | `VaultClient` REST client with auto-refresh on 401 + a typed error hierarchy     |
+| `subscribe`                   | `VaultClient.subscribe()` — live-query SSE (snapshot + upsert/remove, auto-reconnect) |
+| `notes-query`                 | `NotesQuery` typed query builder — `buildNotesQuery` serializes to vault's exact wire grammar |
 | `token-storage`               | `loadToken` / `saveToken` / `clearToken` / `clearAllTokensForApp`                |
 | `mount`                       | runtime-tenancy readers — `getMountBase` / `getTenantId` / `getHubOrigin` / `getVaultUrl` |
 | `sw-reload`                   | `reloadAfterServiceWorkerUpdate` — PWA-mode SW reload helper                      |
@@ -70,6 +72,11 @@ const surface = createVaultSurface({
 ```
 
 The returned `VaultSurface` is `{ oauth, bootstrap, hubUrl, vaultName, login(), handleCallback(), getClient(), logout() }`. `oauth` is the underlying `ParachuteOAuth` if you need to drop down to the low-level dance. Everything below this section is that low-level layer — reach for it when the factory's defaults don't fit.
+
+**Session resilience (return visits just work).** Hub access tokens live ~15 minutes, so *every* return visit starts with an expired-but-refreshable token. Two behaviors make that path safe without app-side workarounds:
+
+- **Cold-load refresh** — `getClient()`'s refresh seam re-seeds the DCR client_id from the factory's durable cache (`parachute_surface_dcr:<appName>` in localStorage) before exchanging the refresh token, so the first 401 on a fresh page load refreshes instead of throwing. If the cache is gone (or the hub issuer changed), refresh reports "not possible" and your UI falls back to `login()` — a fresh registration is never attempted mid-refresh, because the refresh token is bound to the original client_id.
+- **Single-flight refresh** — N parallel queries hitting N 401s collapse into **one** token-endpoint exchange (shared promise per vault). This is correctness, not polish: the hub rotates refresh tokens and treats a concurrent re-use as replay/theft, revoking the whole token family — i.e. a second concurrent refresh used to kill the session.
 
 ---
 
@@ -205,6 +212,69 @@ if (stored) {
 ```
 
 For scripts (Bun / Node), `VaultClient.fromHub({ hubOrigin, vaultName, token })` composes the canonical URL for you.
+
+### Typed queries — `NotesQuery`
+
+`queryNotes`, `queryNotesCursor`, and `subscribe` accept a typed `NotesQuery` object alongside the raw `URLSearchParams | Record<string,string>` forms (which remain fully supported — existing callers are untouched). The typed shape covers vault's structured-query grammar so you don't memorize the wire spelling:
+
+```ts
+const notes = await vault.queryNotes({
+  tag: ["#work", "#decision"],          // comma-joined into one param (vault's grammar)
+  tagMatch: "any",                       // → tag_match
+  expand: "subtypes",                    // | "namespace" | "both" | "exact"
+  excludeTag: "#archived",               // → exclude_tag
+  pathPrefix: "Work/",                   // → path_prefix
+  metadata: {
+    status: { in: ["in-progress", "in-review"] },  // operator query → meta[status][in][]
+    priority: "now",                               // scalar = shorthand equality → meta[priority]
+  },
+  date: { field: "updated_at", from: "2026-06-01" }, // half-open: from inclusive, to exclusive
+  orderBy: "updated_at",
+  sort: "desc",
+  limit: 50,
+});
+```
+
+Notes on the mapping (all pinned by tests against vault's parser):
+
+- **Metadata scalar vs operator object.** A scalar (`priority: "now"`) is shorthand equality — a JSON scan that works on *non-indexed* fields. An operator object (`{ eq, ne, gt, gte, lt, lte, in, not_in, exists }`) routes through the indexed column — vault 400s with `FIELD_NOT_INDEXED` if the field isn't declared in a tag schema.
+- **`date`** serializes to the canonical bracket bridge (`meta[updated_at][gte]=…`), never the deprecated flat `date_field`/`date_from` params. Bounds are half-open: `from` inclusive, `to` exclusive.
+- **`search` / `near` are deliberately not modeled** — they're separate query shapes (and invalid for subscriptions). Use the raw forms for them. Unknown keys with string values pass through verbatim, so mixing typed keys with a raw `"meta[...]"` param also works.
+- `buildNotesQuery(q)` / `toNotesSearchParams(input)` are exported if you want the `URLSearchParams` yourself.
+
+### Live queries — `subscribe()`
+
+Any view that polls `queryNotes` on a timer can subscribe instead. `VaultClient.subscribe()` opens vault's live-query SSE endpoint (`GET /api/subscribe`): you get one `onSnapshot(notes)` with the complete matching set, then `onUpsert(note)` / `onRemove(id)` as notes enter, change, or leave the set.
+
+```ts
+const unsubscribe = vault.subscribe(
+  { tag: "#channel-message", "meta[channel][eq]": "general" },
+  {
+    onSnapshot: (notes) => render(notes),      // replaces your whole set
+    onUpsert:   (note)  => upsertRow(note),
+    onRemove:   (id)    => dropRow(id),         // idempotent — ignore unknown ids
+    onStatus:   (s)     => setLive(s === "open"), // connecting | open | reconnecting | closed
+    onError:    (err)   => console.warn(err),
+  },
+);
+// later: unsubscribe();
+```
+
+Things worth knowing:
+
+- **Query grammar is the same as `queryNotes`** (same server-side parser), except `search`, `near`, and `cursor` aren't live-evaluable — `subscribe()` throws on them synchronously rather than letting the vault 400.
+- **The bearer rides the `Authorization` header, not the URL.** The transport is a `fetch` stream with hand-parsed SSE frames, *not* `EventSource` — `EventSource` can't set headers, which would force the token into a `?key=` query param (proxy logs, browser history). This also makes `subscribe()` work server-side (Bun/Node) where `EventSource` may not exist.
+- **Reconnects are self-correcting.** Vault has no event replay; on reconnect (capped exponential backoff) the client re-subscribes and the fresh `onSnapshot` *replaces* your set, reconciling anything missed while disconnected. Treat every snapshot as the new truth, not a delta.
+- **Token expiry is handled.** A 401 on (re)connect drives the client's `onAuthError` refresh seam once and resubscribes with the fresh token. If refresh isn't possible, the subscription terminates: `onError(VaultAuthError)` then `onStatus("closed")` — without a `"closed"`, it's still retrying.
+- **Stop it** via the returned unsubscribe function or an `AbortSignal` (`subscribe(query, handlers, { signal })`).
+
+### Typed links on create/update
+
+`UpdateNotePayload.links` mutates typed links: `{ add?: { target, relationship, metadata? }[], remove?: { target, relationship }[] }` (`target` is a note id *or* path; missing targets skip silently; vault echoes the hydrated `links` on the response when you mutate them). **`CreateNotePayload.links` is a flat array** — `{ target, relationship }[]`, no envelope and no per-link metadata, because that's what vault's POST branch actually reads; create first + `updateNote({ links: { add } })` when you need link metadata.
+
+### Auth'd media — `fetchAttachmentBlob()`
+
+`VaultClient.fetchAttachmentBlob(url)` GETs an attachment blob with the client's full auth contract (bearer header, refresh-on-401 retry, structured errors). It accepts an absolute URL, a vault-relative `/api/storage/<path>`, or a bare storage path. surface-render's `vaultClientFetchBlob` adapter prefers this method, so a plain `VaultClient` renders auth-gated images/audio with zero extra wiring. By design there is **no `getAccessToken` accessor** — the token stays inside the client (the same custody contract surface-host's scoped server-side client relies on).
 
 ### Don't redeclare the core types
 

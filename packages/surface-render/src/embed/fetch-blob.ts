@@ -3,14 +3,18 @@
  * absolute vault URL), return the blob bytes WITH the surface's
  * authorization applied.
  *
- * This is a hook, not a concrete client, on purpose: the base
- * `VaultClient` in `@openparachute/surface-client` does NOT carry
- * `fetchAttachmentBlob` (that lives on notes-ui's subclass, which adds a
- * blob-aware retry loop because the base `request*` always `.json()`s the
- * body). Rather than depend on a method the base class lacks, the embed
- * renderers take a `FetchBlob` hook. Surfaces supply it via
- * {@link vaultClientFetchBlob} (for any client exposing
- * `fetchAttachmentBlob` and/or `storageUrl`) or a fully custom function.
+ * This is a hook, not a concrete client, on purpose: the embed renderers
+ * take a `FetchBlob` hook so they don't depend on any one client class.
+ * Surfaces supply it via {@link vaultClientFetchBlob} (for any client
+ * exposing `fetchAttachmentBlob` and/or `storageUrl`) or a fully custom
+ * function. As of surface-client's Tier 1 graduation (R2, #90) the BASE
+ * `VaultClient` carries `fetchAttachmentBlob` — full auth + refresh-on-401
+ * retry, the blob-aware loop the shared `request*` path (which always
+ * `.json()`s the body) can't provide — so the adapter's preferred branch
+ * covers every `VaultClient`, base or notes-ui's subclass. The
+ * `storageUrl` + `getAccessToken` fallback below remains only for minimal
+ * custom client shapes that never adopted `fetchAttachmentBlob`; it is
+ * unreachable for `VaultClient` proper.
  */
 export type FetchBlob = (url: string) => Promise<Blob>;
 

@@ -79,8 +79,38 @@ export {
   type VaultClientOptions,
 } from "./vault-client.js";
 
+// Typed notes-query builder — `NotesQuery` objects serialize to vault's
+// exact wire grammar; accepted by queryNotes / queryNotesCursor / subscribe
+// alongside the raw URLSearchParams / Record forms.
+export {
+  buildNotesQuery,
+  isNotesQuery,
+  toNotesSearchParams,
+  type MetadataFilter,
+  type MetadataOps,
+  type MetadataScalar,
+  type NotesDateFilter,
+  type NotesQuery,
+  type NotesQueryInput,
+  type RawNotesQuery,
+} from "./notes-query.js";
+
+// Live-query SSE subscription — `VaultClient.subscribe()` is the consumer
+// API; the parser + loop primitives are exported for advanced/raw use.
+export {
+  parseSSEStream,
+  startSubscription,
+  assertSubscribableQuery,
+  type SSEEvent,
+  type SubscribeHandlers,
+  type SubscribeOptions,
+  type SubscribeStatus,
+  type SubscribeTransport,
+} from "./subscribe.js";
+
 // Vault REST resource types.
 export type {
+  TagExpandMode,
   VaultInfo,
   Note,
   NoteSummary,
@@ -92,6 +122,8 @@ export type {
   TagUpsertPayload,
   UpdateNotePayload,
   CreateNotePayload,
+  NoteLinkAddPayload,
+  NoteLinkRemovePayload,
   FindPathResult,
   StorageUploadResult,
   UploadProgress,

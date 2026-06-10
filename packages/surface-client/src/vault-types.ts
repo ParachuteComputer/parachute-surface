@@ -9,6 +9,14 @@
  * model one specific resource server.
  */
 
+/**
+ * Tag-expansion axis on notes queries (vault's `?expand=` param):
+ * `"subtypes"` (default — parent_names descendants), `"namespace"`
+ * (slash-prefix children), `"both"`, `"exact"`. Mirrors vault's
+ * `TAG_EXPAND_MODES` (`core/src/tag-hierarchy.ts`).
+ */
+export type TagExpandMode = "subtypes" | "namespace" | "both" | "exact";
+
 export interface VaultInfo {
   name: string;
   description: string;
@@ -122,11 +130,48 @@ export interface TagRecord {
   updated_at?: string | null;
 }
 
+/**
+ * A typed-link addition (`PATCH /api/notes/:id` `links.add`). `target`
+ * accepts a note id or path (vault resolves both); a missing target is
+ * skipped silently (mirrors the MCP recipe — no error, no link).
+ * `metadata` lands on the link row.
+ */
+export interface NoteLinkAddPayload {
+  /** Target note id or path. */
+  target: string;
+  relationship: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * A typed-link removal (`PATCH /api/notes/:id` `links.remove`). Missing
+ * targets / non-existent links are skipped silently (idempotent set-op).
+ * Removing a `"wikilink"` relationship also cleans the `[[brackets]]`
+ * out of the note content vault-side.
+ */
+export interface NoteLinkRemovePayload {
+  /** Target note id or path. */
+  target: string;
+  relationship: string;
+}
+
 export interface UpdateNotePayload {
   content?: string;
   path?: string;
   metadata?: Record<string, unknown>;
   tags?: { add?: string[]; remove?: string[] };
+  /**
+   * Typed-link mutations, applied after the core update (a concurrency
+   * conflict leaves links untouched). When present, vault echoes the
+   * hydrated `links` array on the response so callers can confirm the
+   * mutation without a follow-up GET. Shapes verified against vault's
+   * PATCH handler (`parachute-vault/src/routes.ts`): `add` honors
+   * per-link `metadata`; `remove` matches on (target, relationship).
+   */
+  links?: {
+    add?: NoteLinkAddPayload[];
+    remove?: NoteLinkRemovePayload[];
+  };
   if_updated_at?: string;
   /**
    * Vault's PATCH /api/notes/:idOrPath enforces optimistic concurrency
@@ -142,6 +187,17 @@ export interface CreateNotePayload {
   path?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * Typed links to create alongside the note. NOTE the shape difference
+   * from `UpdateNotePayload.links`: vault's `POST /api/notes` create
+   * branch takes a FLAT array (no `add`/`remove` envelope — there's
+   * nothing to remove on a fresh note) and does NOT persist per-link
+   * metadata on this path (verified against
+   * `parachute-vault/src/routes.ts` — `store.createLink` is called
+   * without the metadata argument). Need link metadata? Create first,
+   * then `updateNote` with `links.add`. Missing targets skip silently.
+   */
+  links?: { target: string; relationship: string }[];
 }
 
 export interface StorageUploadResult {

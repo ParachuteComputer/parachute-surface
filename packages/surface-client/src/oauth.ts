@@ -212,6 +212,19 @@ export class ParachuteOAuth {
   private clientInfoCache: OAuthClientInfo | null = null;
   /** In-memory cache of `AS metadata` so discovery runs at most once per page. */
   private metadataCache: AuthorizationServerMetadata | null = null;
+  /**
+   * Single-flight refresh guard, per vaultScope. With the hub's
+   * refresh-token ROTATION + replay detection, two concurrent refresh
+   * calls with the same refresh token are not a race — they're a
+   * security event: the second exchange looks like a stolen-token
+   * replay and **revokes the whole token family**, killing the session
+   * (RFC 6819 posture). N concurrent 401s must therefore share ONE
+   * token-endpoint exchange.
+   */
+  private readonly refreshInFlight = new Map<
+    string,
+    Promise<{ token: TokenResponse; stored: StoredToken }>
+  >();
 
   constructor(opts: ParachuteOAuthOpts) {
     this.appName = opts.appName;
@@ -257,6 +270,18 @@ export class ParachuteOAuth {
     };
     this.clientInfoCache = normalized;
     return normalized;
+  }
+
+  /**
+   * The client identity currently seeded/cached in this driver, if any —
+   * WITHOUT triggering a hosted-endpoint fetch (unlike {@link getClientId})
+   * or a registration. Lets wrappers (`createVaultSurface`'s cold-load
+   * refresh seam) check "can a refresh proceed?" cheaply: a driver that was
+   * seeded via {@link useClientId} or a prior `getClientId()` qualifies even
+   * when the wrapper's own durable cache is empty.
+   */
+  peekClientId(): OAuthClientInfo | null {
+    return this.clientInfoCache;
   }
 
   /**
@@ -440,12 +465,38 @@ export class ParachuteOAuth {
 
   /**
    * Refresh the access token via the refresh_token grant. Returns the
-   * fresh TokenResponse — the caller is responsible for persisting it
-   * (typically by calling `storedFromTokenResponse` + `saveToken`).
-   * Mirrors RFC 6749 §6 with refresh-token rotation: each successful
-   * call returns a new `refresh_token` that supersedes the prior one.
+   * fresh TokenResponse — the token is also persisted via
+   * `token-storage`. Mirrors RFC 6749 §6 with refresh-token rotation:
+   * each successful call returns a new `refresh_token` that supersedes
+   * the prior one.
+   *
+   * **Single-flight per vaultScope**: concurrent calls (e.g. N parallel
+   * requests all hitting 401 when a ~15-min access token expires) share
+   * one in-flight token-endpoint exchange and all resolve to the same
+   * fresh token. Without this, the hub's rotation replay-detection
+   * treats the second concurrent exchange as token theft and revokes
+   * the whole token family — a session-killer, not an optimization
+   * (observed in parachute-brain before this fix). Late callers join
+   * the in-flight exchange even if they hold the now-superseded refresh
+   * token; the shared result is the rotated, valid pair.
    */
   async refreshAccessToken(
+    refreshToken: string,
+    vaultScope: string,
+  ): Promise<{ token: TokenResponse; stored: StoredToken }> {
+    const existing = this.refreshInFlight.get(vaultScope);
+    if (existing) return existing;
+    const flight = this.refreshAccessTokenInner(refreshToken, vaultScope);
+    this.refreshInFlight.set(vaultScope, flight);
+    try {
+      return await flight;
+    } finally {
+      this.refreshInFlight.delete(vaultScope);
+    }
+  }
+
+  /** The actual refresh_token exchange — see `refreshAccessToken`. */
+  private async refreshAccessTokenInner(
     refreshToken: string,
     vaultScope: string,
   ): Promise<{ token: TokenResponse; stored: StoredToken }> {

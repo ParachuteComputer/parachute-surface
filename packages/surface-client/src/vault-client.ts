@@ -38,6 +38,13 @@
  *     match what the modern fetch-style callers want.
  */
 
+import { toNotesSearchParams, type NotesQueryInput } from "./notes-query.js";
+import {
+  assertSubscribableQuery,
+  startSubscription,
+  type SubscribeHandlers,
+  type SubscribeOptions,
+} from "./subscribe.js";
 import type {
   CreateNotePayload,
   FindPathResult,
@@ -507,9 +514,27 @@ export class VaultClient {
 
   // ---------- notes ----------
 
-  async queryNotes(params: URLSearchParams | Record<string, string>): Promise<Note[]> {
-    const qs = params instanceof URLSearchParams ? params : new URLSearchParams(params);
-    const s = qs.toString();
+  /**
+   * Query notes. Accepts the typed `NotesQuery` shape (see
+   * `notes-query.ts` — serialized to vault's exact wire grammar by
+   * `buildNotesQuery`) or the raw `URLSearchParams | Record<string,
+   * string>` forms (back-compat; also the escape hatch for `search` /
+   * `near`, which the typed shape deliberately doesn't model).
+   *
+   * @example
+   * ```ts
+   * await vault.queryNotes({
+   *   tag: ["#work", "#decision"],
+   *   tagMatch: "any",
+   *   metadata: { status: { eq: "in-progress" } },
+   *   orderBy: "updated_at",
+   *   sort: "desc",
+   *   limit: 20,
+   * });
+   * ```
+   */
+  async queryNotes(params: NotesQueryInput): Promise<Note[]> {
+    const s = toNotesSearchParams(params).toString();
     return this.request<Note[]>(`/api/notes${s ? `?${s}` : ""}`);
   }
 
@@ -523,11 +548,11 @@ export class VaultClient {
    * preserves the Response so we can read the `X-Next-Cursor` header.
    */
   async queryNotesCursor(
-    params: URLSearchParams | Record<string, string>,
+    params: NotesQueryInput,
     cursor?: string,
     limit?: number,
   ): Promise<{ items: Note[]; nextCursor?: string }> {
-    const qs = params instanceof URLSearchParams ? params : new URLSearchParams(params);
+    const qs = toNotesSearchParams(params);
     if (cursor) qs.set("cursor", cursor);
     if (typeof limit === "number") qs.set("limit", String(limit));
     const s = qs.toString();
@@ -609,6 +634,74 @@ export class VaultClient {
     const out: { items: Note[]; nextCursor?: string } = { items };
     if (headerCursor) out.nextCursor = headerCursor;
     return out;
+  }
+
+  /**
+   * Live-query subscription over vault's `GET /api/subscribe` SSE endpoint
+   * (vault's live-query SSE design, 2026-06-08). Delivers one
+   * `onSnapshot(notes)` — the complete matching set — then `onUpsert(note)` /
+   * `onRemove(id)` as notes enter/change/leave the set. Returns the
+   * unsubscribe function.
+   *
+   * - **Query grammar** is the same as `queryNotes` (same server-side
+   *   parser), except `search`, `near`, and `cursor` are not
+   *   live-evaluable — this method throws on them synchronously (the
+   *   vault would 400).
+   * - **Transport is fetch-stream, not EventSource** — the bearer rides
+   *   the `Authorization` header instead of a `?key=` query param
+   *   (no token in proxy logs / browser history), and the method works
+   *   server-side (Bun/Node) where `EventSource` may not exist.
+   * - **Reconnects are self-correcting**: vault has no event replay, so a
+   *   reconnect re-delivers a *fresh snapshot* that replaces the
+   *   consumer's set — anything missed while disconnected is reconciled
+   *   wholesale. Backoff is exponential and capped (see
+   *   {@link SubscribeOptions}).
+   * - **Auth expiry**: a 401/403 on (re)connect drives the client's
+   *   `onAuthError` refresh seam once, then resubscribes with the fresh
+   *   token (also rotated into the client). Unrecoverable auth → the
+   *   subscription terminates with `onError(VaultAuthError)` +
+   *   `onStatus("closed")`.
+   *
+   * @example
+   * ```ts
+   * const unsubscribe = vault.subscribe(
+   *   { tag: "#channel-message", "meta[channel][eq]": "general" },
+   *   {
+   *     onSnapshot: (notes) => render(notes),
+   *     onUpsert: (note) => upsertRow(note),
+   *     onRemove: (id) => dropRow(id),
+   *     onStatus: (s) => setLive(s === "open"),
+   *   },
+   * );
+   * // later: unsubscribe();
+   * ```
+   */
+  subscribe(
+    query: NotesQueryInput,
+    handlers: SubscribeHandlers,
+    opts: SubscribeOptions = {},
+  ): () => void {
+    const qs = toNotesSearchParams(query);
+    assertSubscribableQuery(qs);
+    const s = qs.toString();
+    return startSubscription(
+      {
+        url: `${this.baseUrl}/api/subscribe${s ? `?${s}` : ""}`,
+        resolveToken: () => this.resolveToken(),
+        // Reuse the request path's refresh-on-401 seam; rotate the cached
+        // token the same way `requestWithRetry` does on a successful refresh.
+        refreshToken: this.onAuthError
+          ? async () => {
+              const fresh = await this.onAuthError?.();
+              if (fresh) this.token = fresh;
+              return fresh ?? null;
+            }
+          : undefined,
+        fetchImpl: this.fetchImpl,
+      },
+      handlers,
+      opts,
+    );
   }
 
   async getNote(
@@ -938,5 +1031,111 @@ export class VaultClient {
   storageUrl(p: string): string {
     const trimmed = p.startsWith("/") ? p.slice(1) : p;
     return `${this.baseUrl}/api/storage/${trimmed}`;
+  }
+
+  /**
+   * Auth'd GET of an attachment blob (image/audio render). Accepts an
+   * absolute URL, a vault-relative path (`/api/storage/<path>`), or a
+   * bare storage path — the same resolution notes-ui's subclass
+   * established (which keeps its own override; this base implementation
+   * makes plain clients blob-capable too).
+   *
+   * Exists because the shared `request*` loop always `.json()`s the
+   * body; blobs need their own thin retry loop. Runs the full
+   * auth/refresh/error-classification contract: Authorization header,
+   * refresh-on-401 via `onAuthError` (retry once), reachability
+   * signals, and the structured error hierarchy.
+   *
+   * **This is the deliberate fetch-blob seam for surface-render** — its
+   * `vaultClientFetchBlob` adapter prefers `client.fetchAttachmentBlob`
+   * when present, so a base `VaultClient` now renders auth-gated media
+   * without the surface exposing a bearer accessor. The token stays
+   * inside the client *on purpose*: no `getAccessToken` is added, so
+   * the future no-token-accessor `ScopedVaultClient` (surface-host R3)
+   * can extend this class without violating its custody contract.
+   */
+  async fetchAttachmentBlob(url: string): Promise<Blob> {
+    const target = /^https?:\/\//.test(url)
+      ? url
+      : `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+    return this.requestBlobWithRetry(target, url, true);
+  }
+
+  /**
+   * Protected: the blob-returning analog of `requestWithRetry` —
+   * identical auth/refresh/reachability/error semantics, but resolves
+   * `res.blob()` instead of parsing JSON. Subclasses adding blob
+   * endpoints can reuse it.
+   */
+  protected async requestBlobWithRetry(
+    target: string,
+    original: string,
+    allowRetry: boolean,
+  ): Promise<Blob> {
+    const token = await this.resolveToken();
+    let res: Response;
+    try {
+      res = await this.fetchImpl(target, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      this.onReachability?.("unreachable", message);
+      throw new VaultUnreachableError(`GET ${original} failed: ${message}`, 0);
+    }
+    if (res.status >= 500) {
+      this.onReachability?.("unreachable", `HTTP ${res.status}`);
+      const bodyText = await res.text().catch(() => "");
+      throw new VaultServerError(
+        `GET ${original} → ${res.status}`,
+        res.status,
+        bodyText || undefined,
+      );
+    }
+    this.onReachability?.("healthy");
+    if (res.status === 401 || res.status === 403) {
+      const bodyText = await res.text().catch(() => "");
+      let errorType: string | undefined;
+      let serverMessage: string | undefined;
+      if (bodyText) {
+        try {
+          const parsed = JSON.parse(bodyText) as { error_type?: unknown; message?: unknown };
+          if (typeof parsed.error_type === "string") errorType = parsed.error_type;
+          if (typeof parsed.message === "string") serverMessage = parsed.message;
+        } catch {}
+      }
+      if (allowRetry && this.onAuthError) {
+        const fresh = await this.onAuthError();
+        if (fresh) {
+          this.token = fresh;
+          return this.requestBlobWithRetry(target, original, false);
+        }
+        // onAuthError returned null → caller's refresh path owns the halt
+        // (see onAuthRevoked JSDoc); skip onAuthRevoked here.
+      } else {
+        this.onAuthRevoked?.(res.status, { errorType, message: serverMessage });
+      }
+      const composed = errorType
+        ? `Vault rejected the token (${res.status}: ${errorType}${serverMessage ? ` — ${serverMessage}` : ""})`
+        : serverMessage
+          ? `Vault rejected the token (${res.status}: ${serverMessage})`
+          : `Vault rejected the token (${res.status})`;
+      const opts: { errorType?: string; body?: string } = {};
+      if (errorType !== undefined) opts.errorType = errorType;
+      if (bodyText) opts.body = bodyText;
+      if (res.status === 403) {
+        throw new VaultPermissionError(composed, opts);
+      }
+      throw new VaultAuthError(composed, res.status, opts);
+    }
+    if (res.status === 404) {
+      throw new VaultNotFoundError(`GET ${original} → 404`);
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`GET ${original} failed (${res.status}): ${text}`);
+    }
+    return res.blob();
   }
 }
