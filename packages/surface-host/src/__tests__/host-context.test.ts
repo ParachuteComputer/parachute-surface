@@ -127,7 +127,7 @@ describe("ScopedVaultClient — capability, never secret", () => {
     client.setAccessToken;
     // @ts-expect-error — ScopedVaultClient must not expose getAccessToken
     client.getAccessToken;
-    // @ts-expect-error — ScopedVaultClient must not expose vaultBaseUrl's inner client
+    // @ts-expect-error — ScopedVaultClient must not expose resolveToken (the inner client's token-resolution hook)
     client.resolveToken;
   });
 

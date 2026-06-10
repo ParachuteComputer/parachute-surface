@@ -4,7 +4,7 @@
  * real backends mounted from tmpdir surfaces, exercised over loopback.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -25,15 +25,28 @@ afterEach(() => {
   for (const d of tmpdirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/** A backend that records every pathname it is asked to serve. */
-const RECORDING_BACKEND = `
-globalThis.__seenPaths = globalThis.__seenPaths ?? [];
+/**
+ * Source for a backend that records every pathname it is asked to serve.
+ * The recording rides a per-surface file in the surface's own tmpdir (path
+ * baked into the generated source) — the dynamically-imported module can't
+ * close over test scope, and a file keeps the capture closure-scoped to
+ * the test (via the returned `seen()` reader) instead of globalThis.
+ */
+function recordingBackendSource(seenFile: string): string {
+  return `
+import { appendFileSync } from "node:fs";
 export default (ctx) => ({
   fetch(req) {
     const url = new URL(req.url);
-    globalThis.__seenPaths.push(req.method + " " + url.pathname);
+    appendFileSync(${JSON.stringify(seenFile)}, req.method + " " + url.pathname + "\\n");
     return Response.json({ via: "backend", path: url.pathname, mount: ctx.mount });
   },
+});`;
+}
+
+/** Minimal healthy backend for tests that don't need request recording. */
+const PLAIN_BACKEND = `export default (ctx) => ({
+  fetch() { return Response.json({ via: "backend", mount: ctx.mount }); },
 });`;
 
 const ECHO_WS_BACKEND = `export default (ctx) => ({
@@ -72,6 +85,23 @@ function makeSurface(
   return { dirName: name, uiDir, distDir: path.join(uiDir, "dist"), meta };
 }
 
+/** A recording surface + a closure-scoped reader of what its backend saw. */
+function makeRecordingSurface(name: string): { ui: RegisteredUi; seen: () => string[] } {
+  const seenFile = path.join(
+    mkdtempSync(path.join(os.tmpdir(), `routing-seen-${name}-`)),
+    "seen.txt",
+  );
+  tmpdirs.push(path.dirname(seenFile));
+  const ui = makeSurface(name, recordingBackendSource(seenFile));
+  const seen = (): string[] =>
+    existsSync(seenFile)
+      ? readFileSync(seenFile, "utf8")
+          .split("\n")
+          .filter((l) => l.length > 0)
+      : [];
+  return { ui, seen };
+}
+
 async function startHost(uis: RegisteredUi[]): Promise<{ origin: string; state: AppState }> {
   const stateRoot = mkdtempSync(path.join(os.tmpdir(), "routing-state-"));
   tmpdirs.push(stateRoot);
@@ -99,14 +129,9 @@ async function startHost(uis: RegisteredUi[]): Promise<{ origin: string; state: 
   return { origin: `http://127.0.0.1:${server.port}`, state };
 }
 
-function seenPaths(): string[] {
-  return ((globalThis as Record<string, unknown>).__seenPaths as string[]) ?? [];
-}
-
 describe("routing — structural containment (P4)", () => {
   test("backend receives EXACTLY ${mount}/api/* — host paths never reach it", async () => {
-    (globalThis as Record<string, unknown>).__seenPaths = [];
-    const backed = makeSurface("recorder", RECORDING_BACKEND);
+    const { ui: backed, seen } = makeRecordingSurface("recorder");
     const { origin } = await startHost([backed]);
 
     // api namespace → backend (any method).
@@ -127,16 +152,11 @@ describe("routing — structural containment (P4)", () => {
     const healthz = await fetch(`${origin}/surface/healthz`);
     expect(healthz.status).toBe(200);
 
-    expect(seenPaths()).toEqual([
-      "GET /surface/recorder/api/notes",
-      "POST /surface/recorder/api/notes",
-    ]);
-    (globalThis as Record<string, unknown>).__seenPaths = undefined;
+    expect(seen()).toEqual(["GET /surface/recorder/api/notes", "POST /surface/recorder/api/notes"]);
   });
 
   test("sibling surfaces are isolated — one backend cannot serve another's namespace", async () => {
-    (globalThis as Record<string, unknown>).__seenPaths = [];
-    const backed = makeSurface("served", RECORDING_BACKEND);
+    const { ui: backed, seen } = makeRecordingSurface("served");
     const staticOnly = makeSurface("plain", null);
     const { origin } = await startHost([backed, staticOnly]);
 
@@ -146,8 +166,7 @@ describe("routing — structural containment (P4)", () => {
     const res = await fetch(`${origin}/surface/plain/api/anything`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("plain static");
-    expect(seenPaths()).toEqual([]);
-    (globalThis as Record<string, unknown>).__seenPaths = undefined;
+    expect(seen()).toEqual([]);
   });
 
   test("backed surface with failed mount → api 503s while static serves", async () => {
@@ -163,7 +182,7 @@ describe("routing — structural containment (P4)", () => {
 
 describe("security headers (P6/§13)", () => {
   test("injected on backed-surface responses: api, static, and refusals", async () => {
-    const backed = makeSurface("armored", RECORDING_BACKEND);
+    const backed = makeSurface("armored", PLAIN_BACKEND);
     const { origin } = await startHost([backed]);
 
     for (const url of [
@@ -192,7 +211,7 @@ describe("security headers (P6/§13)", () => {
   });
 
   test("csp override ADDS sources to specific directives only", async () => {
-    const backed = makeSurface("extended", RECORDING_BACKEND, {
+    const backed = makeSurface("extended", PLAIN_BACKEND, {
       server: {
         entry: "server/index.js",
         csp: { "connect-src": ["https://api.example.com", "wss:"] },

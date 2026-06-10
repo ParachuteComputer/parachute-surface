@@ -92,6 +92,29 @@ describe("loadConfig — valid", () => {
     expect(cfg.dev_mode_allowed).toBe(DEFAULTS.dev_mode_allowed);
   });
 
+  test("credential_connections survives the real read path (P3 binding map)", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ credential_connections: { "my-surface": "cred-surface-vault-work" } }),
+    );
+    const cfg = loadConfig({ configPath, logger: silentLogger });
+    expect(cfg.credential_connections).toEqual({ "my-surface": "cred-surface-vault-work" });
+  });
+
+  test("credential_connections defaults to {} (missing file AND absent key)", () => {
+    expect(loadConfig({ configPath, logger: silentLogger }).credential_connections).toEqual({});
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ disabled: false }));
+    expect(loadConfig({ configPath, logger: silentLogger }).credential_connections).toEqual({});
+  });
+
+  test("credential_connections wrong shapes are ConfigError", () => {
+    expect(() => validateConfig({ credential_connections: ["cred-a"] })).toThrow(ConfigError);
+    expect(() => validateConfig({ credential_connections: { demo: 42 } })).toThrow(ConfigError);
+    expect(() => validateConfig({ credential_connections: { demo: "" } })).toThrow(ConfigError);
+  });
+
   test("hub_url with trailing slash stripped", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify({ hub_url: "http://x/" }));

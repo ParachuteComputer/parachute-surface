@@ -38,6 +38,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -108,15 +109,20 @@ export function credentialPathFor(connectionId: string, dir = resolveCredentials
 }
 
 /**
- * Persist a credential, 0600. `writeFileSync`'s `mode` only applies on
- * CREATE — the explicit chmod covers overwrites of a file that somehow
- * widened.
+ * Persist a credential, 0600, ATOMICALLY: stage to a temp file (created
+ * 0600 — never a world-readable instant), chmod it (covers a pre-existing
+ * temp that somehow widened; `writeFileSync`'s `mode` only applies on
+ * create), then rename over the target. A crash mid-write leaves the
+ * prior credential intact instead of a torn file, and no reader ever
+ * observes a partial write.
  */
 export function writeCredential(record: StoredCredential, dir = resolveCredentialsDir()): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = credentialPathFor(record.connection_id, dir);
-  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(file, 0o600);
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, file);
 }
 
 export function readCredential(
@@ -168,6 +174,17 @@ export function applyCredentialPayload(
   if (!payload.token || !payload.jti || !payload.expires_at) {
     throw new Error(`credential payload op=${payload.op} is missing token/jti/expires_at`);
   }
+  // renew_path invariant: renewals only ever POST the hub's connections
+  // namespace. The sweep already pins the HUB ORIGIN (a crafted path can't
+  // reach a foreign host), but a payload smuggling e.g. `/oauth/token` or
+  // `/admin/users/...` would still echo the live credential at an
+  // unintended hub endpoint — refuse it at write time.
+  const renewPath = payload.renew_path ?? `/admin/connections/${payload.connection_id}/renew`;
+  if (!renewPath.startsWith("/admin/connections/")) {
+    throw new Error(
+      `credential payload renew_path "${renewPath}" must be under /admin/connections/`,
+    );
+  }
   const record: StoredCredential = {
     connection_id: payload.connection_id,
     key: payload.key,
@@ -177,7 +194,7 @@ export function applyCredentialPayload(
     token: payload.token,
     jti: payload.jti,
     expires_at: payload.expires_at,
-    renew_path: payload.renew_path ?? `/admin/connections/${payload.connection_id}/renew`,
+    renew_path: renewPath,
     status: "ok",
     updated_at: now().toISOString(),
   };

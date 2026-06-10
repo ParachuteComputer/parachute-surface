@@ -75,12 +75,22 @@ export function resolveSurfaceStateDir(
   return path.join(parachuteHome, "surface", "state");
 }
 
-/** Backing SQLite file for one surface's state store. */
+/**
+ * Backing SQLite file for one surface's state store.
+ *
+ * Path safety is PREDICATED on `name` being a NAME_PATTERN-validated
+ * surface name (`^[a-z][a-z0-9-]*$` — enforced by meta-schema parsing,
+ * the admin add flow, and the route extractors): the join is not itself a
+ * traversal guard. Callers must never pass raw operator/wire input here.
+ */
 export function stateStorePathFor(name: string, stateDir = resolveSurfaceStateDir()): string {
   return path.join(stateDir, `${name}.sqlite`);
 }
 
-/** The surface's own (admin-editable) config file. */
+/**
+ * The surface's own (admin-editable) config file. Same precondition as
+ * {@link stateStorePathFor}: `name` must be NAME_PATTERN-validated.
+ */
 export function surfaceConfigPathFor(name: string, stateDir = resolveSurfaceStateDir()): string {
   return path.join(stateDir, `${name}.config.json`);
 }

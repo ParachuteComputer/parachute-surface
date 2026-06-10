@@ -9,12 +9,12 @@
  * the renewal response body `{ ok, credential }`.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 import { type EnforceScopeFn, routeAdmin } from "../admin-routes.ts";
-import { DEFAULTS } from "../config.ts";
+import { DEFAULTS, loadConfig } from "../config.ts";
 import { sweepCredentials } from "../credential-renewal.ts";
 import {
   type CredentialPayload,
@@ -156,6 +156,24 @@ describe("POST /surface/api/credential (hub delivery)", () => {
     }
     expect(listCredentials(dir)).toEqual([]);
   });
+
+  test("crafted renew_path outside /admin/connections/ is refused (nothing persisted)", async () => {
+    const dir = tmpDir("creds-");
+    for (const renew_path of [
+      "/oauth/token",
+      "/admin/users/promote",
+      "admin/connections/x/renew",
+    ]) {
+      const res = await deliver(payload({ renew_path }), adminOpts(dir));
+      expect(res.status).toBe(400);
+    }
+    expect(listCredentials(dir)).toEqual([]);
+    // Absent renew_path falls back to the derived hub-connections default.
+    await deliver(payload({ renew_path: undefined }), adminOpts(dir));
+    expect(readCredential("cred-surface-vault-default", dir)?.renew_path).toBe(
+      "/admin/connections/cred-surface-vault-default/renew",
+    );
+  });
 });
 
 describe("surface → credential binding (the params-shape delta)", () => {
@@ -202,6 +220,36 @@ describe("surface → credential binding (the params-shape delta)", () => {
     const res = resolveCredentialForSurface(makeUi("demo"), { dir });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toContain("credential_connections");
+  });
+
+  test("END-TO-END: an operator mapping in the REAL config file wins (loadConfig → provider)", () => {
+    // Reviewer item: prove the explicit-mapping branch is reachable through
+    // the PRODUCTION config read path, not just an inline object — write a
+    // real config.json, loadConfig() it, and thread it the way serve()
+    // does (getConfig closure over the loaded config).
+    const dir = tmpDir("creds-");
+    const home = tmpDir("creds-home-");
+    const configPath = path.join(home, "surface", "config.json");
+    mkdirSync(path.dirname(configPath), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({ credential_connections: { demo: "cred-2" } }));
+    const loaded = loadConfig({ configPath, logger: silent });
+
+    // Two WRITE credentials on the same vault: the heuristic chain
+    // (single-match, then single-READ) cannot resolve this — ONLY the
+    // operator's config mapping can.
+    applyCredentialPayload(
+      payload({ connection_id: "cred-1", scope: "vault:default:write", token: "tok-1" }),
+      dir,
+    );
+    applyCredentialPayload(
+      payload({ connection_id: "cred-2", scope: "vault:default:write", token: "tok-2" }),
+      dir,
+    );
+    const provider = createCredentialTokenProvider(makeUi("demo"), {
+      dir,
+      getConfig: () => loaded,
+    });
+    expect(provider()).toBe("tok-2");
   });
 });
 

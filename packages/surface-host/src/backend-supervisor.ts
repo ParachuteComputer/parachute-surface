@@ -103,7 +103,15 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** Race a promise against a timeout WITHOUT leaking the timer. */
+/**
+ * Race a promise against a timeout WITHOUT leaking the timer.
+ *
+ * The losing arm is ABANDONED, not cancelled — in-process code has no
+ * preemption (§11), so a timed-out `fetch` / hung `shutdown()` keeps
+ * running detached until it settles on its own. The timeout releases the
+ * CALLER (and feeds the crash-loop counter), nothing more; backends must
+ * key long-running work to `ctx.shutdownSignal`.
+ */
 async function withTimeout<T>(
   p: Promise<T>,
   ms: number,

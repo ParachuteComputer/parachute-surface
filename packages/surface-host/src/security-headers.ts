@@ -29,6 +29,12 @@ import type { UiMeta } from "./meta-schema.ts";
  *     use object URLs routinely.
  *   - `frame-ancestors 'none'` + the X-Frame-Options belt: no embedding,
  *     same posture as the hub admin.
+ *   - `frame-src 'none'` vs `frame-ancestors 'none'` — deliberately
+ *     asymmetric: `frame-src` (what THIS surface may embed) is on the
+ *     overridable list, so a declared override can promote it from 'none'
+ *     (the merge drops 'none' when explicit sources are added);
+ *     `frame-ancestors` (who may embed THIS surface) is NEVER overridable
+ *     — a backed surface cannot opt itself into being framed.
  *   - `base-uri 'self'`: the host's tenancy injection adds a same-origin
  *     `<base href>`; anything else is an injection.
  */
