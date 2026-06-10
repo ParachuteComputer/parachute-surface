@@ -649,6 +649,7 @@ function serveAdminFile(req: Request, filePath: string, filenameForHeaders: stri
       path: "/surface/admin",
       scopes_required: [],
       pwa: false,
+      audience: "hub-users",
       public: false,
     } as UiMeta),
   };

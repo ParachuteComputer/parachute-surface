@@ -191,7 +191,9 @@ function serializeUi(u: RegisteredUi): SerializedUi {
     iconUrl: u.meta.iconUrl,
     scopes_required: u.meta.scopes_required,
     pwa: u.meta.pwa,
+    audience: u.meta.audience,
     public: u.meta.public,
+    server: u.meta.server ?? null,
     status: "active" as const,
     oauthClientId: oauth?.client_id,
     oauthStatus: oauth?.status,
@@ -212,7 +214,11 @@ export type SerializedUi = {
   iconUrl?: string;
   scopes_required: string[];
   pwa: boolean;
+  /** Audience exposure (canonical; `public` is the derived legacy view). */
+  audience: import("./meta-schema.ts").UiAudience;
   public: boolean;
+  /** The validated `server` block when the surface is backed; null otherwise. */
+  server: import("./meta-schema.ts").UiServerBlock | null;
   status: "active";
   oauthClientId?: string;
   oauthStatus?: string;
@@ -571,7 +577,13 @@ export async function addUiInternal(
           vault_default: parsedMeta.vault_default,
           pwa: parsedMeta.pwa,
           pwa_service_worker: parsedMeta.pwa_service_worker,
+          // `audience` is canonical; `public` is written alongside (derived,
+          // always consistent) for readers still on the legacy boolean.
+          audience: parsedMeta.audience,
           public: parsedMeta.public,
+          // Server block (P1) — preserved so re-scans rehydrate the backed
+          // surface and the supervisor can mount it.
+          server: parsedMeta.server,
           // Phase 2.0 — preserve required_schema so the scan in `scanUis()`
           // can rehydrate it from disk + the Phase 2.1 provisioner can
           // re-trigger off it. Without this projection, re-running
@@ -643,7 +655,7 @@ export async function addUiInternal(
           boundPort: 0, // ignored — existing entry's port preserves
           installDir: resolveProjectRoot(),
           manifestPath: opts.manifestPath,
-          extraFields: { uis: buildUisExtraField(opts.state.registeredUis) },
+          extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
           logger: opts.logger,
         });
       } catch (e) {
@@ -743,7 +755,7 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
         boundPort: 0,
         installDir: resolveProjectRoot(),
         manifestPath: opts.manifestPath,
-        extraFields: { uis: buildUisExtraField(opts.state.registeredUis) },
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
         logger: opts.logger,
       });
     } catch (e) {
@@ -784,7 +796,7 @@ async function handleReload(req: Request, name: string, opts: AdminHandlerOpts):
         boundPort: 0,
         installDir: resolveProjectRoot(),
         manifestPath: opts.manifestPath,
-        extraFields: { uis: buildUisExtraField(opts.state.registeredUis) },
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
         logger: opts.logger,
       });
     } catch (e) {
@@ -854,9 +866,16 @@ async function handleProvisionSchema(
 
 /**
  * Assemble the per-UI `uis` map stamped into services.json. Carries the
- * minimum hub needs to render sub-tiles in discovery: display metadata,
- * mount path, scopes, status, and the per-UI OAuth client_id when DCR
- * was successful.
+ * minimum hub needs to render sub-tiles in discovery AND to enforce the
+ * per-UI audience gate (H3): display metadata, mount path, scopes,
+ * `audience`, status, and the per-UI OAuth client_id when DCR was
+ * successful.
+ *
+ * `audience` + `scopes_required` are the transport half of the audience
+ * gate — the hub's `UiSubUnit` reads exactly these field names
+ * (parachute-hub/src/services-manifest.ts) and `gateUiAudience` enforces
+ * them at the proxy BEFORE forwarding. surface-host TRANSPORTS the
+ * declaration; the hub owns enforcement.
  */
 function buildUisExtraField(uis: ReadonlyArray<RegisteredUi>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -869,11 +888,29 @@ function buildUisExtraField(uis: ReadonlyArray<RegisteredUi>): Record<string, un
       iconUrl: u.meta.iconUrl,
       version: u.meta.version,
       scopes_required: u.meta.scopes_required,
+      audience: u.meta.audience,
       oauthClientId: oauth?.client_id,
       status: "active",
     };
   }
   return out;
+}
+
+/**
+ * Assemble the FULL `extraFields` bag for `selfRegister` — the per-UI `uis`
+ * map plus the row-level `websocket` capability flag (H1): `true` iff ANY
+ * installed surface declares `server.capabilities: ["websocket"]`. The
+ * hub's upgrade bridge is deny-by-default; without this flag a WS upgrade
+ * for `/surface/<name>/ws` is refused (426) at the hub and never reaches
+ * this daemon. Always written (explicit `false` clears a stale `true` after
+ * the last WS-declaring surface is removed — the upsert merges, so absence
+ * would leave the old value standing).
+ */
+export function buildSelfRegisterExtraFields(
+  uis: ReadonlyArray<RegisteredUi>,
+): Record<string, unknown> {
+  const websocket = uis.some((u) => u.meta.server?.capabilities.includes("websocket") === true);
+  return { uis: buildUisExtraField(uis), websocket };
 }
 
 /** Used by serve() at boot to stamp the same `uis` map on first selfRegister. */

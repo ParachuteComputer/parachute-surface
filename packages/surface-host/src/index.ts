@@ -14,7 +14,7 @@
 
 import pkg from "../package.json" with { type: "json" };
 
-import { addUiInternal, buildUisExtraFieldForBoot } from "./admin-routes.ts";
+import { addUiInternal, buildSelfRegisterExtraFields } from "./admin-routes.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
@@ -40,6 +40,7 @@ export * from "./dev-watcher.ts";
 export {
   routeAdmin,
   buildUisExtraFieldForBoot,
+  buildSelfRegisterExtraFields,
   addUiInternal,
   type AdminHandlerOpts,
   type AdminMutableState,
@@ -252,7 +253,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       boundPort: portWritten,
       installDir: resolveProjectRoot(),
       manifestPath: opts.manifestPath,
-      extraFields: { uis: buildUisExtraFieldForBoot(state.registeredUis) },
+      extraFields: buildSelfRegisterExtraFields(state.registeredUis),
       logger,
     });
   }
@@ -394,7 +395,7 @@ export async function runBootstrap(args: {
         boundPort: args.boundPort,
         installDir: resolveProjectRoot(),
         manifestPath: args.manifestPath,
-        extraFields: { uis: buildUisExtraFieldForBoot(args.adminOpts.state.registeredUis) },
+        extraFields: buildSelfRegisterExtraFields(args.adminOpts.state.registeredUis),
         logger,
       });
     } catch (e) {

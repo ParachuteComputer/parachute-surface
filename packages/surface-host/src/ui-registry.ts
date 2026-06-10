@@ -22,7 +22,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import { resolveUisDir } from "./config.ts";
-import { InvalidMetaError, type UiMeta, parseMeta } from "./meta-schema.ts";
+import { InvalidMetaError, type UiMeta, parseMetaWithDiagnostics } from "./meta-schema.ts";
 
 export type UiStatus =
   | "active"
@@ -138,7 +138,13 @@ export function scanUis(opts: ScanOpts = {}): ScanResult {
 
     let meta: UiMeta;
     try {
-      meta = parseMeta(raw);
+      const parsed = parseMetaWithDiagnostics(raw);
+      meta = parsed.meta;
+      // Non-fatal diagnostics (e.g. the legacy-`public` deprecation note) —
+      // surfaced in the daemon log / `parachute-surface list`, never a skip.
+      for (const w of parsed.warnings) {
+        logger.warn(`[app] ${dirName}: ${w}`);
+      }
     } catch (e) {
       const reason =
         e instanceof InvalidMetaError

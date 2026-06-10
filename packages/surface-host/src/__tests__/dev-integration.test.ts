@@ -52,6 +52,7 @@ function makeUi(
       path: mountPath,
       scopes_required: ["vault:*:read"],
       pwa: false,
+      audience: "hub-users" as const,
       public: false,
       ...extraMeta,
     },

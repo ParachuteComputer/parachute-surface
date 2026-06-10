@@ -35,6 +35,7 @@ function makeUi(overrides: Partial<RegisteredUi["meta"]> = {}): RegisteredUi {
       path: "/surface/notes",
       scopes_required: ["vault:default:read", "vault:default:write"],
       pwa: false,
+      audience: "hub-users" as const,
       public: false,
       vault_default: "default",
       required_schema: {

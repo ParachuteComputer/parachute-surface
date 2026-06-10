@@ -21,6 +21,7 @@ const minimalMeta: UiMeta = {
   path: "/surface/x",
   scopes_required: ["vault:*:read"],
   pwa: false,
+  audience: "hub-users" as const,
   public: false,
 };
 

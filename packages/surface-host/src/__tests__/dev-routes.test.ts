@@ -46,6 +46,7 @@ function makeUi(name: string, mountPath = `/surface/${name}`): RegisteredUi {
       path: mountPath,
       scopes_required: ["vault:*:read"],
       pwa: false,
+      audience: "hub-users" as const,
       public: false,
     },
   };
