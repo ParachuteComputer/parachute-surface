@@ -1,0 +1,63 @@
+{
+  "name": "@openparachute/doc-schema",
+  "version": "0.1.0",
+  "description": "The shared document schema for rich-text Parachute surfaces — one ProseMirror schema, the TipTap extension list that produces it, and the markdown codec (markdownToDoc/docToMarkdown) built on prosemirror-markdown. Schema and serialization are versioned together: one package version covers both. The codec entry is isomorphic (browser + server) with no DOM globals anywhere in its import graph.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tiptap": {
+      "types": "./dist/tiptap/index.d.ts",
+      "import": "./dist/tiptap/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.codec.json",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@tiptap/core": "3.26.0",
+    "@tiptap/extension-blockquote": "3.26.0",
+    "@tiptap/extension-bold": "3.26.0",
+    "@tiptap/extension-code": "3.26.0",
+    "@tiptap/extension-code-block": "3.26.0",
+    "@tiptap/extension-document": "3.26.0",
+    "@tiptap/extension-hard-break": "3.26.0",
+    "@tiptap/extension-heading": "3.26.0",
+    "@tiptap/extension-horizontal-rule": "3.26.0",
+    "@tiptap/extension-image": "3.26.0",
+    "@tiptap/extension-italic": "3.26.0",
+    "@tiptap/extension-link": "3.26.0",
+    "@tiptap/extension-list": "3.26.0",
+    "@tiptap/extension-paragraph": "3.26.0",
+    "@tiptap/extension-strike": "3.26.0",
+    "@tiptap/extension-text": "3.26.0",
+    "markdown-it": "^14.1.0",
+    "prosemirror-markdown": "^1.13.1",
+    "prosemirror-model": "^1.24.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "@types/markdown-it": "^14.1.2",
+    "typescript": "^5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/doc-schema"
+  }
+}

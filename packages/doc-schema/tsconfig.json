@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    // Build config (tsc → dist). DOM lib is here ONLY for the ./tiptap
+    // entry's @tiptap type surface.
+    //
+    // Sibling configs (comment-free JSON — biome treats non-standard
+    // tsconfig names as strict JSON):
+    // - tsconfig.test.json: noEmit typecheck of everything incl. __tests__.
+    // - tsconfig.codec.json: the static isomorphism gate — codec sources
+    //   (src minus tiptap minus tests) under lib ESNext with NO DOM lib and
+    //   no ambient types. skipLibCheck exempts dependency d.ts files, so the
+    //   AUTHORITATIVE gate is the runtime probe in
+    //   src/__tests__/isomorphism.test.ts.
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "types": []
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/__tests__", "dist", "node_modules"]
+}
