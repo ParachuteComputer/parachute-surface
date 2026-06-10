@@ -356,6 +356,167 @@ describe("POST /surface/add (R3b extensions)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// GitHub-release shorthand sources (resolver in front of the URL branch)
+// ---------------------------------------------------------------------------
+
+describe("add/inspect via GitHub-release shorthand", () => {
+  const DOWNLOAD_URL =
+    "https://github.com/Unforced-Dev/WovenBoulder/releases/download/v1.2.3/woven-boulder-surface-1.2.3.tgz";
+
+  /** fetchFn answering the GitHub API with a release + the CDN with a tarball. */
+  function githubFetch(
+    tarball: Uint8Array,
+    log: string[] = [],
+  ): (url: string | URL | Request, init?: RequestInit) => Promise<Response> {
+    return async (url) => {
+      const u = String(url);
+      log.push(u);
+      if (u.startsWith("https://api.github.com/")) {
+        return Response.json({
+          tag_name: "v1.2.3",
+          assets: [
+            { name: "woven-boulder-surface-1.2.3.tgz", browser_download_url: DOWNLOAD_URL },
+            { name: "checksums.txt", browser_download_url: `${DOWNLOAD_URL}.txt` },
+          ],
+        });
+      }
+      return new Response(tarball, {
+        status: 200,
+        headers: { "content-type": "application/gzip" },
+      });
+    };
+  }
+
+  test("inspect `owner/repo` resolves the latest release + reports it", async () => {
+    const tarball = await makeTarball({
+      "package/dist/index.html": "<html></html>",
+      "package/meta.json": JSON.stringify({
+        name: "woven-boulder",
+        displayName: "Woven Boulder",
+        path: "/surface/woven-boulder",
+      }),
+    });
+    const log: string[] = [];
+    const res = await dispatch(
+      jsonReq("POST", "/surface/inspect", { source: "Unforced-Dev/WovenBoulder" }),
+      makeState(),
+      { fetchFn: githubFetch(tarball, log) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AnyJson;
+    expect(body.ok).toBe(true);
+    expect(body.source_kind).toBe("url"); // resolver feeds the EXISTING url path
+    expect(body.meta.name).toBe("woven-boulder");
+    // The resolved release rides the response for the SPA's confirm step.
+    expect(body.github_release).toEqual({
+      owner: "Unforced-Dev",
+      repo: "WovenBoulder",
+      tag: "v1.2.3",
+      asset_name: "woven-boulder-surface-1.2.3.tgz",
+      download_url: DOWNLOAD_URL,
+    });
+    // One API call, then the asset's browser_download_url — nothing else.
+    expect(log[0]).toBe("https://api.github.com/repos/Unforced-Dev/WovenBoulder/releases/latest");
+    expect(log[1]).toBe(DOWNLOAD_URL);
+  });
+
+  test("add via a github.com release-tag URL installs through the URL pipeline", async () => {
+    const tarball = await makeTarball({
+      "package/dist/index.html": "<html>from-release</html>",
+      "package/meta.json": JSON.stringify({
+        name: "woven-boulder",
+        displayName: "Woven Boulder",
+        path: "/surface/woven-boulder",
+      }),
+    });
+    const log: string[] = [];
+    const state = makeState();
+    const res = await dispatch(
+      jsonReq("POST", "/surface/add", {
+        source: "https://github.com/Unforced-Dev/WovenBoulder/releases/tag/v1.2.3",
+      }),
+      state,
+      { fetchFn: githubFetch(tarball, log) },
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as AnyJson;
+    expect(body.ok).toBe(true);
+    expect(body.ui.name).toBe("woven-boulder");
+    expect(body.github_release.tag).toBe("v1.2.3");
+    expect(fs.readFileSync(path.join(uisDir, "woven-boulder", "dist", "index.html"), "utf8")).toBe(
+      "<html>from-release</html>",
+    );
+    // The tag-named URL resolved by TAG, not latest.
+    expect(log[0]).toBe(
+      "https://api.github.com/repos/Unforced-Dev/WovenBoulder/releases/tags/v1.2.3",
+    );
+  });
+
+  test("GitHub 404 maps to not_found with the private-repo message", async () => {
+    const fetchFn = async () => new Response("{}", { status: 404 });
+    const res = await dispatch(
+      jsonReq("POST", "/surface/add", { source: "ghost/none" }),
+      makeState(),
+      { fetchFn },
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as AnyJson;
+    expect(body.error).toBe("not_found");
+    expect(body.message).toContain("public");
+  });
+
+  test("GitHub rate-limit 403 maps to 429 rate_limited", async () => {
+    const fetchFn = async () =>
+      new Response("{}", { status: 403, headers: { "x-ratelimit-remaining": "0" } });
+    const res = await dispatch(
+      jsonReq("POST", "/surface/inspect", { source: "ghost/none" }),
+      makeState(),
+      { fetchFn },
+    );
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as AnyJson).error).toBe("rate_limited");
+  });
+
+  test("direct …/releases/download/… asset URL bypasses the resolver (passthrough)", async () => {
+    const tarball = await makeTarball({
+      "package/dist/index.html": "<html></html>",
+      "package/meta.json": JSON.stringify({
+        name: "direct",
+        displayName: "Direct",
+        path: "/surface/direct",
+      }),
+    });
+    const log: string[] = [];
+    const fetchFn = async (url: string | URL | Request) => {
+      log.push(String(url));
+      return new Response(tarball, {
+        status: 200,
+        headers: { "content-type": "application/gzip" },
+      });
+    };
+    const res = await dispatch(
+      jsonReq("POST", "/surface/inspect", { source: DOWNLOAD_URL }),
+      makeState(),
+      { fetchFn },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AnyJson;
+    expect(body.github_release).toBeNull(); // no resolution happened
+    // The ONLY fetch is the pasted URL itself — api.github.com never called.
+    expect(log).toEqual([DOWNLOAD_URL]);
+  });
+
+  test("non-github sources keep their existing error story (no resolver interference)", async () => {
+    const res = await dispatch(
+      jsonReq("POST", "/surface/add", { source: "/definitely/not/here" }),
+      makeState(),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as AnyJson).error).toBe("bad_source");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PATCH /surface/<name> — audience edit
 // ---------------------------------------------------------------------------
 

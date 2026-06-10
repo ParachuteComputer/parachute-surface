@@ -45,11 +45,18 @@ const KIND_META: Record<SourceKind, { label: string; placeholder: string; hint: 
     hint: "An absolute path on the host machine — a built bundle (index.html or dist/index.html).",
   },
   url: {
-    label: "URL tarball",
-    placeholder: "https://example.com/releases/my-surface.tgz",
-    hint: "An https:// link to a .tgz (an npm-pack artifact, a GitHub release asset, a CI build).",
+    label: "URL / GitHub release",
+    placeholder: "owner/repo · github.com link · https://…/my-surface.tgz",
+    hint: "A GitHub repo (owner/repo or its URL — installs the latest release's .tgz asset; a release-tag URL pins that release; #asset-name.tgz picks one of several), or a direct https:// .tgz link.",
   },
 };
+
+/**
+ * GitHub-release shorthand the host resolves server-side: `owner/repo` with
+ * an optional `#asset-name.tgz` disambiguation. Mirrors the host's charset
+ * validation (github-release.ts) closely enough for client-side sanity.
+ */
+const GITHUB_SHORTHAND_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+(?:#.+)?$/;
 
 export const AUDIENCE_OPTIONS: Array<{ value: UiAudience; label: string; description: string }> = [
   {
@@ -80,7 +87,10 @@ export function validateSource(kind: SourceKind, source: string): string | null 
     return null;
   }
   if (kind === "url") {
-    if (!/^https?:\/\//i.test(s)) return "Must be an http(s):// URL.";
+    if (GITHUB_SHORTHAND_RE.test(s)) return null; // owner/repo[#asset.tgz]
+    if (!/^https?:\/\//i.test(s)) {
+      return "Must be an http(s):// URL or a GitHub owner/repo shorthand.";
+    }
     if (/^http:\/\//i.test(s) && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])([:/]|$)/i.test(s)) {
       return "Plain http:// is only allowed for loopback hosts — use https://.";
     }
@@ -91,9 +101,12 @@ export function validateSource(kind: SourceKind, source: string): string | null 
     return "That looks like a filesystem path — switch the source kind to “Server path”.";
   }
   if (/^https?:\/\//i.test(s)) {
-    return "That looks like a URL — switch the source kind to “URL tarball”.";
+    return "That looks like a URL — switch the source kind to “URL / GitHub release”.";
   }
   if (!/^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(@.+)?$/.test(s)) {
+    if (GITHUB_SHORTHAND_RE.test(s)) {
+      return "That looks like a GitHub owner/repo — switch the source kind to “URL / GitHub release”.";
+    }
     return "Not a valid npm specifier (name, @scope/name, or @scope/name@version).";
   }
   return null;
@@ -156,7 +169,13 @@ export function Add() {
     setSuccess(null);
     setSubmitting(true);
     try {
-      const body: Parameters<typeof addUi>[0] = { source: source.trim(), audience };
+      // A GitHub-resolved source installs the EXACT inspected asset (its
+      // browser_download_url) — no second GitHub API call, and no race
+      // against a new "latest" published between inspect and install.
+      const body: Parameters<typeof addUi>[0] = {
+        source: inspected.github_release?.download_url ?? source.trim(),
+        audience,
+      };
       // Identity overrides ride only when the operator had to (or chose to)
       // type them — meta-derived values are NOT retyped back at the host.
       if (needsManualIdentity || name !== (inspected.meta?.name ?? "")) {
@@ -291,6 +310,33 @@ export function Add() {
           )}
           {inspected.warnings.length > 0 && (
             <p className="warning">{inspected.warnings.join(" · ")}</p>
+          )}
+
+          {inspected.github_release && (
+            <fieldset className="form-section">
+              <legend className="form-section__title">Resolved GitHub release</legend>
+              <p className="form-section__sub">
+                Install will fetch exactly this release asset from{" "}
+                <code>
+                  {inspected.github_release.owner}/{inspected.github_release.repo}
+                </code>
+                .
+              </p>
+              <dl className="info-card__list add__derived">
+                <div>
+                  <dt>Release</dt>
+                  <dd>
+                    <code>{inspected.github_release.tag}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Asset</dt>
+                  <dd>
+                    <code>{inspected.github_release.asset_name}</code>
+                  </dd>
+                </div>
+              </dl>
+            </fieldset>
           )}
 
           {inspected.meta && (

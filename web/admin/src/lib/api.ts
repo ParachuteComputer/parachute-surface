@@ -125,6 +125,23 @@ export type AddResponse = {
   oauth_client_id?: string;
   oauth_status?: string;
   warning?: string;
+  /** Which release asset a GitHub-release source resolved to (absent otherwise). */
+  github_release?: ResolvedGithubRelease;
+};
+
+/**
+ * A resolved GitHub release asset — what `owner/repo` / repo-home / release
+ * URLs resolve to server-side before riding the URL-tarball install path.
+ */
+export type ResolvedGithubRelease = {
+  owner: string;
+  repo: string;
+  /** The release's tag name (resolved even when the source said "latest"). */
+  tag: string;
+  /** The chosen asset's file name. */
+  asset_name: string;
+  /** The asset's browser_download_url — installing THIS exact artifact. */
+  download_url: string;
 };
 
 export type UiInfoResponse = {
@@ -257,6 +274,14 @@ export function addUi(body: AddRequestBody): Promise<AddResponse> {
 export type InspectResponse = {
   ok: boolean;
   source_kind: "path" | "npm" | "url";
+  /**
+   * The resolved release (tag + asset) when the source was a GitHub-release
+   * shape (`owner/repo`, repo home, release page). Null otherwise. The
+   * confirm step renders it AND installs via its `download_url` — the
+   * operator installs exactly the inspected artifact (no latest-race, no
+   * second GitHub API call).
+   */
+  github_release?: ResolvedGithubRelease | null;
   has_meta: boolean;
   /** Validated meta (defaults filled) — null when absent or invalid. */
   meta: {

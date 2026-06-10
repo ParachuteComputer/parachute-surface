@@ -75,6 +75,12 @@ import {
   unregisterOauthClient,
   writeOauthClientFile,
 } from "./dcr.ts";
+import {
+  GithubResolveError,
+  type ResolvedGithubRelease,
+  parseGithubSource,
+  resolveGithubRelease,
+} from "./github-release.ts";
 import { removeSurfaceState } from "./host-context.ts";
 import {
   InvalidMetaError,
@@ -547,7 +553,11 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
 // --- POST /surface/add -------------------------------------------------------
 
 export type AddRequestBody = {
-  /** Local path, npm package specifier, OR `http(s)://` tarball URL. Required. */
+  /**
+   * Local path, npm package specifier, `http(s)://` tarball URL, OR a
+   * GitHub-release shorthand (`owner/repo[#asset.tgz]`, a github.com repo
+   * home, or a release page — see `github-release.ts`). Required.
+   */
   source: string;
   /** UI name. When `source` is a local path with no meta.json, this is required. */
   name?: string;
@@ -587,6 +597,8 @@ type StagedSource =
       metaPath?: string;
       /** Cleanup for staged temp dirs (npm / url). Absent for local paths. */
       cleanup?: () => void;
+      /** The resolved release, when the source was a GitHub-release shape. */
+      githubRelease?: ResolvedGithubRelease;
     }
   | { ok: false; response: Response };
 
@@ -597,11 +609,59 @@ type StagedSource =
  * never diverge from what an install would actually see.
  */
 async function stageSource(source: string, opts: AdminHandlerOpts): Promise<StagedSource> {
+  // GitHub-release shorthand — a RESOLVER in front of the URL branch, never
+  // a separate install path. `owner/repo`, a github.com repo home, or a
+  // release page resolves (one anonymous GitHub API call) to the release
+  // asset's browser_download_url, which then rides the standard URL-tarball
+  // pipeline below. Non-matching sources (incl. direct `…/releases/download/…`
+  // asset URLs) pass through untouched. Checked FIRST: the charset-validated
+  // exactly-one-slash shorthand can't be an absolute path or a scoped npm
+  // spec, so the only behavior it shadows is a relative local path — which
+  // the add flow never documented and the SPA rejects client-side.
+  let urlSource = source;
+  let githubRelease: ResolvedGithubRelease | undefined;
+  const ghRef = parseGithubSource(source);
+  if (ghRef) {
+    try {
+      githubRelease = await resolveGithubRelease(ghRef, {
+        ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+        ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
+      });
+      urlSource = githubRelease.download_url;
+    } catch (e) {
+      if (e instanceof GithubResolveError) {
+        const status =
+          e.code === "not_found"
+            ? 404
+            : e.code === "rate_limited"
+              ? 429
+              : e.code === "forbidden"
+                ? 403
+                : e.code === "api_error"
+                  ? 502
+                  : 422; // bad_response | no_tgz_asset | ambiguous_assets | asset_not_found
+        return {
+          ok: false,
+          response: Response.json(
+            {
+              error: e.code,
+              message: e.message,
+              ...(e.httpStatus !== undefined ? { github_status: e.httpStatus } : {}),
+              ...(e.retryHint !== undefined ? { retry_hint: e.retryHint } : {}),
+            },
+            { status },
+          ),
+        };
+      }
+      throw e;
+    }
+  }
+
   // URL-tarball branch (R3b).
-  if (looksLikeUrlSource(source)) {
+  if (looksLikeUrlSource(urlSource)) {
     try {
       const fetched = await fetchUrlTarball({
-        url: source,
+        url: urlSource,
         ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
         ...(opts.npmSpawnFn !== undefined ? { spawnFn: opts.npmSpawnFn } : {}),
         ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
@@ -612,6 +672,7 @@ async function stageSource(source: string, opts: AdminHandlerOpts): Promise<Stag
         distDir: fetched.distPath,
         ...(fetched.metaJsonPath !== undefined ? { metaPath: fetched.metaJsonPath } : {}),
         cleanup: fetched.cleanup,
+        ...(githubRelease !== undefined ? { githubRelease } : {}),
       };
     } catch (e) {
       if (e instanceof UrlFetchError) {
@@ -1076,6 +1137,9 @@ export async function addUiInternal(
           oauth_status: oauthRecord?.status,
           warning: dcrWarning,
           provision_schema: provisionSummary,
+          // Which release asset a GitHub-release source resolved to (absent
+          // for path/npm/plain-URL sources) — install provenance at a glance.
+          github_release: staged.githubRelease,
         },
         { status: 201 },
       ),
@@ -1155,6 +1219,12 @@ async function handleInspect(req: Request, opts: AdminHandlerOpts): Promise<Resp
     return Response.json({
       ok: true,
       source_kind: staged.kind,
+      /**
+       * The resolved GitHub release (tag + asset) when the source was a
+       * GitHub-release shape — the confirm step shows the operator exactly
+       * which release asset an install would fetch. Null otherwise.
+       */
+      github_release: staged.githubRelease ?? null,
       has_meta: rawMeta !== null,
       /** Validated meta (defaults filled) — null when absent or invalid. */
       meta,
