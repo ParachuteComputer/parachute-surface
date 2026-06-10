@@ -34,6 +34,8 @@ export class FakeVault {
   /** When set, queryNotes throws (degraded-revalidation failure path). */
   queryError: Error | null = null;
   queryCalls = 0;
+  /** Every queryNotes input, in call order (projection query inspection). */
+  queryInputs: NotesQueryInput[] = [];
   createdNotes: CreateNotePayload[] = [];
   deletedIds: string[] = [];
   #idCounter = 0;
@@ -50,8 +52,9 @@ export class FakeVault {
     };
   }
 
-  async queryNotes(_params: NotesQueryInput): Promise<Note[]> {
+  async queryNotes(params: NotesQueryInput): Promise<Note[]> {
     this.queryCalls++;
+    this.queryInputs.push(params);
     if (this.queryError) throw this.queryError;
     return [...this.notes.values()];
   }

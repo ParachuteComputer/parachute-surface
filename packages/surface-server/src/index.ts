@@ -12,6 +12,10 @@
  *   - **P8 `SurfaceAuthz`** — `can(actor, note, action)`, the
  *     vault-native GrantStore with a live-SSE fail-closed cache, the
  *     level→action table, and `createSurfaceRouter` (deny-by-default).
+ *   - **P9 `defineProjection` + `createSurfaceProjections`** — declare a
+ *     domain query once; the kit derives BOTH the audience-gated REST
+ *     endpoint AND an MCP tool on the per-surface Streamable-HTTP
+ *     endpoint, all riding the same gateway.
  *   - **conformance** (`./conformance` subpath) — the gateway invariants
  *     as a runnable suite any surface points at its own routes.
  *
@@ -122,6 +126,34 @@ export {
   type SurfaceRouter,
   type SurfaceRouterOptions,
 } from "./authz/router.ts";
+
+// P9 — projections (one definition → REST + MCP)
+export {
+  PARAM_TYPES,
+  paramsJsonSchema,
+  parseParams,
+  type ParamIssue,
+  type ParamsDecl,
+  type ParamsJsonSchema,
+  type ParamsOf,
+  type ParamSpec,
+  type ParamType,
+  type ParamValue,
+  type ParseParamsResult,
+} from "./projection/params.ts";
+export {
+  defineProjection,
+  kebabCase,
+  projectionAllows,
+  type DefineProjectionArgs,
+  type ProjectionAccess,
+  type ProjectionDefinition,
+} from "./projection/projection.ts";
+export {
+  createSurfaceProjections,
+  type SurfaceProjections,
+  type SurfaceProjectionsOptions,
+} from "./projection/projections.ts";
 
 // Conformance suite (also importable via the `./conformance` subpath)
 export {
