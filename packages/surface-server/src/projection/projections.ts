@@ -120,6 +120,11 @@ export function createSurfaceProjections(
   // POST only — see the module header for why GET/DELETE 405 instead.
   routes.push(
     { method: "POST", path: "/api/mcp", access: { kind: "public" }, handler: mcpHandler },
+    // UNREACHABLE TODAY: the host forwards only `${mount}/api/*` (+ `/ws`)
+    // to a backend, so this short-namespace route never receives traffic —
+    // it's forward-declared for the day the host forwards `${mount}/mcp`
+    // (the design's named path), at which point it goes live with no kit
+    // change. The reachable MCP path today is `/api/mcp` above.
     { method: "POST", path: "/mcp", access: { kind: "public" }, handler: mcpHandler },
   );
 
@@ -158,7 +163,7 @@ async function runRestProjection(
   for (const [key, value] of url.searchParams) {
     raw[key] = value; // repeated params: last occurrence wins
   }
-  const parsed = parseParams(p.params, raw);
+  const parsed = parseParams(p.compiledParams, raw);
   if (!parsed.ok) {
     return Response.json({ error: "invalid_params", issues: parsed.issues }, { status: 400 });
   }
@@ -207,7 +212,7 @@ function handleMcpRequest(
       tools: visible.map((p) => ({
         name: p.kebabName,
         description: p.describe,
-        inputSchema: paramsJsonSchema(p.params),
+        inputSchema: paramsJsonSchema(p.compiledParams),
       })),
     }));
 
@@ -220,7 +225,7 @@ function handleMcpRequest(
       const p = visible.find((t) => t.kebabName === name);
       if (!p) return toolError(`unknown tool: ${name}`);
 
-      const parsed = parseParams(p.params, (args ?? {}) as Record<string, unknown>);
+      const parsed = parseParams(p.compiledParams, (args ?? {}) as Record<string, unknown>);
       if (!parsed.ok) {
         const issues = parsed.issues.map((i) => `${i.param}: ${i.message}`).join("; ");
         return toolError(`invalid params — ${issues}`);

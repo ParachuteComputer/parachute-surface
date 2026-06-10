@@ -78,12 +78,22 @@ export interface GatewayConformanceOptions {
   /**
    * A VALID raw capability token — enables the entry-hygiene case
    * (redirect strips token, cookie is httpOnly + path-scoped).
+   *
+   * FRESHNESS + ORDERING: the entry-hygiene case AND the cookie-mutation
+   * case EACH exchange this token. A multi-use capability (`cap_…`)
+   * supports both in any order; a SINGLE-USE personal link (`lnk_…`) is
+   * consumed by whichever case runs first, and the other then FAILS
+   * LOUDLY (it never passes vacuously). Supply a `cap` token, or mint a
+   * fresh token per run.
    */
   entryToken?: string;
   /**
    * A mutation route reachable with a session cookie — enables the
    * cookie-mutation origin-check case. The suite first exchanges
-   * `entryToken` for a cookie (requires `entryToken`).
+   * `entryToken` for a cookie (requires `entryToken`); if that exchange
+   * is refused (e.g. the token was already consumed), the case fails
+   * loudly rather than passing without probing the mutation — see the
+   * `entryToken` freshness note.
    */
   cookieMutationProbe?: ConformanceProbe;
 }
@@ -220,7 +230,15 @@ export function gatewayConformanceCases(opts: GatewayConformanceOptions): Confor
         const entry = await opts.fetch(new Request(`${origin}${mount}/api/a/${token}`));
         const setCookie = entry.headers.get("set-cookie") ?? "";
         const pair = setCookie.split(";")[0];
-        if (!pair) fail("could not obtain a session cookie from the entry route");
+        // VACUOUS-PASS GUARD: this case can only probe the mutation with a
+        // real session cookie. A refused exchange (single-use token already
+        // consumed — e.g. by the entry-hygiene case) must FAIL the case
+        // loudly, never let it pass without probing anything.
+        if (entry.status !== 302 || !pair) {
+          fail(
+            `could not obtain session cookie (entry exchange returned ${entry.status}) — entry token already consumed; supply a fresh entryToken or run this case first`,
+          );
+        }
         // No Origin header at all — must refuse.
         const noOrigin = await opts.fetch(buildRequest(probe, { cookie: pair }));
         if (noOrigin.status !== 403) {

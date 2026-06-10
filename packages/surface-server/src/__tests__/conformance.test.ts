@@ -197,6 +197,27 @@ describe("conformance positive controls (the suite must catch planted leaks)", (
     await expect(entryCase!.run()).rejects.toThrow(/still carries the raw token/);
   });
 
+  test("a consumed entry token makes the cookie-mutation case FAIL loudly, never pass vacuously", async () => {
+    const wiring = await exampleBackend();
+    // A single-use personal link, consumed once BEFORE the suite runs —
+    // the cookie-mutation case's exchange is then refused, and the case
+    // must fail with the explicit freshness message, not silently pass.
+    const link = await wiring.auth.mintPersonalLink({ email: "probe@example.test" });
+    const first = await wiring.router.fetch(new Request(`https://surface.test${link.entryPath}`));
+    expect(first.status).toBe(302); // the consuming exchange itself succeeds
+    const cases = gatewayConformanceCases({
+      fetch: (req) => wiring.router.fetch(req),
+      mount: MOUNT,
+      entryToken: link.token,
+      cookieMutationProbe: { method: "POST", path: "/api/echo" },
+    });
+    const originCase = cases.find((c) => c.name.includes("cookie mutation"));
+    expect(originCase).toBeDefined();
+    await expect(originCase!.run()).rejects.toThrow(
+      /could not obtain session cookie .* entry token already consumed; supply a fresh entryToken or run this case first/,
+    );
+  });
+
   test("a backend that accepts cross-origin cookie mutations FAILS the origin pin", async () => {
     const trusting = (req: Request) => {
       if (new URL(req.url).pathname.includes("/api/a/")) {

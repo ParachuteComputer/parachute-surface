@@ -117,7 +117,14 @@ export class AudienceStore {
     return this.#get<SubjectRecord>(SUBJECT_PREFIX + id);
   }
 
-  /** Existing subject for an email (exact match), or null. */
+  /**
+   * Existing subject for an email (exact match), or null.
+   *
+   * Deliberate v1 trade-off: a linear scan of the store's keys on every
+   * personal-link mint. A surface's per-surface state store is small and
+   * mints are infrequent, so O(n) is acceptable; revisit with an email
+   * index if a surface accrues a large audience.
+   */
   findSubjectByEmail(email: string): SubjectRecord | null {
     for (const meta of this.#store.list()) {
       if (!meta.key.startsWith(SUBJECT_PREFIX)) continue;

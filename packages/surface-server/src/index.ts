@@ -129,11 +129,15 @@ export {
 
 // P9 — projections (one definition → REST + MCP)
 export {
+  compileParamsDecl,
   PARAM_TYPES,
   paramsJsonSchema,
   parseParams,
+  type CompiledParam,
+  type CompiledParams,
   type ParamIssue,
   type ParamsDecl,
+  type ParamsDeclLike,
   type ParamsJsonSchema,
   type ParamsOf,
   type ParamSpec,

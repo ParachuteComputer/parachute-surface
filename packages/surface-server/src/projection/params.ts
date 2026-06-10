@@ -56,8 +56,23 @@ export type ParseParamsResult =
   | { ok: true; params: Record<string, unknown> }
   | { ok: false; issues: ParamIssue[] };
 
+/** One precompiled param: a spec string parsed into base type + optionality. */
+export interface CompiledParam {
+  type: ParamType;
+  optional: boolean;
+}
+
+/**
+ * A declaration compiled ONCE (at `defineProjection` time) — the request
+ * path consumes this form, so spec strings are never re-parsed per call.
+ */
+export type CompiledParams = Record<string, CompiledParam>;
+
+/** What the runtime validators accept: spec strings or the compiled form. */
+export type ParamsDeclLike = ParamsDecl | CompiledParams;
+
 /** Split a spec into its base type + optionality. Throws on a bad spec. */
-export function parseParamSpec(name: string, spec: string): { type: ParamType; optional: boolean } {
+export function parseParamSpec(name: string, spec: string): CompiledParam {
   const optional = spec.endsWith("?");
   const base = optional ? spec.slice(0, -1) : spec;
   if (!(PARAM_TYPES as readonly string[]).includes(base)) {
@@ -70,16 +85,32 @@ export function parseParamSpec(name: string, spec: string): { type: ParamType; o
   return { type: base as ParamType, optional };
 }
 
-/** Validate a whole declaration at define time (throws — a coding error). */
-export function validateParamsDecl(decl: ParamsDecl): void {
+/**
+ * Validate + compile a whole declaration at define time (throws — a
+ * coding error). The result is stored on the `ProjectionDefinition` so
+ * per-request validation never re-parses the spec strings.
+ */
+export function compileParamsDecl(decl: ParamsDecl): CompiledParams {
+  const compiled: CompiledParams = {};
   for (const [name, spec] of Object.entries(decl)) {
     if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)) {
       throw new Error(
         `defineProjection: param name "${name}" is invalid — letters/digits/underscore, starting with a letter`,
       );
     }
-    parseParamSpec(name, spec);
+    compiled[name] = parseParamSpec(name, spec);
   }
+  return compiled;
+}
+
+/** Validate a whole declaration at define time (throws — a coding error). */
+export function validateParamsDecl(decl: ParamsDecl): void {
+  compileParamsDecl(decl);
+}
+
+/** Normalize one entry — a spec string parses, a compiled entry passes through. */
+function compiledEntry(name: string, spec: ParamSpec | CompiledParam): CompiledParam {
+  return typeof spec === "string" ? parseParamSpec(name, spec) : spec;
 }
 
 /**
@@ -136,7 +167,7 @@ function coerce(
  * dispatch (JSON arguments). `null` counts as absent (MCP clients send
  * explicit nulls for omitted optionals).
  */
-export function parseParams(decl: ParamsDecl, raw: Record<string, unknown>): ParseParamsResult {
+export function parseParams(decl: ParamsDeclLike, raw: Record<string, unknown>): ParseParamsResult {
   const issues: ParamIssue[] = [];
   const params: Record<string, unknown> = {};
 
@@ -145,7 +176,7 @@ export function parseParams(decl: ParamsDecl, raw: Record<string, unknown>): Par
   }
 
   for (const [name, spec] of Object.entries(decl)) {
-    const { type, optional } = parseParamSpec(name, spec);
+    const { type, optional } = compiledEntry(name, spec);
     const value = raw[name];
     if (value === undefined || value === null) {
       if (!optional) issues.push({ param: name, message: "required" });
@@ -176,11 +207,11 @@ export interface ParamsJsonSchema {
  * client sees is GENERATED from the same record the REST endpoint
  * validates with, so they can never drift.
  */
-export function paramsJsonSchema(decl: ParamsDecl): ParamsJsonSchema {
+export function paramsJsonSchema(decl: ParamsDeclLike): ParamsJsonSchema {
   const properties: ParamsJsonSchema["properties"] = {};
   const required: string[] = [];
   for (const [name, spec] of Object.entries(decl)) {
-    const { type, optional } = parseParamSpec(name, spec);
+    const { type, optional } = compiledEntry(name, spec);
     properties[name] =
       type === "date"
         ? { type: "string", description: "ISO date (YYYY-MM-DD) or ISO datetime" }

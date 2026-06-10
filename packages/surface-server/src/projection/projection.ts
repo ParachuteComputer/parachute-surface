@@ -29,7 +29,12 @@
 
 import type { NotesQueryInput } from "@openparachute/surface-client";
 import type { Actor, Note } from "../types.ts";
-import { type ParamsDecl, type ParamsOf, validateParamsDecl } from "./params.ts";
+import {
+  type CompiledParams,
+  type ParamsDecl,
+  type ParamsOf,
+  compileParamsDecl,
+} from "./params.ts";
 
 /**
  * Who may call a projection — the router's non-note access kinds.
@@ -90,6 +95,11 @@ export interface ProjectionDefinition {
   /** Mount-relative REST path (`/api/<kebab-name>`). */
   restPath: string;
   params: ParamsDecl;
+  /**
+   * The declaration compiled ONCE at define time — the request path
+   * (REST + MCP) validates against this, never re-parsing spec strings.
+   */
+  compiledParams: CompiledParams;
   query: (params: Record<string, unknown>) => NotesQueryInput;
   shape: (note: Note, params: Record<string, unknown>) => unknown;
   describe: string;
@@ -136,13 +146,16 @@ export function defineProjection<D extends ParamsDecl = Record<string, never>>(
     );
   }
   const params = args.params ?? ({} as D);
-  validateParamsDecl(params);
+  // Validate AND compile once — per-request validation consumes the
+  // compiled `{type, optional}` form, never re-parsing spec strings.
+  const compiledParams = compileParamsDecl(params);
 
   return {
     name: args.name,
     kebabName,
     restPath: `/api/${kebabName}`,
     params,
+    compiledParams,
     // Safe erasure: both functions are only ever invoked with the output
     // of `parseParams(params, …)`, which produces exactly `ParamsOf<D>`.
     query: args.query as (p: Record<string, unknown>) => NotesQueryInput,
