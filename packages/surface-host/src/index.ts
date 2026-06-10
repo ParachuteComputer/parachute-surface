@@ -256,6 +256,8 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
       logger,
       skipSelfRegisterRefresh: opts.skipSelfRegister,
       ...(opts.credentialsDir !== undefined ? { credentialsDir: opts.credentialsDir } : {}),
+      // PATCH /surface/api/config persists to the same file serve() loaded.
+      ...(opts.configPath !== undefined ? { configPath: opts.configPath } : {}),
     },
   });
 

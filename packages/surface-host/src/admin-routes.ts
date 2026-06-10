@@ -1,14 +1,21 @@
 /**
- * Admin endpoints — Phase 1.2 of parachute-app.
+ * Admin endpoints — Phase 1.2 of parachute-app, extended by the R3b admin
+ * revamp (inspect-before-install, URL-tarball sources, audience edit,
+ * credential visibility + binding config, DCR retry).
  *
  * Routes implemented here:
  *
  *   GET  /surface/list                         — list mounted UIs (surface:read or surface:admin)
  *   POST /surface/add                          — register a new UI (surface:admin)
+ *   POST /surface/inspect                      — stage + parse a source WITHOUT installing (surface:admin)
  *   DELETE /surface/<name>                     — unregister + remove (surface:admin)
+ *   PATCH /surface/<name>                      — edit post-install fields (audience) (surface:admin)
  *   POST /surface/<name>/reload                — re-scan from disk (surface:admin)
+ *   POST /surface/<name>/register-oauth        — re-attempt DCR registration (surface:admin)
  *   GET  /surface/<name>/info                  — full info for one UI (surface:read or surface:admin)
  *   GET  /surface/<name>/oauth-client          — public client_id discovery (UNAUTHENTICATED)
+ *   GET  /surface/api/credentials              — stored credential copies, tokens stripped (surface:admin)
+ *   PATCH /surface/api/config                  — edit daemon config (credential_connections) (surface:admin)
  *
  * The handlers operate on `AppState` (the same mutable state object the HTTP
  * server's `handle()` closes over). Every state-mutating handler:
@@ -48,13 +55,16 @@ import * as path from "node:path";
 
 import { SCOPE_ADMIN, SCOPE_READ, enforceScope as defaultEnforceScope } from "./auth.ts";
 import type { AppConfig } from "./config.ts";
-import { resolveUisDir } from "./config.ts";
+import { resolveConfigPath, resolveUisDir } from "./config.ts";
+import { DEFAULT_RENEW_WITHIN_MS } from "./credential-renewal.ts";
 import {
   CONNECTION_ID_RE,
   CREDENTIAL_OPS,
   type CredentialPayload,
+  type StoredCredential,
   applyCredentialPayload,
   deleteCredential,
+  listCredentials,
   resolveCredentialForSurface,
 } from "./credential-store.ts";
 import {
@@ -66,12 +76,22 @@ import {
   writeOauthClientFile,
 } from "./dcr.ts";
 import { removeSurfaceState } from "./host-context.ts";
-import { InvalidMetaError, NAME_PATTERN, PATH_PATTERN, parseMeta } from "./meta-schema.ts";
+import {
+  InvalidMetaError,
+  NAME_PATTERN,
+  PATH_PATTERN,
+  UI_AUDIENCES,
+  type UiAudience,
+  type UiMeta,
+  parseMeta,
+  parseMetaWithDiagnostics,
+} from "./meta-schema.ts";
 import { NpmFetchError, copyDir, fetchNpmPackage, parseNpmSpec } from "./npm-fetch.ts";
 import { readOperatorToken } from "./operator-token.ts";
 import { type ProvisionSchemaResult, provisionSchemaForUi } from "./provision-schema.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { RESERVED_PATHS, type RegisteredUi, type SkippedUi, scanUis } from "./ui-registry.ts";
+import { UrlFetchError, fetchUrlTarball, looksLikeUrlSource } from "./url-fetch.ts";
 
 import type { AppState } from "./http-server.ts";
 
@@ -126,6 +146,12 @@ export type AdminHandlerOpts = {
    * `resolveCredentialsDir()` — `$PARACHUTE_HOME/surface/credentials/`.
    */
   credentialsDir?: string;
+  /**
+   * Path of the daemon config file `PATCH /surface/api/config` persists to.
+   * Defaults to `resolveConfigPath()`; serve() threads its own override
+   * through so the PATCH writes the same file the daemon loaded.
+   */
+  configPath?: string;
 };
 
 type RouteOutcome = { handled: false } | { handled: true; response: Promise<Response> | Response };
@@ -153,12 +179,31 @@ export function routeAdmin(req: Request, opts: AdminHandlerOpts): RouteOutcome {
     return { handled: true, response: handleAdd(req, opts) };
   }
 
+  // POST /surface/inspect — stage + parse a source WITHOUT installing (R3b:
+  // the add flow shows meta-derived fields + the server block's trust act
+  // BEFORE the operator commits).
+  if (pathname === "/surface/inspect" && method === "POST") {
+    return { handled: true, response: handleInspect(req, opts) };
+  }
+
   // POST /surface/api/credential — the hub's credential delivery/renewal/
   // removal endpoint (P3/H4). `/surface/api` is a RESERVED namespace (no
   // surface can claim it — see ui-registry RESERVED_PATHS), so this route
   // can never shadow a hosted surface.
   if (pathname === "/surface/api/credential" && method === "POST") {
     return { handled: true, response: handleCredentialDelivery(req, opts) };
+  }
+
+  // GET /surface/api/credentials — the host's stored credential copies,
+  // TOKENS STRIPPED (operator visibility + the explicit-binding picker).
+  if (pathname === "/surface/api/credentials" && method === "GET") {
+    return { handled: true, response: handleListCredentials(req, opts) };
+  }
+
+  // PATCH /surface/api/config — daemon-config edits (today: the
+  // `credential_connections` surface→connection binding map).
+  if (pathname === "/surface/api/config" && method === "PATCH") {
+    return { handled: true, response: handlePatchConfig(req, opts) };
   }
 
   // GET /surface/<name>/oauth-client — unauthenticated.
@@ -179,16 +224,26 @@ export function routeAdmin(req: Request, opts: AdminHandlerOpts): RouteOutcome {
     return { handled: true, response: handleReload(req, reloadMatch[1]!, opts) };
   }
 
+  // POST /surface/<name>/register-oauth — re-attempt DCR registration (R3b:
+  // the in-SPA exit from the pending/failed dead-end).
+  const registerOauthMatch = pathname.match(/^\/surface\/([a-z][a-z0-9-]*)\/register-oauth$/);
+  if (registerOauthMatch && method === "POST") {
+    return { handled: true, response: handleRegisterOauth(req, registerOauthMatch[1]!, opts) };
+  }
+
   // POST /surface/<name>/provision-schema — Phase 2.1 manual re-trigger.
   const provisionMatch = pathname.match(/^\/surface\/([a-z][a-z0-9-]*)\/provision-schema$/);
   if (provisionMatch && method === "POST") {
     return { handled: true, response: handleProvisionSchema(req, provisionMatch[1]!, opts) };
   }
 
-  // DELETE /surface/<name>
-  const deleteMatch = pathname.match(/^\/surface\/([a-z][a-z0-9-]*)$/);
-  if (deleteMatch && method === "DELETE") {
-    return { handled: true, response: handleDelete(req, deleteMatch[1]!, opts) };
+  // DELETE /surface/<name> + PATCH /surface/<name> (post-install edits).
+  const nameMatch = pathname.match(/^\/surface\/([a-z][a-z0-9-]*)$/);
+  if (nameMatch && method === "DELETE") {
+    return { handled: true, response: handleDelete(req, nameMatch[1]!, opts) };
+  }
+  if (nameMatch && method === "PATCH") {
+    return { handled: true, response: handlePatchUi(req, nameMatch[1]!, opts) };
   }
 
   return { handled: false };
@@ -213,7 +268,7 @@ async function handleList(req: Request, opts: AdminHandlerOpts): Promise<Respons
   const auth = await runEnforce(req, SCOPE_READ, opts);
   if (auth instanceof Response) return auth;
   return Response.json({
-    uis: opts.state.registeredUis.map((u) => serializeUi(u, opts.state.backends)),
+    uis: opts.state.registeredUis.map((u) => serializeUi(u, opts)),
     skipped: opts.state.skippedUis,
   });
 }
@@ -234,10 +289,102 @@ function statusFor(
   return backends.statusFor(u);
 }
 
-function serializeUi(
-  u: RegisteredUi,
-  backends?: import("./backend-supervisor.ts").BackendSupervisor,
-): SerializedUi {
+/**
+ * Operator-facing credential summary for a BACKED surface (R3b). `null` for
+ * static surfaces (no server block → no credential story). Tokens never
+ * appear here — identity + lifecycle fields only.
+ *
+ *   "ok"             — bound, valid, outside the renewal window.
+ *   "expiring"       — bound + valid but inside the host's auto-renewal
+ *                      window (informational; renewal is automatic).
+ *   "expired"        — bound but past expiry; operator re-approves in hub.
+ *   "needs-operator" — renewal got a terminal 401; re-approve in hub.
+ *   "none"           — no stored credential matches this surface's vault.
+ *   "ambiguous"      — multiple candidates; the explicit
+ *                      `credential_connections` mapping is required
+ *                      (`candidates` carries the connection ids to pick from).
+ *   "missing"        — the config maps to a connection id with no stored copy.
+ */
+export type CredentialSummary = {
+  state: "ok" | "expiring" | "expired" | "needs-operator" | "none" | "ambiguous" | "missing";
+  connection_id?: string;
+  vault: string;
+  scope?: string;
+  scoped_tags?: string[];
+  expires_at?: string;
+  /** Operator-actionable explanation for any non-ok state. */
+  reason?: string;
+  /** Candidate connection ids when the binding is ambiguous. */
+  candidates?: string[];
+  /** Other installed backed surfaces resolving to the same connection. */
+  shared_with?: string[];
+};
+
+function credentialSummaryFor(ui: RegisteredUi, opts: AdminHandlerOpts): CredentialSummary | null {
+  if (!ui.meta.server) return null;
+  const dirOpt = opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {};
+  const vault = ui.meta.vault_default ?? "default";
+  const resolution = resolveCredentialForSurface(ui, { ...dirOpt, config: opts.state.config });
+
+  if (resolution.ok) {
+    const rec = resolution.record;
+    const sharedWith = opts.state.registeredUis
+      .filter((u) => u.meta.server !== undefined && u.meta.name !== ui.meta.name)
+      .filter((u) => {
+        const r = resolveCredentialForSurface(u, { ...dirOpt, config: opts.state.config });
+        return r.ok && r.record.connection_id === rec.connection_id;
+      })
+      .map((u) => u.meta.name);
+    let state: CredentialSummary["state"] = "ok";
+    let reason: string | undefined;
+    if (rec.status === "needs-operator") {
+      state = "needs-operator";
+      reason =
+        "renewal was rejected by the hub — re-approve the connection in the hub admin (Connections)";
+    } else {
+      const expires = Date.parse(rec.expires_at);
+      if (Number.isFinite(expires)) {
+        if (expires <= Date.now()) {
+          state = "expired";
+          reason = `expired ${rec.expires_at} — re-approve the connection in the hub admin (Connections)`;
+        } else if (expires - Date.now() <= DEFAULT_RENEW_WITHIN_MS) {
+          state = "expiring";
+          reason =
+            "inside the renewal window — the host renews automatically; if this persists, check that the hub is reachable";
+        }
+      }
+    }
+    return {
+      state,
+      connection_id: rec.connection_id,
+      vault: rec.vault,
+      scope: rec.scope,
+      scoped_tags: rec.scoped_tags,
+      expires_at: rec.expires_at,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(sharedWith.length > 0 ? { shared_with: sharedWith } : {}),
+    };
+  }
+
+  // Unresolved — discriminate why so the SPA can render the right remediation.
+  const mapped = opts.state.config.credential_connections?.[ui.meta.name];
+  if (mapped !== undefined) {
+    return { state: "missing", connection_id: mapped, vault, reason: resolution.reason };
+  }
+  const matching = listCredentials(opts.credentialsDir).filter((c) => c.vault === vault);
+  if (matching.length === 0) {
+    return { state: "none", vault, reason: resolution.reason };
+  }
+  return {
+    state: "ambiguous",
+    vault,
+    reason: resolution.reason,
+    candidates: matching.map((c) => c.connection_id),
+  };
+}
+
+function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
+  const backends = opts.state.backends;
   const oauth = readOauthClientFile(u.uiDir);
   const status = statusFor(u, backends);
   return {
@@ -256,6 +403,8 @@ function serializeUi(
     status,
     // Operator-facing reason for a non-healthy backend (admin surfacing).
     statusReason: backends?.reasonFor(u.meta.name),
+    // Credential lifecycle at a glance (R3b) — null for static surfaces.
+    credential: credentialSummaryFor(u, opts),
     oauthClientId: oauth?.client_id,
     oauthStatus: oauth?.status,
     // Surface required_schema (patterns#57) so the admin SPA can render
@@ -284,6 +433,8 @@ export type SerializedUi = {
   status: import("./backend-types.ts").SurfaceStatus;
   /** Operator-facing reason for a non-healthy backend, when any. */
   statusReason?: string;
+  /** Credential lifecycle summary (R3b). `null` for static surfaces. */
+  credential: CredentialSummary | null;
   oauthClientId?: string;
   oauthStatus?: string;
   /**
@@ -306,7 +457,7 @@ async function handleInfo(req: Request, name: string, opts: AdminHandlerOpts): P
   }
   const oauth = readOauthClientFile(ui.uiDir);
   return Response.json({
-    ui: serializeUi(ui, opts.state.backends),
+    ui: serializeUi(ui, opts),
     meta: ui.meta,
     paths: {
       uiDir: ui.uiDir,
@@ -396,7 +547,7 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
 // --- POST /surface/add -------------------------------------------------------
 
 export type AddRequestBody = {
-  /** Local path OR npm package specifier. Required. */
+  /** Local path, npm package specifier, OR `http(s)://` tarball URL. Required. */
   source: string;
   /** UI name. When `source` is a local path with no meta.json, this is required. */
   name?: string;
@@ -410,9 +561,179 @@ export type AddRequestBody = {
   scopes_required?: string[];
   /** Override meta.json's vault_default. */
   vault_default?: string;
+  /**
+   * Override meta.json's audience (R3b: the add form's audience selector).
+   * Validated through `parseMeta` like every other merged field.
+   */
+  audience?: UiAudience;
   /** Force reinstall over an existing UI of the same name. */
   force?: boolean;
 };
+
+/**
+ * The three source kinds the add/inspect flows accept. URL is checked first
+ * (an `https://` string is never a local path); an existing filesystem path
+ * beats the npm-spec pattern (matches the original add behavior).
+ */
+export type SourceKind = "path" | "npm" | "url";
+
+type StagedSource =
+  | {
+      ok: true;
+      kind: SourceKind;
+      /** Absolute path to the staged `dist/` (with index.html). */
+      distDir: string;
+      /** Absolute path to the staged `meta.json`, when one ships. */
+      metaPath?: string;
+      /** Cleanup for staged temp dirs (npm / url). Absent for local paths. */
+      cleanup?: () => void;
+    }
+  | { ok: false; response: Response };
+
+/**
+ * Stage a source for add/inspect: resolve which kind it is, fetch/locate the
+ * bundle, validate `dist/index.html` exists, find the sibling meta.json.
+ * Shared by `addUiInternal` and `handleInspect` so the inspect preview can
+ * never diverge from what an install would actually see.
+ */
+async function stageSource(source: string, opts: AdminHandlerOpts): Promise<StagedSource> {
+  // URL-tarball branch (R3b).
+  if (looksLikeUrlSource(source)) {
+    try {
+      const fetched = await fetchUrlTarball({
+        url: source,
+        ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+        ...(opts.npmSpawnFn !== undefined ? { spawnFn: opts.npmSpawnFn } : {}),
+        ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
+      });
+      return {
+        ok: true,
+        kind: "url",
+        distDir: fetched.distPath,
+        ...(fetched.metaJsonPath !== undefined ? { metaPath: fetched.metaJsonPath } : {}),
+        cleanup: fetched.cleanup,
+      };
+    } catch (e) {
+      if (e instanceof UrlFetchError) {
+        const status =
+          e.code === "http_error" || e.code === "network_error"
+            ? 502
+            : e.code === "too_large"
+              ? 413
+              : e.code === "bad_url" || e.code === "insecure_url"
+                ? 400
+                : 422; // bad_content_type | extract_failed | no_dist | staging_failed
+        return {
+          ok: false,
+          response: Response.json(
+            {
+              error: e.code,
+              message: e.message,
+              ...(e.httpStatus !== undefined ? { http_status: e.httpStatus } : {}),
+              ...(e.retryHint !== undefined ? { retry_hint: e.retryHint } : {}),
+            },
+            { status },
+          ),
+        };
+      }
+      throw e;
+    }
+  }
+
+  // Identify whether `source` is a local path or an npm spec. Path takes
+  // precedence — if it points at a real directory we treat it as filesystem.
+  const sourceIsExistingPath = existsSync(source);
+  const npmSpec = sourceIsExistingPath ? undefined : parseNpmSpec(source);
+  if (!sourceIsExistingPath && !npmSpec) {
+    return {
+      ok: false,
+      response: Response.json(
+        {
+          error: "bad_source",
+          message: `\"${source}\" is neither an existing local path, a valid npm package specifier, nor an http(s):// tarball URL`,
+        },
+        { status: 400 },
+      ),
+    };
+  }
+
+  if (sourceIsExistingPath) {
+    // Local-path branch. Two layouts supported:
+    //   (a) source is a `dist/` directory directly → use it as is
+    //   (b) source is a parent containing `dist/` → use parent/dist
+    // Detected by presence of `index.html` directly vs `dist/index.html`.
+    const sourceAbs = path.resolve(source);
+    const directIndex = path.join(sourceAbs, "index.html");
+    const nestedIndex = path.join(sourceAbs, "dist", "index.html");
+    let distDir: string;
+    if (existsSync(directIndex)) {
+      distDir = sourceAbs;
+    } else if (existsSync(nestedIndex)) {
+      distDir = path.join(sourceAbs, "dist");
+    } else {
+      return {
+        ok: false,
+        response: Response.json(
+          {
+            error: "bad_source",
+            message: `local path ${sourceAbs} has neither index.html nor dist/index.html`,
+          },
+          { status: 400 },
+        ),
+      };
+    }
+    // Optional meta.json sibling: prefer `<source>/meta.json`, fall back
+    // to `<source>/../meta.json` if source pointed at the dist itself.
+    const directMeta = path.join(sourceAbs, "meta.json");
+    const parentMeta = path.join(path.dirname(sourceAbs), "meta.json");
+    const metaPath = existsSync(directMeta)
+      ? directMeta
+      : existsSync(parentMeta)
+        ? parentMeta
+        : undefined;
+    return { ok: true, kind: "path", distDir, ...(metaPath !== undefined ? { metaPath } : {}) };
+  }
+
+  // npm-fetch branch.
+  try {
+    const fetched = await fetchNpmPackage({
+      spec: source,
+      spawnFn: opts.npmSpawnFn,
+      logger: opts.logger,
+    });
+    return {
+      ok: true,
+      kind: "npm",
+      distDir: fetched.distPath,
+      ...(fetched.metaJsonPath !== undefined ? { metaPath: fetched.metaJsonPath } : {}),
+      cleanup: fetched.cleanup,
+    };
+  } catch (e) {
+    if (e instanceof NpmFetchError) {
+      const status =
+        e.code === "not_found"
+          ? 404
+          : e.code === "no_dist"
+            ? 422
+            : e.code === "network_error"
+              ? 502
+              : 422;
+      return {
+        ok: false,
+        response: Response.json(
+          {
+            error: e.code,
+            message: e.message,
+            stderr: e.stderr,
+            retry_hint: e.retryHint,
+          },
+          { status },
+        ),
+      };
+    }
+    throw e;
+  }
+}
 
 async function handleAdd(req: Request, opts: AdminHandlerOpts): Promise<Response> {
   const auth = await runEnforce(req, SCOPE_ADMIN, opts);
@@ -468,99 +789,14 @@ export async function addUiInternal(
     };
   }
 
-  // Identify whether `source` is a local path or an npm spec. Path takes
-  // precedence — if it points at a real directory we treat it as filesystem.
-  // Otherwise we try the npm spec pattern.
-  const sourceIsExistingPath = existsSync(body.source);
-  const npmSpec = sourceIsExistingPath ? undefined : parseNpmSpec(body.source);
-
-  if (!sourceIsExistingPath && !npmSpec) {
-    return {
-      response: Response.json(
-        {
-          error: "bad_source",
-          message: `\"${body.source}\" is neither an existing local path nor a valid npm package specifier`,
-        },
-        { status: 400 },
-      ),
-    };
-  }
-
-  // Stage the source — either copy from the local path or fetch from npm.
-  let stagedDistDir: string;
-  let stagedMetaPath: string | undefined;
-  let cleanupNpm: (() => void) | undefined;
+  // Stage the source — local path copy, npm fetch, or URL-tarball download.
+  const staged = await stageSource(body.source, opts);
+  if (!staged.ok) return { response: staged.response };
+  const stagedDistDir = staged.distDir;
+  const stagedMetaPath = staged.metaPath;
+  const cleanupStaging = staged.cleanup;
 
   try {
-    if (sourceIsExistingPath) {
-      // Local-path branch. Two layouts supported:
-      //   (a) source is a `dist/` directory directly → use it as is
-      //   (b) source is a parent containing `dist/` → use parent/dist
-      // Detected by presence of `index.html` directly vs `dist/index.html`.
-      const sourceAbs = path.resolve(body.source);
-      const directIndex = path.join(sourceAbs, "index.html");
-      const nestedIndex = path.join(sourceAbs, "dist", "index.html");
-      if (existsSync(directIndex)) {
-        stagedDistDir = sourceAbs;
-      } else if (existsSync(nestedIndex)) {
-        stagedDistDir = path.join(sourceAbs, "dist");
-      } else {
-        return {
-          response: Response.json(
-            {
-              error: "bad_source",
-              message: `local path ${sourceAbs} has neither index.html nor dist/index.html`,
-            },
-            { status: 400 },
-          ),
-        };
-      }
-      // Optional meta.json sibling: prefer `<source>/meta.json`, fall back
-      // to `<source>/../meta.json` if source pointed at the dist itself.
-      const directMeta = path.join(sourceAbs, "meta.json");
-      const parentMeta = path.join(path.dirname(sourceAbs), "meta.json");
-      stagedMetaPath = existsSync(directMeta)
-        ? directMeta
-        : existsSync(parentMeta)
-          ? parentMeta
-          : undefined;
-    } else {
-      // npm-fetch branch.
-      try {
-        const fetched = await fetchNpmPackage({
-          spec: body.source,
-          spawnFn: opts.npmSpawnFn,
-          logger: opts.logger,
-        });
-        stagedDistDir = fetched.distPath;
-        stagedMetaPath = fetched.metaJsonPath;
-        cleanupNpm = fetched.cleanup;
-      } catch (e) {
-        if (e instanceof NpmFetchError) {
-          const status =
-            e.code === "not_found"
-              ? 404
-              : e.code === "no_dist"
-                ? 422
-                : e.code === "network_error"
-                  ? 502
-                  : 422;
-          return {
-            response: Response.json(
-              {
-                error: e.code,
-                message: e.message,
-                stderr: e.stderr,
-                retry_hint: e.retryHint,
-              },
-              { status },
-            ),
-          };
-        }
-        throw e;
-      }
-    }
-
     // Assemble the meta.json the new UI will use. Priority:
     //   1. body overrides
     //   2. stagedMetaPath contents
@@ -585,6 +821,13 @@ export async function addUiInternal(
     if (body.tagline !== undefined) merged.tagline = body.tagline;
     if (body.scopes_required !== undefined) merged.scopes_required = body.scopes_required;
     if (body.vault_default !== undefined) merged.vault_default = body.vault_default;
+    if (body.audience !== undefined) {
+      // The operator's add-form choice wins over the bundle's declaration.
+      // Drop a staged legacy `public` boolean so the override can't trip
+      // parseMeta's audience/public contradiction check.
+      merged.audience = body.audience;
+      delete merged.public;
+    }
     // Fall back to sensible defaults when neither body nor staged meta has it.
     if (merged.displayName === undefined && typeof merged.name === "string") {
       merged.displayName = merged.name;
@@ -828,7 +1071,7 @@ export async function addUiInternal(
       response: Response.json(
         {
           ok: true,
-          ui: added ? serializeUi(added, opts.state.backends) : null,
+          ui: added ? serializeUi(added, opts) : null,
           oauth_client_id: oauthRecord?.client_id,
           oauth_status: oauthRecord?.status,
           warning: dcrWarning,
@@ -840,7 +1083,89 @@ export async function addUiInternal(
       ...(oauthRecord ? { oauthRecord } : {}),
     };
   } finally {
-    if (cleanupNpm) cleanupNpm();
+    if (cleanupStaging) cleanupStaging();
+  }
+}
+
+// --- POST /surface/inspect (R3b — stage + parse, no install) ------------------
+
+export type InspectRequestBody = {
+  /** Same source forms `POST /surface/add` accepts. */
+  source: string;
+};
+
+/**
+ * Stage a source and report what an install WOULD see — meta.json-derived
+ * fields, validation problems, and the `server` block (the trust act the
+ * operator should read before committing). Never touches `uis/`; staging
+ * temp dirs are cleaned up before the response returns.
+ */
+async function handleInspect(req: Request, opts: AdminHandlerOpts): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  let body: InspectRequestBody;
+  try {
+    body = (await req.json()) as InspectRequestBody;
+  } catch (e) {
+    return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
+  }
+  if (typeof body.source !== "string" || body.source.length === 0) {
+    return Response.json(
+      { error: "bad_request", message: "`source` is required (string)" },
+      { status: 400 },
+    );
+  }
+
+  const staged = await stageSource(body.source, opts);
+  if (!staged.ok) return staged.response;
+
+  try {
+    let rawMeta: Record<string, unknown> | null = null;
+    if (staged.metaPath) {
+      try {
+        const parsed = JSON.parse(readFileSync(staged.metaPath, "utf8"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          rawMeta = parsed as Record<string, unknown>;
+        }
+      } catch (e) {
+        opts.logger?.warn(
+          `[app-admin] inspect: couldn't parse staged meta.json: ${(e as Error).message}`,
+        );
+      }
+    }
+
+    let meta: UiMeta | null = null;
+    let metaErrors: ReadonlyArray<{ path: string; message: string }> | null = null;
+    let warnings: string[] = [];
+    if (rawMeta !== null) {
+      try {
+        const r = parseMetaWithDiagnostics(rawMeta);
+        meta = r.meta;
+        warnings = r.warnings;
+      } catch (e) {
+        if (e instanceof InvalidMetaError) {
+          metaErrors = e.details;
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    return Response.json({
+      ok: true,
+      source_kind: staged.kind,
+      has_meta: rawMeta !== null,
+      /** Validated meta (defaults filled) — null when absent or invalid. */
+      meta,
+      /** Field-level validation problems when the staged meta.json is invalid. */
+      meta_errors: metaErrors,
+      warnings,
+      /** The server block — the trust act to render BEFORE install. */
+      server: meta?.server ?? null,
+    });
+  } finally {
+    staged.cleanup?.();
   }
 }
 
@@ -1015,8 +1340,349 @@ async function handleReload(req: Request, name: string, opts: AdminHandlerOpts):
   }
   return Response.json({
     ok: true,
-    ui: serializeUi(ui, opts.state.backends),
+    ui: serializeUi(ui, opts),
   });
+}
+
+// --- PATCH /surface/<name> (R3b — post-install edits) -------------------------
+
+export type PatchUiRequestBody = {
+  /** New audience exposure. The only editable field today. */
+  audience?: unknown;
+};
+
+/**
+ * Edit a surface's post-install settings. Today: `audience` only. The write
+ * goes to the installed `meta.json` (audience canonical + the derived legacy
+ * `public` boolean kept consistent), then the standard re-scan + services.json
+ * refresh — the hub's audience gate reads the refreshed `uis{}` map
+ * per-request, so the change takes effect on the next proxied request.
+ */
+async function handlePatchUi(
+  req: Request,
+  name: string,
+  opts: AdminHandlerOpts,
+): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  let body: PatchUiRequestBody;
+  try {
+    body = (await req.json()) as PatchUiRequestBody;
+  } catch (e) {
+    return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
+  }
+  if (body.audience === undefined) {
+    return Response.json(
+      { error: "bad_request", message: "nothing to update — supported fields: audience" },
+      { status: 400 },
+    );
+  }
+  if (
+    typeof body.audience !== "string" ||
+    !(UI_AUDIENCES as readonly string[]).includes(body.audience)
+  ) {
+    return Response.json(
+      {
+        error: "invalid_audience",
+        message: `audience must be one of ${UI_AUDIENCES.map((a) => `"${a}"`).join(", ")}`,
+      },
+      { status: 400 },
+    );
+  }
+  const audience = body.audience as UiAudience;
+
+  const uisDir = opts.uisDir ?? resolveUisDir();
+  const targetDir = path.join(uisDir, name);
+  const metaPath = path.join(targetDir, "meta.json");
+  if (!existsSync(metaPath)) {
+    return Response.json({ error: "not_found", message: `no UI at ${targetDir}` }, { status: 404 });
+  }
+
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(readFileSync(metaPath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("meta.json root is not an object");
+    }
+    raw = parsed as Record<string, unknown>;
+  } catch (e) {
+    return Response.json(
+      { error: "meta_unreadable", message: `couldn't read ${metaPath}: ${(e as Error).message}` },
+      { status: 500 },
+    );
+  }
+  raw.audience = audience;
+  raw.public = audience === "public"; // keep the derived legacy view consistent
+  writeFileSync(metaPath, `${JSON.stringify(raw, null, 2)}\n`);
+
+  // Re-scan + swap state, then refresh services.json (the hub gate's
+  // transport — H3 enforcement reads the refreshed audience per-request).
+  const scan = scanUis({ uisDir, logger: opts.logger });
+  opts.state.registeredUis = scan.registered;
+  opts.state.skippedUis = scan.skipped.map((s) => ({
+    dirName: s.dirName,
+    status: s.status,
+    reason: s.reason,
+  }));
+  if (!opts.skipSelfRegisterRefresh) {
+    try {
+      selfRegister({
+        boundPort: 0,
+        installDir: resolveProjectRoot(),
+        manifestPath: opts.manifestPath,
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+        logger: opts.logger,
+      });
+    } catch (e) {
+      opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
+    }
+  }
+
+  const ui = opts.state.registeredUis.find((u) => u.meta.name === name);
+  if (!ui) {
+    // The edit landed but the re-scan rejected the result (corrupt meta
+    // beyond the field we touched). Honest partial-state report.
+    const skipped = opts.state.skippedUis.find((s) => s.dirName === name);
+    return Response.json(
+      {
+        error: "ui_inactive_after_patch",
+        message: `meta.json was updated but the UI failed re-scan${skipped ? `: ${skipped.reason}` : ""}`,
+      },
+      { status: 500 },
+    );
+  }
+  return Response.json({ ok: true, ui: serializeUi(ui, opts) });
+}
+
+// --- POST /surface/<name>/register-oauth (R3b — DCR retry) --------------------
+
+/**
+ * Re-attempt DCR registration for an installed surface — the in-SPA exit
+ * from the "DCR failed at add time / landed pending forever" dead-end. Runs
+ * the same `registerOauthClient` the add path runs, with the CURRENT
+ * operator token (an operator who has since signed in gets `approved`
+ * instead of `pending`). Overwrites the on-disk `.oauth-client.json`; the
+ * hub upserts by client_name+redirects or issues a fresh client_id —
+ * either way the stamped record is what the UI's OAuth dance reads next.
+ */
+async function handleRegisterOauth(
+  req: Request,
+  name: string,
+  opts: AdminHandlerOpts,
+): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  const ui = opts.state.registeredUis.find((u) => u.meta.name === name);
+  if (!ui) {
+    return Response.json({ error: "not_found", message: `no UI named "${name}"` }, { status: 404 });
+  }
+
+  const operatorToken =
+    (opts.operatorTokenOverride
+      ? opts.operatorTokenOverride()
+      : readOperatorToken({ logger: opts.logger })) ?? undefined;
+  const hubUrl = opts.state.config.hub_url;
+  const redirectBase = `${hubUrl.replace(/\/$/, "")}${ui.meta.path}`;
+
+  try {
+    const reg = await registerOauthClient({
+      hubUrl,
+      clientName: ui.meta.displayName,
+      redirectUris: [`${redirectBase}/`, `${redirectBase}/oauth-callback`],
+      scopes: ui.meta.scopes_required,
+      operatorToken,
+      fetchFn: opts.fetchFn,
+      logger: opts.logger,
+    });
+    const record: OauthClientRecord = {
+      client_id: reg.client_id,
+      client_name: reg.client_name ?? ui.meta.displayName,
+      redirect_uris: reg.redirect_uris,
+      scope: reg.scope ?? ui.meta.scopes_required.join(" "),
+      status: reg.status,
+      registered_at: new Date().toISOString(),
+      hub_url: hubUrl,
+    };
+    writeOauthClientFile(ui.uiDir, record);
+
+    // The client_id rides the services.json uis{} map — refresh it.
+    if (!opts.skipSelfRegisterRefresh) {
+      try {
+        selfRegister({
+          boundPort: 0,
+          installDir: resolveProjectRoot(),
+          manifestPath: opts.manifestPath,
+          extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+          logger: opts.logger,
+        });
+      } catch (e) {
+        opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
+      }
+    }
+    return Response.json({ ok: true, oauth_client: record });
+  } catch (e) {
+    if (e instanceof DcrError) {
+      // Honest failure surfacing: the hub's words, not a paraphrase.
+      const status =
+        e.status === "hub_rejected" &&
+        e.hubResponseStatus !== undefined &&
+        e.hubResponseStatus < 500
+          ? 422
+          : 502;
+      return Response.json(
+        {
+          error: e.status,
+          message: e.message,
+          hub_status: e.hubResponseStatus,
+          hub_body: e.hubResponseBody,
+        },
+        { status },
+      );
+    }
+    throw e;
+  }
+}
+
+// --- GET /surface/api/credentials (R3b — credential visibility) ---------------
+
+/** A stored credential with the SECRET fields stripped (wire shape). */
+export type CredentialListEntry = Omit<StoredCredential, "token" | "jti"> & {
+  /** Installed backed surfaces currently resolving to this connection. */
+  used_by: string[];
+};
+
+async function handleListCredentials(req: Request, opts: AdminHandlerOpts): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  const dirOpt = opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {};
+  const credentials: CredentialListEntry[] = listCredentials(opts.credentialsDir).map((c) => {
+    const { token: _token, jti: _jti, ...rest } = c;
+    const usedBy = opts.state.registeredUis
+      .filter((u) => {
+        if (!u.meta.server) return false;
+        const r = resolveCredentialForSurface(u, { ...dirOpt, config: opts.state.config });
+        return r.ok && r.record.connection_id === c.connection_id;
+      })
+      .map((u) => u.meta.name);
+    return { ...rest, used_by: usedBy };
+  });
+  return Response.json({ ok: true, credentials });
+}
+
+// --- PATCH /surface/api/config (R3b — credential_connections binding) ---------
+
+export type PatchConfigRequestBody = {
+  /**
+   * Merge-patch of the surface→connection binding map: a string value sets
+   * the binding, an explicit `null` deletes it. Other config fields are NOT
+   * editable here.
+   */
+  credential_connections?: Record<string, string | null>;
+};
+
+/**
+ * Edit the daemon config's `credential_connections` map — the explicit
+ * disambiguation the SPA writes when a surface's credential binding is
+ * ambiguous (R3a resolution rule 1). Applies to the LIVE in-memory config
+ * (the credential token provider reads `state.config` per call, so the
+ * binding takes effect on the backend's next vault call — no remount) and
+ * persists to the config file read-modify-write, preserving every other
+ * field as written.
+ */
+async function handlePatchConfig(req: Request, opts: AdminHandlerOpts): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  let body: PatchConfigRequestBody;
+  try {
+    body = (await req.json()) as PatchConfigRequestBody;
+  } catch (e) {
+    return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
+  }
+  const patch = body.credential_connections;
+  if (patch === undefined) {
+    return Response.json(
+      {
+        error: "bad_request",
+        message: "nothing to update — supported fields: credential_connections",
+      },
+      { status: 400 },
+    );
+  }
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return Response.json(
+      {
+        error: "bad_request",
+        message:
+          "credential_connections must be an object mapping surface names to connection ids (null deletes)",
+      },
+      { status: 400 },
+    );
+  }
+  for (const [k, v] of Object.entries(patch)) {
+    if (!NAME_PATTERN.test(k)) {
+      return Response.json(
+        { error: "bad_request", message: `"${k}" is not a valid surface name` },
+        { status: 400 },
+      );
+    }
+    if (v !== null && (typeof v !== "string" || !CONNECTION_ID_RE.test(v))) {
+      return Response.json(
+        {
+          error: "bad_request",
+          message: `credential_connections["${k}"] must be a connection id (or null to unbind)`,
+        },
+        { status: 400 },
+      );
+    }
+  }
+
+  // Persist FIRST (read-modify-write, preserving unknown fields), then swap
+  // the in-memory map — a failed write never leaves memory + disk diverged.
+  const configPath = opts.configPath ?? resolveConfigPath();
+  let rawFile: Record<string, unknown> = {};
+  if (existsSync(configPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("config root is not a JSON object");
+      }
+      rawFile = parsed as Record<string, unknown>;
+    } catch (e) {
+      return Response.json(
+        {
+          error: "config_unreadable",
+          message: `refusing to overwrite an unparseable config at ${configPath}: ${(e as Error).message}`,
+        },
+        { status: 500 },
+      );
+    }
+  }
+
+  const next: Record<string, string> = { ...opts.state.config.credential_connections };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete next[k];
+    else next[k] = v;
+  }
+  rawFile.credential_connections = next;
+  try {
+    mkdirSync(path.dirname(configPath), { recursive: true });
+    writeFileSync(configPath, `${JSON.stringify(rawFile, null, 2)}\n`);
+  } catch (e) {
+    return Response.json(
+      {
+        error: "config_write_failed",
+        message: `couldn't write ${configPath}: ${(e as Error).message}`,
+      },
+      { status: 500 },
+    );
+  }
+  opts.state.config.credential_connections = next;
+
+  return Response.json({ ok: true, credential_connections: next });
 }
 
 // --- POST /surface/<name>/provision-schema (Phase 2.1) -----------------------

@@ -704,11 +704,23 @@ describe("HTTP — 404 + 405", () => {
     }
   });
 
-  test("PATCH (unsupported method) returns 405", async () => {
+  test("PUT (unsupported method) returns 405", async () => {
+    // PATCH became a routed admin method in R3b (PATCH /surface/<name> +
+    // PATCH /surface/api/config), so PUT is the unsupported-method probe now.
+    const srv = startServer(makeState([]));
+    try {
+      const r = await fetch(`${srv.url}/surface/healthz`, { method: "PUT" });
+      expect(r.status).toBe(405);
+    } finally {
+      srv.stop();
+    }
+  });
+
+  test("PATCH /surface/<name> is auth-gated (401 without a bearer)", async () => {
     const srv = startServer(makeState([]));
     try {
       const r = await fetch(`${srv.url}/surface/healthz`, { method: "PATCH" });
-      expect(r.status).toBe(405);
+      expect(r.status).toBe(401);
     } finally {
       srv.stop();
     }
