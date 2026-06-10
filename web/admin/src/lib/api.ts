@@ -49,8 +49,16 @@ export type UiSummary = {
   iconUrl?: string;
   scopes_required: string[];
   pwa: boolean;
+  /** Audience exposure (canonical; `public` is the derived legacy view). */
+  audience?: "public" | "hub-users" | "operator";
   public: boolean;
-  status: "active";
+  /**
+   * Real per-surface status (surface-runtime P5): static surfaces report
+   * "static-only"; backed surfaces report their backend lifecycle state.
+   */
+  status: "static-only" | "active" | "failing" | "backend-error" | "backend-disabled";
+  /** Operator-facing reason for a non-healthy backend, when any. */
+  statusReason?: string;
   oauthClientId?: string;
   oauthStatus?: string;
   required_schema?: RequiredSchemaDeclaration;

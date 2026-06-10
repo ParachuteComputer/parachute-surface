@@ -15,6 +15,7 @@
 import pkg from "../package.json" with { type: "json" };
 
 import { addUiInternal, buildSelfRegisterExtraFields } from "./admin-routes.ts";
+import { BackendSupervisor } from "./backend-supervisor.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
@@ -60,6 +61,15 @@ export {
   type ProvisionSchemaResult,
 } from "./provision-schema.ts";
 export { routeDev, type DevRoutesOpts } from "./dev-routes.ts";
+export * from "./backend-types.ts";
+export {
+  BackendSupervisor,
+  mountSpecFor,
+  DEFAULT_CRASH_LOOP_MAX,
+  DEFAULT_CRASH_LOOP_WINDOW_MS,
+  DEFAULT_SHUTDOWN_TIMEOUT_MS,
+  type BackendSupervisorOpts,
+} from "./backend-supervisor.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
 export { startHttpServer } from "./http-server.ts";
@@ -136,6 +146,13 @@ export type ServeHandle = {
    * Tests `await handle.bootstrap` to assert post-bootstrap state.
    */
   bootstrap?: Promise<import("./bootstrap.ts").BootstrapResult>;
+  /**
+   * Resolves once the boot-time backend mount pass (P5) completes.
+   * Mounting is fire-and-forget for the daemon (the HTTP server is up
+   * first; a backed surface 503s its api namespace until mounted); tests
+   * await this to assert post-mount state.
+   */
+  backendsReady?: Promise<void>;
 };
 
 /**
@@ -177,6 +194,23 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     })),
   };
 
+  // Backend supervisor (P5) — mounts every backed surface's server entry.
+  // The context builder here is the lifecycle core (commit 3 of R3a swaps
+  // in the full host context: ScopedVaultClient + SurfaceStateStore +
+  // hub-stamped trust readers).
+  const backends = new BackendSupervisor({
+    buildContext: (ui, signal) => ({
+      layer: () => "public" as const,
+      clientIp: () => null,
+      config: { all: () => ({}), get: () => undefined },
+      log: prefixedSurfaceLogger(logger, ui.meta.name),
+      mount: ui.meta.path,
+      shutdownSignal: signal,
+    }),
+    logger,
+  });
+  state.backends = backends;
+
   const startedAt = new Date();
   const server = startHttpServer({
     state,
@@ -215,6 +249,13 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   // when the server uses unix sockets, which we don't here) — fall back to
   // the operator's requested port. Both paths produce a `number`.
   const portWritten = server.port ?? port;
+
+  // Boot-time backend mount pass (P5). Fire-and-forget: the HTTP server is
+  // already up (a backed surface 503s its api namespace until its mount
+  // lands); failures are contained per-surface inside sync().
+  const backendsReady = backends
+    .sync(state.registeredUis)
+    .catch((e) => logger.warn(`[app] backend mount pass failed: ${(e as Error).message}`));
 
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
@@ -264,6 +305,9 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     // The watcher slots own AbortControllers + FSWatchers; without this
     // the daemon can hang on shutdown until the FSEvents stream closes.
     stopAllWatchers();
+    // Unmount every backed surface: ctx.shutdownSignal aborts, bounded
+    // shutdown() awaited — before the HTTP server drops.
+    await backends.stop();
     server.stop();
     logger.log("[app] stopped");
   };
@@ -273,7 +317,25 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     server,
     state,
     stop,
+    backendsReady,
     ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
+  };
+}
+
+/** `[surface:<name>]`-prefixed logger flowing into the daemon's stream. */
+function prefixedSurfaceLogger(
+  base: Pick<Console, "log" | "warn" | "error">,
+  name: string,
+): {
+  log: (...a: unknown[]) => void;
+  warn: (...a: unknown[]) => void;
+  error: (...a: unknown[]) => void;
+} {
+  const prefix = `[surface:${name}]`;
+  return {
+    log: (...a: unknown[]) => base.log(prefix, ...a),
+    warn: (...a: unknown[]) => base.warn(prefix, ...a),
+    error: (...a: unknown[]) => base.error(prefix, ...a),
   };
 }
 

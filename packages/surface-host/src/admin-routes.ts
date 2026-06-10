@@ -35,7 +35,15 @@
  * `DELETE /surface/..%2Fetc/passwd` falls through to a 404.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import * as path from "node:path";
 
 import { SCOPE_ADMIN, SCOPE_READ, enforceScope as defaultEnforceScope } from "./auth.ts";
@@ -61,9 +69,13 @@ import type { AppState } from "./http-server.ts";
 /**
  * Subset of `AppState` admin handlers mutate. Spelled separately so a unit
  * test can pass a synthetic state without needing the full http-server
- * dependency closure.
+ * dependency closure. `backends` (the backed-surface supervisor, P5) is
+ * optional throughout — tests without it exercise the static paths only.
  */
-export type AdminMutableState = Pick<AppState, "config" | "registeredUis" | "skippedUis">;
+export type AdminMutableState = Pick<
+  AppState,
+  "config" | "registeredUis" | "skippedUis" | "backends"
+>;
 
 /**
  * Test-only seam: override the auth-enforcement step. Production callers do
@@ -174,13 +186,33 @@ async function handleList(req: Request, opts: AdminHandlerOpts): Promise<Respons
   const auth = await runEnforce(req, SCOPE_READ, opts);
   if (auth instanceof Response) return auth;
   return Response.json({
-    uis: opts.state.registeredUis.map((u) => serializeUi(u)),
+    uis: opts.state.registeredUis.map((u) => serializeUi(u, opts.state.backends)),
     skipped: opts.state.skippedUis,
   });
 }
 
-function serializeUi(u: RegisteredUi): SerializedUi {
+/**
+ * REAL per-surface status (P5 — replaces the hardcoded `"active"`):
+ * static surfaces report `"static-only"`; backed surfaces report the
+ * supervisor's lifecycle state (`active | failing | backend-error |
+ * backend-disabled`). Without a supervisor in scope (runOnce, unit tests),
+ * a declared-but-unmounted backend honestly reads `"backend-error"`.
+ */
+function statusFor(
+  u: RegisteredUi,
+  backends?: import("./backend-supervisor.ts").BackendSupervisor,
+): import("./backend-types.ts").SurfaceStatus {
+  if (!u.meta.server) return "static-only";
+  if (!backends) return "backend-error";
+  return backends.statusFor(u);
+}
+
+function serializeUi(
+  u: RegisteredUi,
+  backends?: import("./backend-supervisor.ts").BackendSupervisor,
+): SerializedUi {
   const oauth = readOauthClientFile(u.uiDir);
+  const status = statusFor(u, backends);
   return {
     name: u.meta.name,
     dirName: u.dirName,
@@ -194,7 +226,9 @@ function serializeUi(u: RegisteredUi): SerializedUi {
     audience: u.meta.audience,
     public: u.meta.public,
     server: u.meta.server ?? null,
-    status: "active" as const,
+    status,
+    // Operator-facing reason for a non-healthy backend (admin surfacing).
+    statusReason: backends?.reasonFor(u.meta.name),
     oauthClientId: oauth?.client_id,
     oauthStatus: oauth?.status,
     // Surface required_schema (patterns#57) so the admin SPA can render
@@ -219,7 +253,10 @@ export type SerializedUi = {
   public: boolean;
   /** The validated `server` block when the surface is backed; null otherwise. */
   server: import("./meta-schema.ts").UiServerBlock | null;
-  status: "active";
+  /** Real per-surface status (P5). Static surfaces are "static-only". */
+  status: import("./backend-types.ts").SurfaceStatus;
+  /** Operator-facing reason for a non-healthy backend, when any. */
+  statusReason?: string;
   oauthClientId?: string;
   oauthStatus?: string;
   /**
@@ -242,7 +279,7 @@ async function handleInfo(req: Request, name: string, opts: AdminHandlerOpts): P
   }
   const oauth = readOauthClientFile(ui.uiDir);
   return Response.json({
-    ui: serializeUi(ui),
+    ui: serializeUi(ui, opts.state.backends),
     meta: ui.meta,
     paths: {
       uiDir: ui.uiDir,
@@ -562,6 +599,21 @@ export async function addUiInternal(
     mkdirSync(targetDir, { recursive: true });
     const targetDist = path.join(targetDir, "dist");
     copyDir(stagedDistDir, targetDist);
+    // Backed surface (P1): the server entry lives OUTSIDE dist/ (e.g.
+    // `server/index.js`), so the dist-only copy above wouldn't carry it.
+    // Copy the entry's top-level path segment from the staged package root
+    // into the install dir. Missing files don't fail the install — the
+    // supervisor reports `backend-error` (entry not found) and the static
+    // bundle still serves.
+    if (parsedMeta.server) {
+      const copyWarn = copyServerFiles(
+        stagedMetaPath ? path.dirname(stagedMetaPath) : path.dirname(stagedDistDir),
+        targetDir,
+        parsedMeta.server.entry,
+        opts.logger,
+      );
+      if (copyWarn) opts.logger?.warn(`[app-admin] ${parsedMeta.name}: ${copyWarn}`);
+    }
     const targetMetaPath = path.join(targetDir, "meta.json");
     writeFileSync(
       targetMetaPath,
@@ -648,6 +700,10 @@ export async function addUiInternal(
       reason: s.reason,
     }));
 
+    // Backed surfaces (P5): mount the new backend / remount a force-replaced
+    // one. sync() reconciles, so unrelated mounted backends are untouched.
+    await opts.state.backends?.sync(opts.state.registeredUis);
+
     // Refresh services.json so hub picks up the new uis-map entry.
     if (!opts.skipSelfRegisterRefresh) {
       try {
@@ -655,7 +711,7 @@ export async function addUiInternal(
           boundPort: 0, // ignored — existing entry's port preserves
           installDir: resolveProjectRoot(),
           manifestPath: opts.manifestPath,
-          extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
+          extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
           logger: opts.logger,
         });
       } catch (e) {
@@ -690,7 +746,7 @@ export async function addUiInternal(
       response: Response.json(
         {
           ok: true,
-          ui: added ? serializeUi(added) : null,
+          ui: added ? serializeUi(added, opts.state.backends) : null,
           oauth_client_id: oauthRecord?.client_id,
           oauth_status: oauthRecord?.status,
           warning: dcrWarning,
@@ -737,6 +793,10 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
     logger: opts.logger,
   });
 
+  // Unmount the backend FIRST (shutdownSignal aborts, bounded shutdown
+  // awaits) so in-flight work isn't pulling files out from under rmSync.
+  await opts.state.backends?.unmount(name);
+
   // Remove the directory.
   rmSync(targetDir, { recursive: true, force: true });
 
@@ -749,13 +809,16 @@ async function handleDelete(req: Request, name: string, opts: AdminHandlerOpts):
     reason: s.reason,
   }));
 
+  // Reconcile any remaining backed surfaces (no-op for unrelated mounts).
+  await opts.state.backends?.sync(opts.state.registeredUis);
+
   if (!opts.skipSelfRegisterRefresh) {
     try {
       selfRegister({
         boundPort: 0,
         installDir: resolveProjectRoot(),
         manifestPath: opts.manifestPath,
-        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
         logger: opts.logger,
       });
     } catch (e) {
@@ -790,13 +853,25 @@ async function handleReload(req: Request, name: string, opts: AdminHandlerOpts):
     reason: s.reason,
   }));
 
+  // Operator reload is the quarantine exit (P5): force a full unmount +
+  // remount for THIS surface (fresh module import, crash-loop window reset)
+  // even when nothing on disk changed; sync() reconciles the rest.
+  const reloaded = opts.state.registeredUis.find((u) => u.meta.name === name);
+  if (opts.state.backends) {
+    if (reloaded?.meta.server) {
+      await opts.state.backends.reload(reloaded);
+    } else {
+      await opts.state.backends.sync(opts.state.registeredUis);
+    }
+  }
+
   if (!opts.skipSelfRegisterRefresh) {
     try {
       selfRegister({
         boundPort: 0,
         installDir: resolveProjectRoot(),
         manifestPath: opts.manifestPath,
-        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis),
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
         logger: opts.logger,
       });
     } catch (e) {
@@ -816,7 +891,7 @@ async function handleReload(req: Request, name: string, opts: AdminHandlerOpts):
   }
   return Response.json({
     ok: true,
-    ui: serializeUi(ui),
+    ui: serializeUi(ui, opts.state.backends),
   });
 }
 
@@ -877,10 +952,20 @@ async function handleProvisionSchema(
  * them at the proxy BEFORE forwarding. surface-host TRANSPORTS the
  * declaration; the hub owns enforcement.
  */
-function buildUisExtraField(uis: ReadonlyArray<RegisteredUi>): Record<string, unknown> {
+function buildUisExtraField(
+  uis: ReadonlyArray<RegisteredUi>,
+  backends?: import("./backend-supervisor.ts").BackendSupervisor,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const u of uis) {
     const oauth = readOauthClientFile(u.uiDir);
+    // Map the rich SurfaceStatus onto hub's UiSubUnitStatus vocabulary
+    // (active|pending|inactive|failing — services-manifest.ts validation
+    // REJECTS unknown values, dropping the whole row): a serving surface
+    // (static-only or healthy backend) is "active"; any backend trouble is
+    // "failing". The rich status lives on /surface/list (`serializeUi`).
+    const rich = statusFor(u, backends);
+    const hubStatus = rich === "static-only" || rich === "active" ? "active" : "failing";
     out[u.meta.name] = {
       displayName: u.meta.displayName,
       tagline: u.meta.tagline,
@@ -890,10 +975,49 @@ function buildUisExtraField(uis: ReadonlyArray<RegisteredUi>): Record<string, un
       scopes_required: u.meta.scopes_required,
       audience: u.meta.audience,
       oauthClientId: oauth?.client_id,
-      status: "active",
+      status: hubStatus,
     };
   }
   return out;
+}
+
+/**
+ * Copy the server entry's files from the staged package root into the
+ * install dir (P1). The dist-only copy predates backed surfaces; the entry
+ * (plus whatever rides in its top-level directory — handlers, deps the
+ * author bundled) lives outside dist/. Copies the entry's FIRST path
+ * segment as a tree (or the file itself when the entry sits at the package
+ * root). Already-present destinations (entry inside dist/, force-reinstall
+ * leftovers) are skipped. Returns a warning string instead of throwing —
+ * a missing server tree degrades to `backend-error`, never a failed add.
+ */
+function copyServerFiles(
+  stagedRoot: string,
+  targetDir: string,
+  entry: string,
+  logger?: Pick<Console, "log" | "warn" | "error">,
+): string | undefined {
+  const firstSeg = entry.split("/")[0] ?? "";
+  if (firstSeg === "") return `server entry "${entry}" has no path segments`;
+  const src = path.join(stagedRoot, firstSeg);
+  const dest = path.join(targetDir, firstSeg);
+  if (existsSync(dest)) return undefined; // e.g. entry inside dist/ — already copied
+  if (!existsSync(src)) {
+    return `server entry source not found in staged package: ${firstSeg} (looked in ${stagedRoot})`;
+  }
+  try {
+    const st = statSync(src);
+    if (st.isDirectory()) {
+      copyDir(src, dest);
+    } else {
+      mkdirSync(path.dirname(dest), { recursive: true });
+      copyFileSync(src, dest);
+    }
+    logger?.log(`[app-admin] copied server files: ${firstSeg}/`);
+    return undefined;
+  } catch (e) {
+    return `failed to copy server files: ${(e as Error).message}`;
+  }
 }
 
 /**
@@ -908,9 +1032,10 @@ function buildUisExtraField(uis: ReadonlyArray<RegisteredUi>): Record<string, un
  */
 export function buildSelfRegisterExtraFields(
   uis: ReadonlyArray<RegisteredUi>,
+  backends?: import("./backend-supervisor.ts").BackendSupervisor,
 ): Record<string, unknown> {
   const websocket = uis.some((u) => u.meta.server?.capabilities.includes("websocket") === true);
-  return { uis: buildUisExtraField(uis), websocket };
+  return { uis: buildUisExtraField(uis, backends), websocket };
 }
 
 /** Used by serve() at boot to stamp the same `uis` map on first selfRegister. */

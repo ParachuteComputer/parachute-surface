@@ -55,6 +55,12 @@ export type AppState = {
    * payload so operators can spot broken UIs without leaving the daemon.
    */
   skippedUis: Array<{ dirName: string; status: string; reason: string }>;
+  /**
+   * Backend supervisor for BACKED surfaces (surface-runtime P5). Absent in
+   * contexts that never mount backends (runOnce, most unit tests) — status
+   * reads fall back to "backend-error" for declared-but-unmounted servers.
+   */
+  backends?: import("./backend-supervisor.ts").BackendSupervisor;
 };
 
 export type HttpServerOpts = {
