@@ -1203,7 +1203,13 @@ export async function addUiInternal(
         const reg = await registerOauthClient({
           hubUrl,
           clientName: oauthClientNameFor(parsedMeta.displayName, instanceName, parsedMeta.name),
-          redirectUris: [`${redirectBase}/`, `${redirectBase}/oauth-callback`],
+          redirectUris: [
+            `${redirectBase}/`,
+            // surface-client's hosted-mode runtime callback (the canonical form).
+            `${redirectBase}/oauth/callback`,
+            // Legacy hyphenated form kept for pre-R2 clients.
+            `${redirectBase}/oauth-callback`,
+          ],
           scopes: parsedMeta.scopes_required,
           operatorToken,
           fetchFn: opts.fetchFn,
@@ -1741,7 +1747,13 @@ async function handleRegisterOauth(
     const reg = await registerOauthClient({
       hubUrl,
       clientName,
-      redirectUris: [`${redirectBase}/`, `${redirectBase}/oauth-callback`],
+      redirectUris: [
+        `${redirectBase}/`,
+        // surface-client's hosted-mode runtime callback (the canonical form).
+        `${redirectBase}/oauth/callback`,
+        // Legacy hyphenated form kept for pre-R2 clients.
+        `${redirectBase}/oauth-callback`,
+      ],
       scopes: ui.meta.scopes_required,
       operatorToken,
       fetchFn: opts.fetchFn,
