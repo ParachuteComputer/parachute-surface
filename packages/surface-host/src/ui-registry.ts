@@ -194,10 +194,14 @@ export function scanUis(opts: ScanOpts = {}): ScanResult {
           candidates.push({ dirName, uiDir, status: "invalid-instance", reason });
           continue;
         }
-        if (instance.name !== undefined && instance.name !== meta.name) {
+        // Normalized pair: when EITHER field is overridden, record BOTH
+        // package values — display logic ("instance of <package>") never has
+        // to reason about which half changed (#115 review nit).
+        const overridden =
+          (instance.name !== undefined && instance.name !== meta.name) ||
+          (instance.path !== undefined && instance.path !== meta.path);
+        if (overridden) {
           packageName = meta.name;
-        }
-        if (instance.path !== undefined && instance.path !== meta.path) {
           packagePath = meta.path;
         }
         meta = {

@@ -424,6 +424,76 @@ describe("#105 — backwards compatibility (pre-override installs)", () => {
     expect(rescan.registered[0]!.packageName).toBeUndefined();
   });
 
+  test("a path-only override (default name, custom mount) installs + records the sidecar", async () => {
+    const state = makeState();
+    const source = seedDocsPackage();
+    const res = await dispatch(addReq({ source, mount_path: "/surface/docs-alt" }), state);
+    expect(res.status).toBe(201);
+    const rescan = scanUis({ uisDir, logger: silent });
+    expect(rescan.registered).toHaveLength(1);
+    expect(rescan.registered[0]!.meta.name).toBe("docs");
+    expect(rescan.registered[0]!.meta.path).toBe("/surface/docs-alt");
+    // Normalized pair: when either package field is overridden, BOTH are set.
+    expect(rescan.registered[0]!.packageName).toBe("docs");
+    expect(rescan.registered[0]!.packagePath).toBe("/surface/docs");
+  });
+
+  test("force-add over a renamed instance with NO override params preserves its identity (upgrade ≠ rename)", async () => {
+    const state = makeState();
+    const source = seedDocsPackage();
+    expect(
+      (
+        await dispatch(
+          addReq({ source, instance_name: "boulder-docs", mount_path: "/surface/boulder-docs" }),
+          state,
+        )
+      ).status,
+    ).toBe(201);
+
+    // Upgrade: same instance name targets the same dir; mount NOT re-specified.
+    const upgrade = await dispatch(
+      addReq({ source: seedDocsPackage(), instance_name: "boulder-docs", force: true }),
+      state,
+    );
+    expect(upgrade.status).toBe(201);
+    // Identity preserved: prior record is the default for unspecified fields.
+    const rescan = scanUis({ uisDir, logger: silent });
+    const inst = rescan.registered.find((u) => u.meta.name === "boulder-docs");
+    expect(inst).toBeDefined();
+    expect(inst!.meta.path).toBe("/surface/boulder-docs");
+    expect(fs.existsSync(path.join(uisDir, "boulder-docs", "instance.json"))).toBe(true);
+  });
+
+  test("force-add with an EXPLICIT different mount_path changes it deliberately", async () => {
+    const state = makeState();
+    expect(
+      (
+        await dispatch(
+          addReq({
+            source: seedDocsPackage(),
+            instance_name: "boulder-docs",
+            mount_path: "/surface/boulder-docs",
+          }),
+          state,
+        )
+      ).status,
+    ).toBe(201);
+    const moved = await dispatch(
+      addReq({
+        source: seedDocsPackage(),
+        instance_name: "boulder-docs",
+        mount_path: "/surface/boulder-docs-v2",
+        force: true,
+      }),
+      state,
+    );
+    expect(moved.status).toBe(201);
+    const rescan = scanUis({ uisDir, logger: silent });
+    expect(rescan.registered.find((u) => u.meta.name === "boulder-docs")!.meta.path).toBe(
+      "/surface/boulder-docs-v2",
+    );
+  });
+
   test("explicit overrides equal to the package defaults write no sidecar", async () => {
     const state = makeState();
     const source = seedDocsPackage();

@@ -83,7 +83,7 @@ import {
   resolveGithubRelease,
 } from "./github-release.ts";
 import { removeSurfaceState } from "./host-context.ts";
-import { writeInstanceRecord } from "./instance-record.ts";
+import { readInstanceRecord, writeInstanceRecord } from "./instance-record.ts";
 import {
   InvalidMetaError,
   NAME_PATTERN,
@@ -414,9 +414,12 @@ function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
   return {
     name: u.meta.name,
     dirName: u.dirName,
-    // The PACKAGE's identity (#105) — equals `name` unless this install is
-    // a renamed instance. The admin list renders it as the secondary line.
+    // The PACKAGE's identity (#105) — equals `name`/`path` unless this
+    // install is an overridden instance. The admin list renders the package
+    // name as the secondary line; the pair is normalized (both set or
+    // neither) at scan time.
     packageName: u.packageName ?? u.meta.name,
+    packagePath: u.packagePath ?? u.meta.path,
     displayName: u.meta.displayName,
     tagline: u.meta.tagline,
     path: u.meta.path,
@@ -445,10 +448,13 @@ export type SerializedUi = {
   name: string;
   dirName: string;
   /**
-   * The PACKAGE's own name from its meta.json (#105). Equals `name` unless
-   * the install is a renamed instance (instance_name override at add time).
+   * The PACKAGE's own name/path from its meta.json (#105). Equal `name`/
+   * `path` unless the install is an overridden instance (instance_name /
+   * mount_path at add time). Normalized: both reflect the package whenever
+   * either was overridden.
    */
   packageName: string;
+  packagePath: string;
   displayName: string;
   tagline?: string;
   path: string;
@@ -1024,12 +1030,25 @@ export async function addUiInternal(
         ),
       };
     }
-    // Instance identity (#105): the override wins, the package meta is the
-    // default. Everything downstream of this point — the uis dir, the
-    // registry key, the mount, the credential binding, DCR, services.json —
-    // keys off these two values.
+    // Instance identity (#105): the override wins; for a force-replace of an
+    // EXISTING instance the PRIOR instance record is the next default (an
+    // upgrade must not silently change identity — re-specifying overrides on
+    // every upgrade was the footgun the #115 review caught); the package
+    // meta is the last default. Everything downstream of this point — the
+    // uis dir, the registry key, the mount, the credential binding, DCR,
+    // services.json — keys off these two values.
     const instanceName = body.instance_name ?? parsedMeta.name;
-    const mountPath = body.mount_path ?? parsedMeta.path;
+
+    const uisDir = opts.uisDir ?? resolveUisDir();
+    const targetDir = path.join(uisDir, instanceName);
+
+    // Captured BEFORE the rmSync below — a force-add over an installed
+    // surface must REMOUNT its backend (#103), not just replace the files.
+    const replacedExisting = existsSync(targetDir);
+    // Prior identity, read before the wipe: preserves a renamed instance's
+    // mount across upgrades when the request doesn't re-specify it.
+    const priorRecord = replacedExisting ? readInstanceRecord(targetDir) : null;
+    const mountPath = body.mount_path ?? priorRecord?.path ?? parsedMeta.path;
 
     // Reserved-path check runs on the EFFECTIVE mount (when no override is
     // present this is exactly the package path — behavior unchanged).
@@ -1044,13 +1063,6 @@ export async function addUiInternal(
         ),
       };
     }
-
-    const uisDir = opts.uisDir ?? resolveUisDir();
-    const targetDir = path.join(uisDir, instanceName);
-
-    // Captured BEFORE the rmSync below — a force-add over an installed
-    // surface must REMOUNT its backend (#103), not just replace the files.
-    const replacedExisting = existsSync(targetDir);
     if (replacedExisting && !body.force) {
       return {
         response: Response.json(
@@ -1553,6 +1565,11 @@ export type PatchUiRequestBody = {
  * `public` boolean kept consistent), then the standard re-scan + services.json
  * refresh — the hub's audience gate reads the refreshed `uis{}` map
  * per-request, so the change takes effect on the next proxied request.
+ *
+ * Renamed instances (#105): meta.json carries PACKAGE identity; the rescan
+ * re-applies the instance.json sidecar, so this PATCH must never write
+ * `name`/`path` into meta.json (today it can't — only audience/public are
+ * editable; keep it that way or route identity edits through the sidecar).
  */
 async function handlePatchUi(
   req: Request,

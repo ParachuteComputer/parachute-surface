@@ -75,6 +75,7 @@ export type UiSummary = {
    * Optional: older daemons don't send it — fall back to `name`.
    */
   packageName?: string;
+  packagePath?: string;
   displayName: string;
   tagline?: string;
   path: string;
