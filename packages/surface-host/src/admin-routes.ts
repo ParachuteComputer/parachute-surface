@@ -63,6 +63,7 @@ import {
   type CredentialPayload,
   type StoredCredential,
   applyCredentialPayload,
+  createCredentialTokenProvider,
   deleteCredential,
   listCredentials,
   resolveCredentialForSurface,
@@ -1151,8 +1152,7 @@ export async function addUiInternal(
         provisionSummary = await provisionSchemaForUi({
           ui: added,
           hubUrl: opts.state.config.hub_url,
-          operatorTokenResolver:
-            opts.operatorTokenOverride ?? (() => readOperatorToken({ logger: opts.logger })),
+          tokenProvider: credentialTokenProviderFor(added, opts),
           fetchFn: opts.fetchFn,
           logger: opts.logger,
         });
@@ -1798,10 +1798,26 @@ async function handlePatchConfig(req: Request, opts: AdminHandlerOpts): Promise<
 // --- POST /surface/<name>/provision-schema (Phase 2.1) -----------------------
 
 /**
+ * The vault tokenProvider for schema provisioning — the SAME stored-
+ * credential resolution the backend's runtime vault calls use
+ * (`createCredentialTokenProvider`, the #110 gate's resolution), so
+ * provisioning can never ride the operator bearer: hub JWTs are
+ * audience-bound and the operator token carries `aud: "operator"`, which
+ * the vault rejects with a 401 audience mismatch (#112).
+ */
+function credentialTokenProviderFor(ui: RegisteredUi, opts: AdminHandlerOpts): () => string {
+  return createCredentialTokenProvider(ui, {
+    ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+    getConfig: () => opts.state.config,
+  });
+}
+
+/**
  * Manual re-trigger for the auto-provisioning that runs on `add`. Use
  * cases:
- *   - Auto-provision failed at add time (vault down, no operator token);
- *     operator fixes the underlying issue + re-runs.
+ *   - Auto-provision failed at add time (vault down, no stored vault
+ *     credential yet); operator fixes the underlying issue — e.g.
+ *     approves a credential connection in the hub admin — + re-runs.
  *   - Operator changed the meta.json's `required_schema` post-install
  *     (added a new tag) and wants the new declarations seeded.
  *   - Multi-vault apps where the operator wants to push schema to a
@@ -1824,8 +1840,7 @@ async function handleProvisionSchema(
   const summary = await provisionSchemaForUi({
     ui,
     hubUrl: opts.state.config.hub_url,
-    operatorTokenResolver:
-      opts.operatorTokenOverride ?? (() => readOperatorToken({ logger: opts.logger })),
+    tokenProvider: credentialTokenProviderFor(ui, opts),
     fetchFn: opts.fetchFn,
     logger: opts.logger,
   });

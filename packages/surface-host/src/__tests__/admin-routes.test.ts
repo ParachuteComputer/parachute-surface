@@ -33,6 +33,7 @@ import {
   type EnforceScopeFn,
   routeAdmin,
 } from "../admin-routes.ts";
+import { type StoredCredential, writeCredential } from "../credential-store.ts";
 import { writeOauthClientFile } from "../dcr.ts";
 import type { AppState } from "../http-server.ts";
 import type { NpmSpawnFn } from "../npm-fetch.ts";
@@ -97,6 +98,33 @@ function seedLocalSource(localName: string, files: Record<string, string>): stri
     fs.writeFileSync(path.join(root, filename), body);
   }
   return root;
+}
+
+/**
+ * Write a stored vault credential (R3a host custody) into a per-test
+ * credentials dir — what `POST /surface/<name>/provision-schema` rides
+ * against the vault post-#112.
+ */
+function seedCredential(
+  credsDir: string,
+  overrides: Partial<StoredCredential> = {},
+): StoredCredential {
+  const record: StoredCredential = {
+    connection_id: "cred-surface-vault-default",
+    key: "vault",
+    vault: "default",
+    scope: "vault:default:write",
+    scoped_tags: ["capture"],
+    token: "STORED-VAULT-CRED",
+    jti: "jti-1",
+    expires_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+    renew_path: "/admin/connections/cred-surface-vault-default/renew",
+    status: "ok",
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+  writeCredential(record, credsDir);
+  return record;
 }
 
 /** Allow-all auth shim for tests. */
@@ -854,6 +882,8 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
       }),
     );
     fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir);
     const state = makeState();
 
     const fetchCalls: Array<{ url: string; method: string }> = [];
@@ -870,7 +900,7 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
       state,
       {
         enforceScopeFn: allowAdmin,
-        operatorTokenOverride: () => "op-tok",
+        credentialsDir: credsDir,
         fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       },
     );
@@ -892,6 +922,57 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
     expect(fetchCalls[0]!.url).toContain("/api/tags/capture");
   });
 
+  test("#112: provisioning rides the surface's STORED credential — never the operator bearer", async () => {
+    const name = "notes";
+    const dir = path.join(uisDir, name);
+    const distDir = path.join(dir, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({
+        name,
+        displayName: "Notes",
+        path: "/surface/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture", description: "Quick captures" }] },
+      }),
+    );
+    fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir);
+    const state = makeState();
+
+    const bearers: string[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      bearers.push(new Headers(init?.headers).get("Authorization") ?? "");
+      return new Response(JSON.stringify({ name: "capture" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/surface/notes/provision-schema", { method: "POST" }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        // An operator bearer IS available — but it carries aud "operator",
+        // which the vault rejects (401 audience mismatch). The fix must
+        // never let it reach the vault.
+        operatorTokenOverride: () => "operator-bearer-wrong-audience",
+        credentialsDir: credsDir,
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; provisioned: string[] };
+    expect(body.ok).toBe(true);
+    expect(body.provisioned).toEqual(["capture"]);
+    // The aud-mismatch class is structurally impossible: the vault saw
+    // exactly the stored credential, never the operator bearer.
+    expect(bearers).toEqual(["Bearer STORED-VAULT-CRED"]);
+  });
+
   test("UI without required_schema → 200 with skipReason", async () => {
     seedUi("plain", "/surface/plain", { "index.html": "<html></html>" });
     const state = makeState();
@@ -900,13 +981,118 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
       state,
       {
         enforceScopeFn: allowAdmin,
-        operatorTokenOverride: () => "op-tok",
       },
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; skipReason?: string };
     expect(body.ok).toBe(true);
     expect(body.skipReason).toContain("no required_schema");
+  });
+
+  test("no stored credential → clean skip in the result, not a 500 (#112)", async () => {
+    const name = "notes";
+    const dir = path.join(uisDir, name);
+    const distDir = path.join(dir, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({
+        name,
+        displayName: "Notes",
+        path: "/surface/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
+    );
+    fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    // Empty credentials dir — nothing stored for this surface's vault.
+    const credsDir = path.join(tmpDir, "credentials");
+    fs.mkdirSync(credsDir, { recursive: true });
+    const state = makeState();
+
+    let vaultCalls = 0;
+    const fetchFn = (async () => {
+      vaultCalls++;
+      return new Response("not used", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/surface/notes/provision-schema", { method: "POST" }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        // Operator bearer available — must NOT be used as a fallback.
+        operatorTokenOverride: () => "op-tok",
+        credentialsDir: credsDir,
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      provisioned: string[];
+      errors: unknown[];
+      skipReason?: string;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.provisioned).toEqual([]);
+    expect(body.errors).toEqual([]);
+    expect(body.skipReason).toContain("no vault credential");
+    expect(body.skipReason).toContain("approve a credential connection");
+    expect(vaultCalls).toBe(0);
+  });
+
+  test("read-scoped credential → 'lacks write scope' per-tag error, not a raw 401 (#112)", async () => {
+    const name = "notes";
+    const dir = path.join(uisDir, name);
+    const distDir = path.join(dir, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({
+        name,
+        displayName: "Notes",
+        path: "/surface/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
+    );
+    fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir, { scope: "vault:default:read" });
+    const state = makeState();
+
+    // Vault answers what it really answers for a write with a read-scoped
+    // token: 403 insufficient_scope (routing.ts scope gate).
+    const fetchFn = (async () =>
+      new Response(
+        JSON.stringify({
+          error: "Forbidden",
+          error_type: "insufficient_scope",
+          message: "This endpoint requires the 'vault:write' scope (or 'vault:default:write').",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      )) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/surface/notes/provision-schema", { method: "POST" }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        credentialsDir: credsDir,
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      errors: Array<{ tag: string; error: string }>;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.errors.length).toBe(1);
+    expect(body.errors[0]!.tag).toBe("capture");
+    expect(body.errors[0]!.error).toContain("lacks write scope");
+    expect(body.errors[0]!.error).toContain("write-scoped credential connection");
   });
 
   test("provision endpoint is idempotent (running twice → same shape)", async () => {
@@ -925,6 +1111,8 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
       }),
     );
     fs.writeFileSync(path.join(distDir, "index.html"), "<html></html>");
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir);
     const state = makeState();
 
     let callCount = 0;
@@ -942,7 +1130,7 @@ describe("POST /surface/<name>/provision-schema (Phase 2.1)", () => {
         state,
         {
           enforceScopeFn: allowAdmin,
-          operatorTokenOverride: () => "op-tok",
+          credentialsDir: credsDir,
           fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
         },
       );
@@ -978,11 +1166,17 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
       }),
     );
 
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir);
     const state = makeState({ auto_provision_required_schema: true });
 
-    const fetchCalls: Array<{ url: string; method: string }> = [];
+    const fetchCalls: Array<{ url: string; method: string; bearer: string }> = [];
     const fetchFn = (async (url: string, init?: RequestInit) => {
-      fetchCalls.push({ url, method: init?.method ?? "GET" });
+      fetchCalls.push({
+        url,
+        method: init?.method ?? "GET",
+        bearer: new Headers(init?.headers).get("Authorization") ?? "",
+      });
       return new Response(JSON.stringify({ name: "capture" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -997,7 +1191,9 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
       state,
       {
         enforceScopeFn: allowAdmin,
+        // Operator bearer available — the vault PUT must NOT ride it (#112).
         operatorTokenOverride: () => "op-tok",
+        credentialsDir: credsDir,
         fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       },
     );
@@ -1012,10 +1208,60 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
     expect(body.ui?.name).toBe("notes");
     expect(body.provision_schema?.provisioned).toEqual(["capture"]);
     expect(body.provision_schema?.errors).toEqual([]);
-    // PUT to vault was attempted.
-    expect(fetchCalls.some((c) => c.method === "PUT" && c.url.includes("/api/tags/capture"))).toBe(
-      true,
+    // PUT to vault was attempted, riding the stored credential.
+    const put = fetchCalls.find((c) => c.method === "PUT" && c.url.includes("/api/tags/capture"));
+    expect(put).toBeDefined();
+    expect(put!.bearer).toBe("Bearer STORED-VAULT-CRED");
+  });
+
+  test("auto-provision on add with NO stored credential → install succeeds, clean skip (#112)", async () => {
+    const sourceRoot = path.join(tmpDir, "src", "notes-src");
+    const sourceDist = path.join(sourceRoot, "dist");
+    fs.mkdirSync(sourceDist, { recursive: true });
+    fs.writeFileSync(path.join(sourceDist, "index.html"), "<html></html>");
+    fs.writeFileSync(
+      path.join(sourceRoot, "meta.json"),
+      JSON.stringify({
+        name: "notes",
+        displayName: "Notes",
+        path: "/surface/notes",
+        vault_default: "default",
+        required_schema: { tags: [{ name: "capture" }] },
+      }),
     );
+    const credsDir = path.join(tmpDir, "credentials");
+    fs.mkdirSync(credsDir, { recursive: true });
+    const state = makeState({ auto_provision_required_schema: true });
+
+    let vaultCalls = 0;
+    const fetchFn = (async () => {
+      vaultCalls++;
+      return new Response("not used", { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const res = await dispatch(
+      new Request("http://localhost/surface/add", {
+        method: "POST",
+        body: JSON.stringify({ source: sourceRoot }),
+      }),
+      state,
+      {
+        enforceScopeFn: allowAdmin,
+        operatorTokenOverride: () => "op-tok",
+        credentialsDir: credsDir,
+        fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      },
+    );
+    // Install succeeds — provisioning is best-effort.
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      ui: { name: string } | null;
+      provision_schema?: { provisioned: string[]; skipReason?: string };
+    };
+    expect(body.ui?.name).toBe("notes");
+    expect(body.provision_schema?.provisioned).toEqual([]);
+    expect(body.provision_schema?.skipReason).toContain("no vault credential");
+    expect(vaultCalls).toBe(0);
   });
 
   test("auto_provision_required_schema: false → no provisioning on add (default in tests)", async () => {
@@ -1074,6 +1320,8 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
         required_schema: { tags: [{ name: "capture" }] },
       }),
     );
+    const credsDir = path.join(tmpDir, "credentials");
+    seedCredential(credsDir);
     const state = makeState({ auto_provision_required_schema: true });
     // vault returns 403 — provisioning fails per-tag.
     const fetchFn = (async () =>
@@ -1090,7 +1338,7 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
       state,
       {
         enforceScopeFn: allowAdmin,
-        operatorTokenOverride: () => "op-tok",
+        credentialsDir: credsDir,
         fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       },
     );
@@ -1104,5 +1352,6 @@ describe("POST /surface/add — Phase 2.1 auto-provision wiring", () => {
     expect(body.provision_schema?.provisioned).toEqual([]);
     expect(body.provision_schema?.errors.length).toBe(1);
     expect(body.provision_schema?.errors[0]!.tag).toBe("capture");
+    expect(body.provision_schema?.errors[0]!.error).toContain("lacks write scope");
   });
 });
