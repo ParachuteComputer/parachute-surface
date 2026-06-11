@@ -40,6 +40,7 @@ type ConnState = "connecting" | "connected" | "denied" | "disconnected";
 export function EditorPane({ api, docId, userName, editable }: EditorPaneProps) {
   const [connState, setConnState] = useState<ConnState>("connecting");
   const [peers, setPeers] = useState<string[]>([]);
+  const [resyncNotice, setResyncNotice] = useState(false);
 
   const provider = useMemo(
     () =>
@@ -50,9 +51,27 @@ export function EditorPane({ api, docId, userName, editable }: EditorPaneProps) 
         onAuthenticated: () => setConnState("connected"),
         onAuthenticationFailed: () => setConnState("denied"),
         onClose: () => setConnState((s) => (s === "denied" ? s : "disconnected")),
+        onStateless: ({ payload }) => {
+          // The backend broadcasts { type: "resync" } when an external
+          // vault edit (or a writeback conflict's winner) re-seeded the
+          // live doc — the content just changed under the user.
+          try {
+            const parsed = JSON.parse(payload) as { type?: string };
+            if (parsed.type === "resync") setResyncNotice(true);
+          } catch {
+            // not ours
+          }
+        },
       }),
     [api, docId],
   );
+
+  // Auto-dismiss the resync banner.
+  useEffect(() => {
+    if (!resyncNotice) return;
+    const timer = setTimeout(() => setResyncNotice(false), 6_000);
+    return () => clearTimeout(timer);
+  }, [resyncNotice]);
 
   useEffect(() => {
     const awareness = provider.awareness;
@@ -110,6 +129,11 @@ export function EditorPane({ api, docId, userName, editable }: EditorPaneProps) 
           </span>
         )}
       </div>
+      {resyncNotice && (
+        <p className="resync-banner">
+          This doc was updated outside the editor — your view re-synced.
+        </p>
+      )}
       {connState === "denied" ? (
         <p className="notice">This link doesn't grant access to this document.</p>
       ) : (

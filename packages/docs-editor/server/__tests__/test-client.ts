@@ -25,6 +25,7 @@ import * as Y from "yjs";
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const MESSAGE_AUTH = 2;
+const MESSAGE_STATELESS = 5;
 const MESSAGE_CLOSE = 7;
 
 /** Auth sub-message types (@hocuspocus/common auth.ts). */
@@ -110,6 +111,8 @@ export class CollabTestClient {
   denyReason: string | null = null;
   /** Reason from a server-sent protocol CLOSE message (Connection.close). */
   serverClosedReason: string | null = null;
+  /** Server-sent stateless payloads (the resync-banner channel). */
+  readonly statelessMessages: string[] = [];
   readonly #token: string;
   #connection: FakeConnection | null = null;
 
@@ -239,6 +242,10 @@ export class CollabTestClient {
           decoding.readVarUint8Array(decoder),
           this,
         );
+        break;
+      }
+      case MESSAGE_STATELESS: {
+        this.statelessMessages.push(decoding.readVarString(decoder));
         break;
       }
       case MESSAGE_CLOSE: {

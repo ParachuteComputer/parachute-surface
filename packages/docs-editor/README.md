@@ -70,6 +70,14 @@ backend. The bundle is gitignored (generated); the install-simulation
 test (`server/__tests__/install-simulation.test.ts`) pins that it loads
 and serves from a node_modules-free install dir.
 
+Dependency floors: this package is **private** (the repo's
+pebble-config precedent — plain semver ranges, resolved to workspace
+copies in-monorepo). If it ever publishes, the `@openparachute/surface`
+floor must rise to the version that ships the SurfaceSocket identity
+contract (stable per-connection wrapper + `socketId` + `readyState`;
+^0.3.2 or whatever release carries it) — `^0.3.0` admits published
+hosts without it, and the collab WS wiring keys on that contract.
+
 ## Tests
 
 `bun test packages/docs-editor/server/` (or `bun run test:docs-editor`
@@ -80,12 +88,38 @@ real engine through the host's WS contract (convergence, external-edit
 wins, 409 → re-seed, read-only enforcement, double-disconnect
 idempotency).
 
+## Credential scope
+
+The surface's vault credential must cover **two tags**:
+
+- the working tag (`doc` by default, `working_tag` config) — read/write:
+  doc list, seeds, and writebacks;
+- `surface-acl/docs` — read/write: the vault-native GrantStore keeps one
+  note per grant there (declared in meta.json `required_schema` so the
+  requirement is visible at install time). Revocation = deleting the
+  grant note.
+
+## Known limitation (v1): share links need hub-identified visitors
+
+This surface declares `audience: "hub-users"`, and the hub's audience
+gate admits only hub sessions / hub-issued Bearers — an anonymous
+invitee clicking a capability entry link is bounced to `/login` at the
+proxy, BEFORE the backend's own link auth can run. The hub is gaining a
+`surface` audience tier (backend-owned admission; in flight in a
+parallel hub PR); once the operator's hub ships it, flip meta.json to
+`audience: "surface"` and anonymous invite links work end to end.
+(surface-host already accepts the value — but declaring it against an
+older hub drops the mount: its manifest validation rejects unknown
+audiences.)
+
 ## Not built (v1)
 
-Comments/suggestions (`#comments` overlay docs, propose-a-revision),
-audience password accounts, outbound email for personal links (links
-render inline for copy-paste), offline/PWA. See the design doc's §7 for
-the tracked shapes.
+Comments/suggestions (`#comments` overlay docs, propose-a-revision —
+the `comment`/`suggest` grant levels stay in the backend schema for
+forward-compat but behave as read-only, so the v1 share UI offers only
+view/edit), audience password accounts, outbound email for personal
+links (links render inline for copy-paste), offline/PWA. See the design
+doc's §7 for the tracked shapes.
 
 ## License
 

@@ -172,6 +172,16 @@ describe("collab loop", () => {
     expect(a.fragmentText()).not.toContain("original");
     expect(events.some((e) => e.type === "external-edit" && e.noteId === "doc-x")).toBe(true);
 
+    // The user-facing signal rode along: a stateless resync notice.
+    await waitUntil(
+      () =>
+        a.statelessMessages.some((m) => {
+          const parsed = JSON.parse(m) as { type?: string; reason?: string };
+          return parsed.type === "resync" && parsed.reason === "external-edit";
+        }),
+      { label: "resync stateless notice" },
+    );
+
     // Post-re-seed edits write back against the WINNER's version.
     a.appendParagraph("after the external edit");
     await waitUntil(
@@ -414,7 +424,7 @@ describe("collab loop", () => {
 
     // The operator revokes the victim's share over REST.
     const shares = await m.backend.fetch(
-      new Request(`https://docs.test/surface/docs/api/shares`, {
+      new Request("https://docs.test/surface/docs/api/shares", {
         headers: { authorization: `Bearer ${OPERATOR_JWT}` },
       }),
     );

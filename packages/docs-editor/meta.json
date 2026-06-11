@@ -17,6 +17,10 @@
       {
         "name": "doc",
         "description": "Working tag for the Docs surface — notes carrying it appear in the doc list and are editable collaboratively."
+      },
+      {
+        "name": "surface-acl/docs",
+        "description": "Grant rows for the Docs surface (vault-native GrantStore) — one note per share/grant; revocation = delete the note. The surface credential needs read/write on this tag as well as on the working tag."
       }
     ]
   }

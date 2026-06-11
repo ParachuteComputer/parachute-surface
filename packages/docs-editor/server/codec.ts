@@ -20,6 +20,10 @@
  */
 
 import { type DocJSON, docFromJSON, docToMarkdown, markdownToDoc } from "@openparachute/doc-schema";
+// CAUTION: updateYFragment is marked @private/@unstable upstream and its
+// 4th-arg meta-object shape has changed across releases — y-prosemirror is
+// EXACT-pinned in package.json (1.3.7) for the same reason doc-schema pins
+// its schema deps; bump deliberately and re-run the round-trip suite.
 import { updateYFragment, yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import type * as Y from "yjs";
 

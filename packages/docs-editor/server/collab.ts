@@ -248,6 +248,17 @@ export function createCollab(deps: CollabDeps): Collab {
     void sweepSessions();
   });
 
+  // USER-FACING RESYNC SIGNAL: when an external vault edit wins (live
+  // re-seed) or a writeback 409s into a re-seed, connected clients see
+  // their content replaced under them — tell them why. The engine's
+  // stateless channel carries a tiny JSON payload the editor turns into
+  // a banner; documents nobody has open need no signal.
+  const detachReconcilerWatch = reconciler.on((event) => {
+    if (event.type !== "external-edit" && event.type !== "writeback-conflict") return;
+    const document = hocuspocus.documents.get(event.noteId);
+    document?.broadcastStateless(JSON.stringify({ type: "resync", reason: event.type }));
+  });
+
   // Stable SurfaceSocket identity (host contract) keys the engine's
   // per-connection handle.
   const connections = new Map<SurfaceSocket, ClientConnection>();
@@ -299,8 +310,16 @@ export function createCollab(deps: CollabDeps): Collab {
     },
     async shutdown(): Promise<void> {
       detachGrantWatch();
-      for (const connection of connections.values()) {
+      detachReconcilerWatch();
+      for (const [ws, connection] of connections) {
         connection.handleClose({ code: 1001, reason: "surface shutting down" });
+        try {
+          // handleClose tears down ENGINE state; the raw socket is the
+          // host's — close it too so no client lingers on a dead backend.
+          ws.close(1001, "surface shutting down");
+        } catch {
+          // already closing
+        }
       }
       connections.clear();
       sessions.clear();

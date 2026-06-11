@@ -7,7 +7,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DocsApi, MintedShare, ShareGrant } from "./api.ts";
 
-const LEVELS = ["view", "comment", "suggest", "edit"] as const;
+// v1 offers only the levels with BEHAVIOR in this build: view (read-only
+// collab) and edit (write). comment/suggest stay in the backend's grant
+// schema for forward-compat (overlay docs / propose-a-revision are the
+// design's tracked v2) but minting them here would just confuse — they
+// behave as read-only today.
+const LEVELS = ["view", "edit"] as const;
 
 export function ShareDialog({ api, docId }: { api: DocsApi; docId: string }) {
   const [grants, setGrants] = useState<ShareGrant[]>([]);
