@@ -26,14 +26,27 @@
  * `VaultClient.updateTag` against each declared tag so vault has the
  * schema row the app expects.
  *
+ * Which token? The surface's STORED vault credential (R3a host custody,
+ * credential-store.ts), resolved through the same path the backend's
+ * runtime vault calls use (`createCredentialTokenProvider` — explicit
+ * `credential_connections` mapping first, vault-match heuristics after),
+ * so single- and multi-credential bindings behave exactly like the #110
+ * pending-credential gate. History: the Phase-2.1 original rode the
+ * OPERATOR bearer — it predates credential custody, when the host had no
+ * vault credential of its own. Hub JWTs are audience-bound: the operator
+ * token carries `aud: "operator"`, not `aud: "vault.<name>"`, so the
+ * vault rejects it with a 401 audience mismatch (#112). The operator
+ * bearer authenticates the ADMIN ENDPOINT; it never reaches the vault.
+ *
  * Idempotent — vault's `PUT /api/tags/:name` upserts (omitted keys
  * preserve, declared keys overwrite). Re-running provisioning against
  * a vault that already has the schema is a no-op at the row level.
  *
- * **Best-effort.** If vault is unreachable, the operator token is
- * absent, or the tag-PUT 4xxs, we log + warn but never unwind the
+ * **Best-effort.** If vault is unreachable, no usable stored credential
+ * exists, or the tag-PUT 4xxs, we log + warn but never unwind the
  * install. The operator can re-trigger via `POST /surface/<name>/provision-
- * schema` once the underlying issue is fixed.
+ * schema` once the underlying issue is fixed (e.g. after approving a
+ * credential connection in the hub admin).
  *
  * Which vault?
  *   - If `meta.vault_default` is set (single-vault apps), we provision
@@ -46,7 +59,11 @@
  */
 
 import type { TagUpsertPayload } from "@openparachute/surface-client";
-import { VaultClient } from "@openparachute/surface-client/vault-client";
+import {
+  VaultAuthError,
+  VaultClient,
+  VaultPermissionError,
+} from "@openparachute/surface-client/vault-client";
 
 import type { FetchFn } from "./dcr.ts";
 import type { RegisteredUi } from "./ui-registry.ts";
@@ -55,8 +72,14 @@ export type ProvisionSchemaOpts = {
   ui: RegisteredUi;
   /** Hub origin (used to construct the per-vault base URL). */
   hubUrl: string;
-  /** Resolver for the operator bearer used to authenticate to vault. */
-  operatorTokenResolver: () => string | undefined;
+  /**
+   * Resolves the surface's STORED vault credential token (host custody —
+   * build with credential-store.ts `createCredentialTokenProvider`, the
+   * same resolution the backend's runtime vault calls use). Must throw an
+   * operator-actionable Error when no usable credential exists; that
+   * message becomes the pass-level `skipReason` (never a 500).
+   */
+  tokenProvider: () => string;
   /** Inject fetch (tests). */
   fetchFn?: FetchFn;
   /** Logger override; default console. */
@@ -72,7 +95,8 @@ export type ProvisionSchemaResult = {
    * Reason the whole pass was skipped (per-UI), if it was. Examples:
    *   - "ui declared no required_schema"
    *   - "ui has no vault_default; skip (operator can re-trigger manually)"
-   *   - "no operator token available"
+   *   - "no vault credential provisioned for surface … — approve a
+   *     credential connection in the hub admin (Connections → surface)"
    */
   skipReason?: string;
   /** Resolved vault URL, when one was used. */
@@ -114,10 +138,15 @@ export async function provisionSchemaForUi(
     };
   }
 
-  const operatorToken = opts.operatorTokenResolver();
-  if (!operatorToken) {
-    const reason =
-      "no operator token available (PARACHUTE_HUB_TOKEN unset, ~/.parachute/operator.token missing/unreadable)";
+  // Resolve the surface's stored vault credential (R3a custody). No usable
+  // credential (none stored / ambiguous binding / expired / needs-operator)
+  // → clean skip with the resolver's operator-actionable reason, shaped
+  // like the vault_default-unset skip above — never a 500.
+  let credentialToken: string;
+  try {
+    credentialToken = opts.tokenProvider();
+  } catch (e) {
+    const reason = (e as Error).message ?? String(e);
     logger.warn(`[app-provision] ${opts.ui.meta.name}: ${reason}`);
     return {
       provisioned: [],
@@ -130,7 +159,7 @@ export async function provisionSchemaForUi(
   const fetchImpl = opts.fetchFn ?? (fetch as typeof fetch);
   const client = new VaultClient({
     vaultUrl,
-    accessToken: operatorToken,
+    accessToken: credentialToken,
     // Cast fits — server-side FetchFn matches DOM `typeof fetch` at the
     // call-site shape VaultClient needs (URL string + RequestInit).
     fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -164,7 +193,7 @@ export async function provisionSchemaForUi(
       provisioned.push(tag.name);
       logger.log(`[app-provision] ${opts.ui.meta.name}: provisioned tag "${tag.name}"`);
     } catch (e) {
-      const msg = (e as Error).message ?? String(e);
+      const msg = describeProvisionError(e);
       errors.push({ tag: tag.name, error: msg });
       logger.warn(
         `[app-provision] ${opts.ui.meta.name}: failed to provision tag "${tag.name}": ${msg}`,
@@ -177,4 +206,22 @@ export async function provisionSchemaForUi(
     errors,
     vaultUrl,
   };
+}
+
+/**
+ * Map vault auth failures onto operator-actionable per-tag messages. The
+ * stored credential may be READ-scoped while `PUT /api/tags/:name` needs
+ * write — vault answers 403 `insufficient_scope` (`VaultPermissionError`);
+ * distinguish that ("widen the scope") from a 401 (`VaultAuthError` —
+ * credential expired / revoked / wrong audience: "re-approve the
+ * connection"). Everything else passes through as-is.
+ */
+function describeProvisionError(e: unknown): string {
+  if (e instanceof VaultPermissionError) {
+    return `stored credential lacks write scope — ${e.message}; approve a write-scoped credential connection in the hub admin (Connections)`;
+  }
+  if (e instanceof VaultAuthError) {
+    return `stored credential was rejected — ${e.message}; re-approve the credential connection in the hub admin (Connections)`;
+  }
+  return (e as Error).message ?? String(e);
 }

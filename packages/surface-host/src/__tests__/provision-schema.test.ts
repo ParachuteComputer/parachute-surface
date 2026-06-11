@@ -1,14 +1,21 @@
 /**
- * Tests for `src/provision-schema.ts` — Phase 2.1 required_schema
- * auto-provisioner.
+ * Tests for `src/provision-schema.ts` — required_schema auto-provisioner
+ * (Phase 2.1, re-based onto stored-credential custody in #112).
  *
  * Coverage:
- *   - UI declares required_schema + vault_default + operator token →
- *     PUTs each tag to /vault/<name>/api/tags/<tag>
+ *   - UI declares required_schema + vault_default + stored credential →
+ *     PUTs each tag to /vault/<name>/api/tags/<tag> with the CREDENTIAL
+ *     bearer (the aud-mismatch class of #112 is structurally impossible:
+ *     no operator token exists in this module anymore)
  *   - UI declares required_schema but no vault_default → skip with
  *     reason ("apps declaring required_schema must pin a vault")
  *   - UI has no required_schema → skip with reason
- *   - No operator token available → skip with reason
+ *   - tokenProvider throws (no stored credential / expired /
+ *     needs-operator) → skip with the resolver's reason, no vault call,
+ *     never a throw out of provisionSchemaForUi
+ *   - READ-scoped credential: vault 403 insufficient_scope → per-tag
+ *     "lacks write scope" message (distinct from a raw 401)
+ *   - rejected credential: vault 401 → per-tag "was rejected" message
  *   - Per-tag PUT failure logs warn + continues to next tag; result
  *     records errors
  *   - Idempotent: re-running against vault with same payload is a
@@ -23,6 +30,10 @@ import { provisionSchemaForUi } from "../provision-schema.ts";
 import type { RegisteredUi } from "../ui-registry.ts";
 
 const silentLogger = { log: () => {}, warn: () => {}, error: () => {} };
+
+/** The stored vault credential the fake tokenProvider resolves. */
+const CRED_TOKEN = "stored-vault-cred";
+const credProvider = () => CRED_TOKEN;
 
 function makeUi(overrides: Partial<RegisteredUi["meta"]> = {}): RegisteredUi {
   return {
@@ -74,7 +85,7 @@ function makeFetch(
 }
 
 describe("provisionSchemaForUi", () => {
-  test("happy path: PUTs each declared tag to vault", async () => {
+  test("happy path: PUTs each declared tag to vault with the stored credential", async () => {
     const calls: FakeCall[] = [];
     const fetchFn = makeFetch(
       calls,
@@ -87,7 +98,7 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui: makeUi(),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -98,7 +109,8 @@ describe("provisionSchemaForUi", () => {
     expect(calls.length).toBe(1);
     expect(calls[0]!.method).toBe("PUT");
     expect(calls[0]!.url).toBe("http://127.0.0.1:1939/vault/default/api/tags/capture");
-    expect(calls[0]!.bearer).toBe("Bearer op-tok");
+    // The bearer the vault sees IS the stored credential (#112).
+    expect(calls[0]!.bearer).toBe(`Bearer ${CRED_TOKEN}`);
     // Body carries the description + translated fields.
     expect(calls[0]!.body).toContain("Quick captures");
     expect(calls[0]!.body).toContain('"source"');
@@ -115,7 +127,7 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui: makeUi({ vault_default: undefined }),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -131,7 +143,7 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui: makeUi({ required_schema: undefined }),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -144,25 +156,87 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui: makeUi({ required_schema: { tags: [] } }),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       logger: silentLogger,
     });
     expect(result.provisioned).toEqual([]);
     expect(result.skipReason).toContain("no required_schema");
   });
 
-  test("no operator token → skip with reason (no vault call attempted)", async () => {
+  test("tokenProvider throws (no stored credential) → skip with reason, no vault call", async () => {
     const calls: FakeCall[] = [];
     const fetchFn = makeFetch(calls, () => new Response("nope", { status: 500 }));
+    const warns: string[] = [];
     const result = await provisionSchemaForUi({
       ui: makeUi(),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => undefined,
+      // Same shape createCredentialTokenProvider throws when nothing is
+      // stored for the surface's vault.
+      tokenProvider: () => {
+        throw new Error(
+          'no vault credential provisioned for surface "notes" (vault "default") — approve a credential connection in the hub admin (Connections → surface)',
+        );
+      },
+      fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      logger: { log: () => {}, warn: (m: string) => warns.push(m), error: () => {} },
+    });
+    expect(result.provisioned).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.skipReason).toContain("no vault credential");
+    expect(result.skipReason).toContain("approve a credential connection");
+    expect(warns.length).toBe(1);
+    expect(calls.length).toBe(0);
+  });
+
+  test("READ-scoped credential: vault 403 insufficient_scope → 'lacks write scope' per-tag error", async () => {
+    const calls: FakeCall[] = [];
+    const fetchFn = makeFetch(
+      calls,
+      () =>
+        new Response(
+          JSON.stringify({
+            error: "Forbidden",
+            error_type: "insufficient_scope",
+            message: "This endpoint requires the 'vault:write' scope (or 'vault:default:write').",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const result = await provisionSchemaForUi({
+      ui: makeUi({ required_schema: { tags: [{ name: "capture" }] } }),
+      hubUrl: "http://127.0.0.1:1939",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
-    expect(result.skipReason).toContain("no operator token");
-    expect(calls.length).toBe(0);
+    expect(result.provisioned).toEqual([]);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0]!.error).toContain("lacks write scope");
+    expect(result.errors[0]!.error).toContain("insufficient_scope");
+    expect(result.errors[0]!.error).toContain("write-scoped credential connection");
+  });
+
+  test("rejected credential: vault 401 → 'was rejected' per-tag error (re-approve)", async () => {
+    const calls: FakeCall[] = [];
+    const fetchFn = makeFetch(
+      calls,
+      () =>
+        new Response(
+          JSON.stringify({ error: "Unauthorized", message: "token has been revoked" }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    const result = await provisionSchemaForUi({
+      ui: makeUi({ required_schema: { tags: [{ name: "capture" }] } }),
+      hubUrl: "http://127.0.0.1:1939",
+      tokenProvider: credProvider,
+      fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
+      logger: silentLogger,
+    });
+    expect(result.provisioned).toEqual([]);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0]!.error).toContain("was rejected");
+    expect(result.errors[0]!.error).toContain("re-approve the credential connection");
   });
 
   test("per-tag PUT failure logs + continues to next tag", async () => {
@@ -192,7 +266,7 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui,
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: {
         log: () => {},
@@ -223,14 +297,14 @@ describe("provisionSchemaForUi", () => {
     const first = await provisionSchemaForUi({
       ui,
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
     const second = await provisionSchemaForUi({
       ui,
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -254,7 +328,7 @@ describe("provisionSchemaForUi", () => {
     await provisionSchemaForUi({
       ui: makeUi(),
       hubUrl: "http://127.0.0.1:1939/",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -277,7 +351,7 @@ describe("provisionSchemaForUi", () => {
     const result = await provisionSchemaForUi({
       ui,
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
@@ -298,7 +372,7 @@ describe("provisionSchemaForUi", () => {
     await provisionSchemaForUi({
       ui: makeUi({ vault_default: "weird name" }),
       hubUrl: "http://127.0.0.1:1939",
-      operatorTokenResolver: () => "op-tok",
+      tokenProvider: credProvider,
       fetchFn: fetchFn as unknown as import("../dcr.ts").FetchFn,
       logger: silentLogger,
     });
