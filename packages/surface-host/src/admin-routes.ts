@@ -88,6 +88,7 @@ import {
   InvalidMetaError,
   NAME_PATTERN,
   PATH_PATTERN,
+  SURFACE_AUDIENCE_HUB_HINT,
   UI_AUDIENCES,
   type UiAudience,
   type UiMeta,
@@ -432,7 +433,12 @@ function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
     server: u.meta.server ?? null,
     status,
     // Operator-facing reason for a non-healthy backend (admin surfacing).
-    statusReason: backends?.reasonFor(u.meta.name),
+    // For `audience: "surface"` rows with no backend trouble, carry the
+    // hub-tier hint (#99) — no cheap probe can tell whether the operator's
+    // hub ships the tier, so the admin UI shows the informative heads-up.
+    statusReason:
+      backends?.reasonFor(u.meta.name) ??
+      (u.meta.audience === "surface" ? SURFACE_AUDIENCE_HUB_HINT : undefined),
     // Credential lifecycle at a glance (R3b) — null for static surfaces.
     credential: credentialSummaryFor(u, opts),
     oauthClientId: oauth?.client_id,
