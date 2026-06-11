@@ -1,0 +1,63 @@
+# CI on pull requests — the repo's manual pre-merge gate set, mechanized (#108).
+#
+# Runs exactly the gates every PR runs by hand before merge:
+#
+#   bun run typecheck:all   (all package tsconfigs + the admin SPA)
+#   bun run test            (every bun-test suite + the vitest suites)
+#   bun run build           (every buildable package, incl. docs-editor's
+#                            web dist + self-contained server bundle)
+#
+# Cost discipline: ONE job, sequential steps (a failure short-circuits the
+# rest), bun's install cache persisted across runs keyed on bun.lock, and
+# stale runs on the same PR are cancelled by the concurrency group.
+#
+# OPERATOR STEP (not automatable from this repo's contents): making this a
+# REQUIRED check happens in branch protection for `main` — Settings →
+# Branches → require the `gates` job.
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  # One live run per PR — a new push cancels the stale run.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Matches release.yml — keep the two in lockstep so CI exercises
+          # the same runtime the release gates run on.
+          bun-version: 1.3
+
+      - name: cache bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: install deps
+        # Workspace root install — every packages/* workspace + web/admin.
+        run: bun install --frozen-lockfile
+
+      - name: typecheck (all packages + admin SPA)
+        run: bun run typecheck:all
+
+      - name: test (root suite — bun test + vitest packages)
+        run: bun run test
+
+      - name: build (all buildable packages)
+        run: bun run build
