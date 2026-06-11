@@ -185,21 +185,27 @@ export interface SurfaceHostContext {
 /**
  * Real per-surface status (P5 — replaces the hardcoded `"active"`):
  *
- *   "static-only"      — no `server` block; the bundle serves, nothing to mount.
- *   "active"           — backend mounted and healthy.
- *   "failing"          — recent contained failures inside the crash-loop
- *                        window, below the quarantine threshold. Still serving.
- *   "backend-error"    — the factory (or entry import) failed at mount; the
- *                        static bundle still serves, `${mount}/api/*` 503s.
- *   "backend-disabled" — crash-loop quarantine; 503 until an operator reload.
+ *   "static-only"        — no `server` block; the bundle serves, nothing to mount.
+ *   "active"             — backend mounted and healthy.
+ *   "pending-credential" — the surface requires a vault credential
+ *                          (`scopes_required` non-empty) and none is stored
+ *                          yet; the factory is DEFERRED until the credential
+ *                          lands (#101). The static bundle serves,
+ *                          `${mount}/api/*` 503s with `credential_pending`.
+ *   "failing"            — recent contained failures inside the crash-loop
+ *                          window, below the quarantine threshold. Still serving.
+ *   "backend-error"      — the factory (or entry import) failed at mount; the
+ *                          static bundle still serves, `${mount}/api/*` 503s.
+ *   "backend-disabled"   — crash-loop quarantine; 503 until an operator reload.
  *
  * services.json stamping maps these onto the hub's UiSubUnitStatus
  * vocabulary (active|pending|inactive|failing): static-only/active →
- * "active", everything else → "failing".
+ * "active", pending-credential → "pending", everything else → "failing".
  */
 export type SurfaceStatus =
   | "static-only"
   | "active"
+  | "pending-credential"
   | "failing"
   | "backend-error"
   | "backend-disabled";

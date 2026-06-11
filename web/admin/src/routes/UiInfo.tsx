@@ -57,6 +57,13 @@ export function statusCopy(ui: UiSummary): {
         explanation: "The surface's server is mounted and healthy.",
         showReload: false,
       };
+    case "pending-credential":
+      return {
+        label: "Awaiting credential",
+        tone: "pending",
+        explanation: `The surface needs a vault credential before its server starts — approve a credential connection in the hub admin (Connections); the server mounts automatically when it arrives.${ui.statusReason ? ` Detail: ${ui.statusReason}` : ""}`,
+        showReload: false,
+      };
     case "failing":
       return {
         label: "Failing",

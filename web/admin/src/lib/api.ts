@@ -85,7 +85,13 @@ export type UiSummary = {
    * Real per-surface status (surface-runtime P5): static surfaces report
    * "static-only"; backed surfaces report their backend lifecycle state.
    */
-  status: "static-only" | "active" | "failing" | "backend-error" | "backend-disabled";
+  status:
+    | "static-only"
+    | "active"
+    | "pending-credential"
+    | "failing"
+    | "backend-error"
+    | "backend-disabled";
   /** Operator-facing reason for a non-healthy backend, when any. */
   statusReason?: string;
   /** Credential lifecycle at a glance (R3b). Null/absent for static surfaces. */
