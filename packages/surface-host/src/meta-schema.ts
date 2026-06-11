@@ -60,6 +60,19 @@ export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
 export const UI_AUDIENCES = ["public", "hub-users", "operator", "surface"] as const;
 export type UiAudience = (typeof UI_AUDIENCES)[number];
 
+/**
+ * Operator-facing heads-up for `audience: "surface"` (#99). The warn is
+ * UNCONDITIONAL because no cheap definitive hub-capability probe exists:
+ * services.json carries no hub row, /.well-known/parachute.json exposes no
+ * hub version, and the services.json write always succeeds locally — an
+ * older hub only drops the row in ITS reader, invisible from here. Emitted
+ * through `parseMetaWithDiagnostics` warnings (the scanner logs them on
+ * every registration path: boot, add, PATCH re-scan, reload) and as the
+ * `statusReason` hint on serialized rows.
+ */
+export const SURFACE_AUDIENCE_HUB_HINT =
+  "audience \"surface\" requires a hub that ships the surface audience tier (hub#651 — releases after hub 0.7.0): an older hub's manifest validation drops this surface's services.json row and the mount 404s";
+
 /** Default audience when neither `audience` nor legacy `public` is declared. */
 export const DEFAULT_AUDIENCE: UiAudience = "hub-users";
 
@@ -503,6 +516,11 @@ export function parseMetaWithDiagnostics(raw: unknown): { meta: UiMeta; warnings
     }
   }
   const publicField = audience === "public";
+  if (audience === "surface") {
+    // #99 — unconditional registration-time diagnostic (no cheap hub
+    // probe exists; see SURFACE_AUDIENCE_HUB_HINT's doc comment).
+    warnings.push(`meta.json: ${SURFACE_AUDIENCE_HUB_HINT}`);
+  }
 
   // server — optional block (P1). See `UiServerBlock`.
   const server = parseServerBlock(o.server, errors);

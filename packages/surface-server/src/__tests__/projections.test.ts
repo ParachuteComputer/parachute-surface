@@ -297,10 +297,12 @@ describe("MCP face — per-actor tool visibility", () => {
     expect(body.error).toBe("invalid_token");
   });
 
-  test("the short `${mount}/mcp` namespace answers too (future host forwarding)", async () => {
+  test("the bare `${mount}/mcp` path is NOT routed — `/api/mcp` is canonical (#104)", async () => {
     const { router } = await wiring();
-    const tools = await listTools(router, {}, `${MOUNT}/mcp`);
-    expect(tools.map((t) => t.name)).toEqual(["upcoming-meetings"]);
+    const res = await router.fetch(
+      mcpPost({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {}, `${MOUNT}/mcp`),
+    );
+    expect(res.status).toBe(404);
   });
 
   test("GET on the MCP endpoint is a 405, not a hanging stream", async () => {

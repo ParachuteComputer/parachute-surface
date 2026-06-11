@@ -240,7 +240,8 @@ defineProjection({
 ```
 → the kit derives BOTH the REST endpoint (`GET ${mount}/api/upcoming-meetings`,
 audience-gated) AND an **MCP tool** on a per-surface Streamable-HTTP endpoint
-(`${mount}/mcp` — channel's per-instance MCP endpoints are the in-house
+(`${mount}/api/mcp` — canonical per #104, since the host forwards only
+`${mount}/api/*`; channel's per-instance MCP endpoints are the in-house
 precedent). One definition, two projections: browsers and AI clients both get
 the domain vocabulary instead of tags/notes/links.
 

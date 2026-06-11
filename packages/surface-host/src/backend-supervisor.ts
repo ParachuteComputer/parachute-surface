@@ -378,23 +378,25 @@ export class BackendSupervisor {
 
   /**
    * Re-attempt the deferred factory mount for every record parked in
-   * `pending-credential` (#101). Called when a credential lands (the hub
-   * delivery endpoint) and after a `credential_connections` binding change;
-   * harmless any time — records whose gate still refuses stay pending
-   * untouched. Returns the names whose mount was retried (their status now
-   * reflects the real factory outcome).
+   * `pending-credential` (#101). Called when a credential is delivered OR
+   * removed (a removal can resolve multi-credential ambiguity — #111) and
+   * after a `credential_connections` binding change; harmless any time —
+   * records whose gate still refuses stay pending untouched. Returns ONLY
+   * the names whose retried factory SUCCEEDED (#111): a retry that fails
+   * reads `backend-error` on the record and is not reported, so callers
+   * can honestly stamp the list into a delivery response as `mounted`.
    */
   async retryPendingCredentialMounts(uis: ReadonlyArray<RegisteredUi>): Promise<string[]> {
-    const retried: string[] = [];
+    const mounted: string[] = [];
     for (const [name, rec] of [...this.mounts]) {
       if (rec.status !== "pending-credential") continue;
       const ui = uis.find((u) => u.meta.name === name);
       if (!ui?.meta.server) continue; // removed/de-backed since — sync()'s job
       if ((this.pendingCredentialReason?.(ui) ?? null) !== null) continue; // still gated
       await this.mount(ui);
-      retried.push(name);
+      if (this.mounts.get(name)?.status === "active") mounted.push(name);
     }
-    return retried;
+    return mounted;
   }
 
   /** Unmount everything (daemon shutdown). */

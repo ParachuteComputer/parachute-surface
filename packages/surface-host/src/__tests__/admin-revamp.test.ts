@@ -24,6 +24,7 @@ import {
 } from "../admin-routes.ts";
 import { type StoredCredential, writeCredential } from "../credential-store.ts";
 import type { AppState } from "../http-server.ts";
+import { SURFACE_AUDIENCE_HUB_HINT } from "../meta-schema.ts";
 import { scanUis } from "../ui-registry.ts";
 
 // biome-ignore lint/suspicious/noExplicitAny: tests poke parsed JSON loosely
@@ -545,6 +546,24 @@ describe("PATCH /surface/<name>", () => {
     );
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("invalid_audience");
+  });
+
+  test('audience: "surface" lands + the serialized row carries the hub-tier hint (#99)', async () => {
+    seedUi("alpha", "/surface/alpha");
+    const state = makeState();
+    const res = await dispatch(jsonReq("PATCH", "/surface/alpha", { audience: "surface" }), state);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AnyJson;
+    expect(body.ui.audience).toBe("surface");
+    // No cheap hub-capability probe exists, so the heads-up is the
+    // unconditional statusReason hint the admin SPA renders.
+    expect(body.ui.statusReason).toContain(SURFACE_AUDIENCE_HUB_HINT);
+    // Other audiences carry no hint.
+    const back = await dispatch(
+      jsonReq("PATCH", "/surface/alpha", { audience: "hub-users" }),
+      state,
+    );
+    expect((((await back.json()) as AnyJson).ui as AnyJson).statusReason).toBeUndefined();
   });
 
   test("no editable fields → 400", async () => {

@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { SURFACE_AUDIENCE_HUB_HINT } from "../meta-schema.ts";
 import { scanUis } from "../ui-registry.ts";
 
 let uisDir: string;
@@ -176,5 +177,38 @@ describe("scanUis — ordering", () => {
       "/surface/middle",
       "/surface/zeta",
     ]);
+  });
+});
+
+describe("scanUis — registration-time diagnostics (#99)", () => {
+  test('audience: "surface" logs the hub-tier warn on every scan; the UI still registers', () => {
+    seedUi("backed", {
+      name: "backed",
+      displayName: "Backed",
+      path: "/surface/backed",
+      audience: "surface",
+    });
+    const warns: string[] = [];
+    const logger = {
+      log: () => {},
+      warn: (...a: unknown[]) => warns.push(a.join(" ")),
+      error: () => {},
+    };
+    const result = scanUis({ uisDir, logger });
+    expect(result.registered).toHaveLength(1); // a warn, never a skip
+    expect(result.registered[0]!.meta.audience).toBe("surface");
+    expect(warns.some((w) => w.includes(SURFACE_AUDIENCE_HUB_HINT))).toBe(true);
+  });
+
+  test("other audiences scan without the hub-tier warn", () => {
+    seedUi("plain", { name: "plain", displayName: "Plain", path: "/surface/plain" });
+    const warns: string[] = [];
+    const logger = {
+      log: () => {},
+      warn: (...a: unknown[]) => warns.push(a.join(" ")),
+      error: () => {},
+    };
+    scanUis({ uisDir, logger });
+    expect(warns.some((w) => w.includes(SURFACE_AUDIENCE_HUB_HINT))).toBe(false);
   });
 });

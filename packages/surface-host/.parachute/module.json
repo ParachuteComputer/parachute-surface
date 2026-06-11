@@ -4,10 +4,7 @@
   "displayName": "Surface",
   "tagline": "Host module for custom Parachute surfaces — drop a built bundle in and serve it under one origin.",
   "port": 1946,
-  "paths": [
-    "/surface",
-    "/.parachute"
-  ],
+  "paths": ["/surface", "/.parachute"],
   "stripPrefix": false,
   "health": "/surface/healthz",
   "uiUrl": "/surface/admin/",
@@ -15,15 +12,9 @@
   "configUiUrl": "/surface/admin/",
   "focus": "core",
   "adminCapabilities": ["config"],
-  "startCmd": [
-    "parachute-surface",
-    "serve"
-  ],
+  "startCmd": ["parachute-surface", "serve"],
   "scopes": {
-    "defines": [
-      "surface:read",
-      "surface:admin"
-    ]
+    "defines": ["surface:read", "surface:admin"]
   },
   "credentials": [
     {

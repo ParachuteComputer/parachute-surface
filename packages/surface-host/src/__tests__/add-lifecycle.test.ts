@@ -382,3 +382,118 @@ describe("#101 — add must not block awaiting a credential (pending-credential 
     await backends.stop();
   });
 });
+
+function credReq(payload: Record<string, unknown>): Request {
+  return new Request("http://x/surface/api/credential", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+describe("#111 — credential-delivery lifecycle follow-ups", () => {
+  test('op:"removed" also retries pending mounts — a removal resolves multi-credential ambiguity', async () => {
+    const state = makeState();
+    const backends = attachSupervisor(state);
+    // TWO write-scope credentials for the same vault and no explicit
+    // binding → the gate parks the surface on the ambiguity reason.
+    await dispatch(
+      credReq(
+        credentialPayload({ connection_id: "cred-a", scope: "vault:default:write", jti: "jti-a" }),
+      ),
+      state,
+    );
+    await dispatch(
+      credReq(
+        credentialPayload({ connection_id: "cred-b", scope: "vault:default:write", jti: "jti-b" }),
+      ),
+      state,
+    );
+    const marker = path.join(tmpDir, "ambig-invoked.marker");
+    const source = seedBackedSource(
+      "ambig",
+      backendMeta("ambig"),
+      tokenAwaitingFactory(marker, credsDir),
+    );
+    await dispatch(addReq({ source }), state);
+    const ui = state.registeredUis.find((u) => u.meta.name === "ambig");
+    expect(backends.statusFor(ui!)).toBe("pending-credential");
+    expect(backends.reasonFor("ambig")).toContain("multiple credentials");
+
+    // The hub tears one down: exactly one candidate remains. Pre-fix the
+    // removed op skipped the retry and the surface stayed parked until
+    // reload/PATCH/reboot.
+    const res = await dispatch(
+      credReq(credentialPayload({ op: "removed", connection_id: "cred-b" })),
+      state,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; mounted?: string[] };
+    expect(body.mounted).toEqual(["ambig"]);
+    expect(backends.statusFor(ui!)).toBe("active");
+    expect(fs.existsSync(marker)).toBe(true);
+
+    await backends.stop();
+  });
+
+  test("a delivery-triggered mount refreshes services.json (hub tile flips pending → active)", async () => {
+    // An existing row is the precondition for the refresh (selfRegister
+    // preserves its port; without one the port-0 guard refuses).
+    fs.writeFileSync(
+      manifestPath,
+      `${JSON.stringify({ services: [{ name: "parachute-surface", port: 4321 }] }, null, 2)}\n`,
+    );
+    const state = makeState();
+    const backends = attachSupervisor(state);
+    const marker = path.join(tmpDir, "manifested-invoked.marker");
+    const source = seedBackedSource(
+      "manifested",
+      backendMeta("manifested"),
+      tokenAwaitingFactory(marker, credsDir),
+    );
+    await dispatch(addReq({ source }), state, { skipSelfRegisterRefresh: false });
+    const manifestBefore = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      services: Array<{ name: string; uis?: Record<string, { status: string }> }>;
+    };
+    expect(manifestBefore.services[0]?.uis?.manifested?.status).toBe("pending");
+
+    const res = await dispatch(credReq(credentialPayload()), state, {
+      skipSelfRegisterRefresh: false,
+    });
+    expect(((await res.json()) as { mounted?: string[] }).mounted).toEqual(["manifested"]);
+    // Pre-fix: the mount went active but services.json still said
+    // "pending" until the next add/reload/boot.
+    const manifestAfter = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      services: Array<{ name: string; port: number; uis?: Record<string, { status: string }> }>;
+    };
+    expect(manifestAfter.services[0]?.uis?.manifested?.status).toBe("active");
+    expect(manifestAfter.services[0]?.port).toBe(4321); // existing port preserved
+
+    await backends.stop();
+  });
+
+  test("`mounted` lists only retried factories that SUCCEEDED — a failing factory is not reported", async () => {
+    const state = makeState();
+    const backends = attachSupervisor(state);
+    const source = seedBackedSource(
+      "doomed",
+      backendMeta("doomed"),
+      `export default () => { throw new Error("boom at mount"); };`,
+    );
+    await dispatch(addReq({ source }), state);
+    const ui = state.registeredUis.find((u) => u.meta.name === "doomed");
+    expect(backends.statusFor(ui!)).toBe("pending-credential");
+
+    // The credential lands; the retried factory then throws. The response
+    // must NOT claim the surface mounted.
+    const res = await dispatch(credReq(credentialPayload()), state);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; mounted?: string[] };
+    expect(body.ok).toBe(true);
+    expect(body.mounted).toBeUndefined();
+    expect(backends.statusFor(ui!)).toBe("backend-error");
+    expect(backends.reasonFor("doomed")).toContain("boom at mount");
+
+    await backends.stop();
+  });
+});
