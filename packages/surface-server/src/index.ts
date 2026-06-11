@@ -125,6 +125,7 @@ export {
 export { createSurfaceAuthz, SurfaceAuthz } from "./authz/surface-authz.ts";
 export {
   createSurfaceRouter,
+  isVaultNotFound,
   type RouteAccess,
   type RouteContext,
   type RouteHandler,

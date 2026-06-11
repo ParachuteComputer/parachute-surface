@@ -45,6 +45,8 @@ export class FakeVault {
   notes = new Map<string, Note>();
   subscriptions: FakeSubscription[] = [];
   updateCalls: { id: string; payload: UpdateNotePayload }[] = [];
+  /** When set, getNote throws it (vault-outage scripting). */
+  getNoteError: Error | null = null;
   /** When set, the NEXT updateNote throws it once (conflict scripting). */
   updateErrorOnce: Error | null = null;
   /** When set, updateNote awaits it BEFORE applying (in-flight race tests). */
@@ -102,8 +104,17 @@ export class FakeVault {
     return this.matching(params);
   }
 
+  /**
+   * FAITHFUL to the live client: vault 404s the by-id read of a missing
+   * note and surface-client raises the typed `VaultNotFoundError` — the
+   * fake must NOT soften that to null, or oracle regressions (missing →
+   * 500 while denied → 404) stay invisible to this suite.
+   */
   async getNote(id: string): Promise<Note | null> {
-    return this.notes.get(id) ?? null;
+    if (this.getNoteError) throw this.getNoteError;
+    const note = this.notes.get(id);
+    if (note === undefined) throw new VaultNotFoundError(`note ${id} not found`);
+    return note;
   }
 
   async updateNote(id: string, payload: UpdateNotePayload): Promise<Note> {

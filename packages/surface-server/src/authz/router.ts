@@ -27,6 +27,7 @@
  */
 
 import type { SurfaceHostContext } from "@openparachute/surface";
+import { VaultNotFoundError } from "@openparachute/surface-client";
 import { isMutation, originAllowed } from "../auth/origin-check.ts";
 import { type RateLimitOptions, RateLimiter, rateLimitedResponse } from "../auth/rate-limit.ts";
 import type { SurfaceAuth } from "../auth/surface-auth.ts";
@@ -65,7 +66,9 @@ export type RouteAccess =
       action: Action;
       /** Which `:param` carries the note id/path. Default `"id"`. */
       noteParam?: string;
-      /** Custom resolution (overrides `noteParam`). Null → 404. */
+      /** Custom resolution (overrides `noteParam`). Null → 404. May also
+       *  throw the vault's typed not-found — the router normalizes it to
+       *  the same 404 as null (missing ≡ denied; see isVaultNotFound). */
       resolve?: (params: Record<string, string>, req: Request) => Promise<Note | null>;
     };
 
@@ -214,9 +217,22 @@ export function createSurfaceRouter(
             return Response.json({ error: "unauthorized" }, { status: 401 });
           }
         } else if (access.kind === "note") {
-          const note = access.resolve
-            ? await access.resolve(params, req)
-            : await resolveNoteByParam(ctx, params, access.noteParam ?? "id");
+          // Resolve the note, NORMALIZING the vault's typed not-found to
+          // null: the by-id read THROWS `VaultNotFoundError` on a missing
+          // note, and letting that reach the error boundary turns missing
+          // into a 500 while denied stays 404 — a 500-vs-404 existence
+          // oracle. Only the typed not-found maps to null; auth, server,
+          // and network failures rethrow into the 500 boundary (a vault
+          // outage must never read as not_found).
+          let note: Note | null;
+          try {
+            note = access.resolve
+              ? await access.resolve(params, req)
+              : await resolveNoteByParam(ctx, params, access.noteParam ?? "id");
+          } catch (err) {
+            if (!isVaultNotFound(err)) throw err;
+            note = null;
+          }
           // Missing and denied are the SAME response — no existence oracle.
           if (note === null) return notFound();
           if (!(await authz.can(actor, note, access.action))) return notFound();
@@ -240,4 +256,25 @@ async function resolveNoteByParam(
   const id = params[param];
   if (!id) return null;
   return await ctx.vault.getNote(id);
+}
+
+/**
+ * The vault's typed "not found" (the by-id read 404s as a throw, not a
+ * null). Matched structurally as well as nominally: a bundled surface's
+ * dependency tree can carry its OWN surface-client copy while the host's
+ * `ctx.vault` raises the host copy's class — `instanceof` fails across
+ * copies, the `name` discriminant doesn't. Custom `resolve` hooks that
+ * read the vault get the same normalization via this guard.
+ */
+export function isVaultNotFound(err: unknown): boolean {
+  return (
+    err instanceof VaultNotFoundError ||
+    // Structural match for the bundled-surface case (the bundle carries its
+    // own surface-client class copy, so instanceof fails cross-copy). Two
+    // discriminants — name AND the class's literal status field — so an
+    // unrelated error that merely shares the name can't false-positive.
+    (err instanceof Error &&
+      err.name === "VaultNotFoundError" &&
+      (err as { status?: unknown }).status === 404)
+  );
 }

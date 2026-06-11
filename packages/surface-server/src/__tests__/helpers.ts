@@ -103,10 +103,18 @@ export class FakeVault {
     return [...this.notes.values()];
   }
 
+  /**
+   * FAITHFUL to the live client: vault 404s the by-id read of a missing
+   * note and surface-client raises the typed `VaultNotFoundError` — the
+   * fake must NOT soften that to null, or oracle regressions (missing →
+   * 500 while denied → 404) stay invisible to this suite.
+   */
   async getNote(id: string): Promise<Note | null> {
     this.getNoteCalls++;
     if (this.getNoteError) throw this.getNoteError;
-    return this.notes.get(id) ?? null;
+    const note = this.notes.get(id);
+    if (note === undefined) throw new VaultNotFoundError(`note ${id} not found`);
+    return note;
   }
 
   /**

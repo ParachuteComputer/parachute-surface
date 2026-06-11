@@ -157,6 +157,65 @@ describe("note routes (no existence oracle)", () => {
     expect(missing.status).toBe(404);
     expect(await denied.text()).toBe(await missing.text());
   });
+
+  test("anon and operator × {existing-denied, nonexistent} all share the not_found shape — the vault's typed 404-throw never reaches the 500 boundary", async () => {
+    const { router } = await makeWiring();
+    const anonDenied = await router.fetch(get(`${MOUNT}/api/doc/n-secret`));
+    // Pre-fix these were 500 {"error":"internal"}: the live vault THROWS
+    // VaultNotFoundError on a missing-note read and the error boundary
+    // mapped it to 500 while existing-but-denied stayed 404 — a
+    // 500-vs-404 existence oracle.
+    const anonMissing = await router.fetch(get(`${MOUNT}/api/doc/n-nope`));
+    expect(anonDenied.status).toBe(404);
+    expect(anonMissing.status).toBe(404);
+    expect(await anonMissing.clone().text()).toBe(await anonDenied.text());
+
+    const opMissing = await router.fetch(
+      get(`${MOUNT}/api/doc/n-nope`, { authorization: "Bearer valid-operator-jwt" }),
+    );
+    expect(opMissing.status).toBe(404);
+    expect(await opMissing.text()).toBe(await anonMissing.text());
+  });
+
+  test("a custom resolve raising the typed not-found is normalized to the same 404 — including a foreign surface-client copy's instance", async () => {
+    // A bundled surface can carry its OWN surface-client copy while the
+    // host's ctx.vault raises the host copy's class — `instanceof` fails
+    // across copies, so the router discriminates structurally: name AND the
+    // class's literal `status: 404` field (both present on any real copy).
+    const foreignCopyError = Object.assign(new Error("note n-x not found"), {
+      name: "VaultNotFoundError",
+      status: 404,
+    });
+    const { router } = await makeWiring({
+      routes: [
+        {
+          method: "GET",
+          path: "/api/r/:id",
+          access: {
+            kind: "note",
+            action: "read",
+            resolve: async () => {
+              throw foreignCopyError;
+            },
+          },
+          handler: () => Response.json({ ok: true }),
+        },
+      ],
+    });
+    const res = await router.fetch(get(`${MOUNT}/api/r/anything`));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
+  test("a genuine vault outage on the note read is still a 500 — not_found never masks it", async () => {
+    const { router, t } = await makeWiring();
+    t.vault.getNoteError = new Error("vault unreachable");
+    const res = await router.fetch(
+      get(`${MOUNT}/api/doc/n-secret`, { authorization: "Bearer valid-operator-jwt" }),
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal" });
+  });
 });
 
 describe("note routes with live grants", () => {
