@@ -204,8 +204,15 @@ describe("backend-ws socket wrapper", () => {
     await settle();
     const frame = frames[0] as Uint8Array;
     expect(frame).toBeInstanceOf(Uint8Array);
+    // PIN THE CONVERSION: a raw-Buffer passthrough would satisfy the
+    // instanceof check (Buffer extends Uint8Array) — require the plain
+    // copy the pump promises (exact bounds, not a slab view).
+    expect(Buffer.isBuffer(frame)).toBe(false);
+    expect(frame.constructor).toBe(Uint8Array);
     expect([...frame]).toEqual([7, 8, 9]);
     expect(frame.byteLength).toBe(3);
+    expect(frame.byteOffset).toBe(0);
+    expect(frame.buffer.byteLength).toBe(3);
   });
 
   test("a throwing handler is contained: 1011 close + recorded failure", async () => {

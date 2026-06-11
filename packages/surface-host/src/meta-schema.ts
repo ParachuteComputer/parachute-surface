@@ -43,6 +43,13 @@ export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
  *   "hub-users" — a valid hub session OR a hub-issued Bearer whose scopes
  *                 satisfy `scopes_required`. THE DEFAULT when absent.
  *   "operator"  — the first-admin session only.
+ *   "surface"   — the surface backend owns audience admission (capability
+ *                 links / its own sessions); the hub passes traffic through
+ *                 to the backend's deny-by-default gateway. REQUIRES a hub
+ *                 version that ships the `surface` audience tier: older
+ *                 hubs' manifest validation rejects unknown audience values
+ *                 and the lenient read DROPS the row — the mount 404s.
+ *                 Declare it only once the operator's hub has the tier.
  *
  * The legacy boolean `public` field is accepted as an alias for one release
  * window (`public: true` → `"public"`, `public: false` → the default) with a
@@ -50,7 +57,7 @@ export const DEFAULT_SCOPES_REQUIRED: readonly string[] = ["vault:*:read"];
  * they must agree — a meta.json saying `public: true` AND
  * `audience: "operator"` is a contradiction we refuse rather than guess.
  */
-export const UI_AUDIENCES = ["public", "hub-users", "operator"] as const;
+export const UI_AUDIENCES = ["public", "hub-users", "operator", "surface"] as const;
 export type UiAudience = (typeof UI_AUDIENCES)[number];
 
 /** Default audience when neither `audience` nor legacy `public` is declared. */
@@ -984,7 +991,7 @@ export function metaSchemaJson(): Record<string, unknown> {
         enum: [...UI_AUDIENCES],
         default: DEFAULT_AUDIENCE,
         description:
-          "Audience exposure, enforced at the hub proxy (surface-runtime design §12): 'public' (anyone), 'hub-users' (hub session or scoped Bearer — the default), 'operator' (first admin only).",
+          "Audience exposure, enforced at the hub proxy (surface-runtime design §12): 'public' (anyone), 'hub-users' (hub session or scoped Bearer — the default), 'operator' (first admin only), 'surface' (backend-owned admission — requires a hub shipping the surface audience tier).",
       },
       public: {
         type: "boolean",

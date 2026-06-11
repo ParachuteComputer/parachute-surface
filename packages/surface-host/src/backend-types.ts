@@ -66,10 +66,11 @@ export interface SurfaceSocketData {
   /** Client IP at upgrade time, or null when unattributable. */
   readonly clientIp: string | null;
   /**
-   * Unique id for this connection, stable for its lifetime. Stateful WS
-   * protocols (Hocuspocus, y-protocols) key per-connection state off it —
-   * and disconnect-driven cleanup dedupes by it (the recorded Hocuspocus
-   * double-`onDisconnect` bug makes idempotency-by-socketId load-bearing).
+   * Unique id for this connection, stable for its lifetime — the host-
+   * plane connection identity for logging and Map keys. Note: engine-
+   * class protocols may mint their OWN connection ids (Hocuspocus's
+   * ClientConnection does, and its disconnect hooks dedupe by THAT id);
+   * this one identifies the host connection wrapping them.
    */
   readonly socketId: string;
 }
