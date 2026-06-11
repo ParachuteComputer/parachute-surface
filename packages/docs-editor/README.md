@@ -68,7 +68,7 @@ auto-selects its single tarball. Don't paste the bare
 **latest** release, which is usually a surface-host release, not a
 docs-editor one. If a release ever carries several tarballs, disambiguate
 with the exact asset name:
-`https://github.com/ParachuteComputer/parachute-surface/releases/tag/docs-editor-v0.1.0#docs-editor-surface-0.1.0.tgz`.
+`ParachuteComputer/parachute-surface#docs-editor-surface-0.1.0.tgz` (the owner/repo shorthand with asset disambiguation), or the release asset's direct download URL.
 
 ## Editing flow
 

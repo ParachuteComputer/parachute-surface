@@ -111,7 +111,7 @@ jobs:
         # Root script typechecks all workspace packages (surface-host,
         # surface-client, surface-server, surface-render, notes-ui,
         # pebble-config, doc-schema incl. its no-DOM codec tsconfig).
-        run: bun run typecheck
+        run: bun run typecheck:all
       - name: tests
         # Root script runs every suite: surface-host, surface-client,
         # surface-server, pebble-config, doc-schema (bun test), plus notes-ui
