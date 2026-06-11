@@ -20,7 +20,7 @@ share links).
 ## Shape
 
 ```
-meta.json            audience: hub-users · server.capabilities: ["websocket"]
+meta.json            audience: surface · server.capabilities: ["websocket"]
                      server.entry: server/index.bundle.js (the SELF-CONTAINED build artifact —
                      installs copy dist/ + server/ + meta.json, never node_modules)
 server/index.ts      createBackend(ctx) — auth + grants + reconciler + collab + routes (source)
@@ -41,6 +41,34 @@ web/                 Vite + React + TipTap 3 (docSchemaExtensions + Collaboratio
   hub JWT; the audience is link-shaped (capability + personal links, no
   password accounts in v1).
 - **documentName = note id**, one Y.Doc per note, fragment `"default"`.
+
+## Install
+
+**Requires hub ≥ 0.7.1** — this surface declares `audience: "surface"`
+(backend-owned admission: the hub proxy passes visitors through and the
+backend's own link auth decides), which older hubs reject at manifest
+validation (the mount is silently dropped). Anonymous capability-link
+invitees only work on a hub that ships the tier.
+
+This package is `private: true` — it never publishes to npm. **The
+distribution is the GitHub release tarball** attached by this repo's
+release workflow on `docs-editor-v*` tags (layout: `package/` →
+`meta.json` + `dist/` + `server/index.bundle.js`, the self-contained
+install shape).
+
+To install: Surface admin → **Add surface** → paste the release-tag URL:
+
+```
+https://github.com/ParachuteComputer/parachute-surface/releases/tag/docs-editor-v0.1.0
+```
+
+(substitute the version you want). The host resolves THAT release and
+auto-selects its single tarball. Don't paste the bare
+`ParachuteComputer/parachute-surface` shorthand — it resolves the repo's
+**latest** release, which is usually a surface-host release, not a
+docs-editor one. If a release ever carries several tarballs, disambiguate
+with the exact asset name:
+`ParachuteComputer/parachute-surface#docs-editor-surface-0.1.0.tgz` (the owner/repo shorthand with asset disambiguation), or the release asset's direct download URL.
 
 ## Editing flow
 
@@ -99,18 +127,19 @@ The surface's vault credential must cover **two tags**:
   requirement is visible at install time). Revocation = deleting the
   grant note.
 
-## Known limitation (v1): share links need hub-identified visitors
+## Hub-version requirement: the `surface` audience tier
 
-This surface declares `audience: "hub-users"`, and the hub's audience
-gate admits only hub sessions / hub-issued Bearers — an anonymous
-invitee clicking a capability entry link is bounced to `/login` at the
-proxy, BEFORE the backend's own link auth can run. The hub is gaining a
-`surface` audience tier (backend-owned admission; in flight in a
-parallel hub PR); once the operator's hub ships it, flip meta.json to
-`audience: "surface"` and anonymous invite links work end to end.
-(surface-host already accepts the value — but declaring it against an
-older hub drops the mount: its manifest validation rejects unknown
-audiences.)
+meta.json declares `audience: "surface"` (hub ≥ 0.7.1): the hub proxy
+admits visitors without a hub session and the backend's own auth
+(capability/personal links, P7) is the gate — so anonymous invitees
+clicking a share link land in the doc end to end. The v1 limitation
+this replaced (`audience: "hub-users"` bounced anonymous invitees to
+`/login` at the proxy before link auth could run) is gone on a current
+hub. The flip is one-way for distribution: an OLDER hub's manifest
+validation rejects unknown audiences and drops the mount — hence the
+hub ≥ 0.7.1 floor in the Install section (the tier ships in the next
+stable train; anyone installing the release artifact will be
+post-train).
 
 ## Not built (v1)
 

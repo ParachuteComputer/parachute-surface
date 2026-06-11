@@ -187,6 +187,17 @@ Pins anon-sees-nothing, deny-by-default, leak conditions, path/tag locks,
 entry-redirect hygiene, and the cookie-mutation origin check — against YOUR
 routes. The kit runs the same suite against its own example wiring.
 
+### SECURITY.md template (spec §13)
+
+Every backed surface should ship a `SECURITY.md`. The kit packs a scaffold —
+[`SECURITY.template.md`](./SECURITY.template.md) (in the published tarball at
+the package root) — covering the one-rule statement, threat-model summary,
+credential posture, audience plane, working-scope statement, an actor table
+that cites your conformance-suite case names as evidence, a secrets table,
+residual risks, and the report channel. Copy it to your surface package root,
+fill the placeholders with your real answers. The docs-editor's
+[`SECURITY.md`](../docs-editor/SECURITY.md) is the filled reference.
+
 ## From `createBackend(ctx)` to a gated, projected backend
 
 The whole journey in one file. A surface package declares a `server` block in

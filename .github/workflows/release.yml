@@ -1,6 +1,8 @@
 # Release workflow — triggered by pushing a semver tag.
 #
-# This workflow publishes SIX packages on different tag namespaces:
+# This workflow publishes SIX packages to npm on different tag namespaces,
+# plus ONE GitHub-release tarball (docs-editor, which is private:true — its
+# distribution is the release asset, not npm):
 #
 #   - @openparachute/surface        ← tag prefix `v...`           (from packages/surface-host)
 #   - @openparachute/surface-client ← tag prefix `client-v...`    (from packages/surface-client)
@@ -8,8 +10,10 @@
 #   - @openparachute/notes-ui       ← tag prefix `notes-ui-v...`  (from packages/notes-ui)
 #   - @openparachute/doc-schema     ← tag prefix `doc-schema-v...` (from packages/doc-schema)
 #   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
+#   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (from packages/docs-editor;
+#                                     attaches docs-editor-surface-<v>.tgz to a GitHub Release)
 #
-# All packages have npm Trusted Publisher rules pointing at this workflow
+# All npm packages have npm Trusted Publisher rules pointing at this workflow
 # file. Jobs gate on the tag prefix so only one package publishes per tag
 # push. Independent release cadences.
 #
@@ -19,11 +23,13 @@
 #                                          (notes-ui-v0.1.4-rc.1)
 #                                          (doc-schema-v0.1.0-rc.1)
 #                                          (server-v0.1.0-rc.1)
+#                                          (docs-editor-v0.1.0-rc.1)
 #   - stable: v<X>.<Y>.<Z>                 (e.g. v0.2.0)
 #                                          (client-v0.1.0)
 #                                          (notes-ui-v0.1.4)
 #                                          (doc-schema-v0.1.0)
 #                                          (server-v0.1.0)
+#                                          (docs-editor-v0.1.0)
 #
 # Release flow:
 #   1. When ready to ship: bump version in the relevant package.json on main.
@@ -42,6 +48,9 @@
 #        git tag "$VERSION" && git push origin "$VERSION"
 #        # for surface-server
 #        VERSION="server-v$(bun -e "console.log(require('./packages/surface-server/package.json').version)")"
+#        git tag "$VERSION" && git push origin "$VERSION"
+#        # for docs-editor (GitHub release tarball, not npm)
+#        VERSION="docs-editor-v$(bun -e "console.log(require('./packages/docs-editor/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
 #   3. CI runs tests once (workspace-wide), then publishes the package matching
 #      the tag prefix.
@@ -76,6 +85,9 @@ on:
       # Surface-server release tags
       - 'server-v[0-9]+.[0-9]+.[0-9]+'
       - 'server-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Docs-editor release tags (GitHub release tarball, not npm)
+      - 'docs-editor-v[0-9]+.[0-9]+.[0-9]+'
+      - 'docs-editor-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   # Don't let two releases race on the same tag.
@@ -99,7 +111,7 @@ jobs:
         # Root script typechecks all workspace packages (surface-host,
         # surface-client, surface-server, surface-render, notes-ui,
         # pebble-config, doc-schema incl. its no-DOM codec tsconfig).
-        run: bun run typecheck
+        run: bun run typecheck:all
       - name: tests
         # Root script runs every suite: surface-host, surface-client,
         # surface-server, pebble-config, doc-schema (bun test), plus notes-ui
@@ -109,10 +121,12 @@ jobs:
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client-, render-, notes-ui-, doc-schema-, and server- tags.
-    # (The bare `v...` namespace is the catch-all: every NEW tag prefix MUST be
-    # excluded here, or its tag would fire this job too.)
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') }}
+    # App-only: skip on client-, render-, notes-ui-, doc-schema-, server-, and
+    # docs-editor- tags. (The bare `v...` namespace is the catch-all: every NEW
+    # tag prefix MUST be excluded here, or its tag would fire this job too.
+    # `docs-editor-` needs its own exclusion — it does NOT share the
+    # `doc-schema-` prefix.)
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -429,3 +443,114 @@ jobs:
           fi
           echo "publishing @openparachute/surface-server with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
+
+  release-docs-editor-tarball:
+    name: attach docs-editor installable tarball to a GitHub Release
+    needs: test
+    # docs-editor-only: gate on the `docs-editor-v...` tag prefix.
+    #
+    # docs-editor is private:true (never npm) — its DISTRIBUTION is this
+    # release asset. The tarball layout matches what surface-host's
+    # URL-source install flow expects (url-fetch.ts locatePackageRoot +
+    # admin-routes copyServerFiles): a single `package/` root holding
+    # meta.json, dist/ (the web SPA), and server/index.bundle.js (the
+    # SELF-CONTAINED server bundle — installs copy dist/ + the entry's
+    # first path segment + meta.json, never node_modules). Layout proven
+    # by WovenBoulder's release-surface.yml (the reference packaging flow
+    # for backed surfaces); this variant creates the GitHub Release for
+    # the pushed tag itself when none exists, then attaches the asset.
+    if: ${{ startsWith(github.ref_name, 'docs-editor-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      # gh release create + upload.
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - name: install deps
+        # Workspace install at root — docs-editor's deps resolve to the
+        # workspace copies (the monorepo precedent for private packages).
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Same tag-drift defense as the npm jobs; tag prefix is
+        # `docs-editor-v...`. meta.json's version is REWRITTEN from the tag
+        # at assemble time below, so package.json is the single thing to pin.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/docs-editor/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#docs-editor-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/docs-editor/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: build (web dist + self-contained server bundle)
+        # `bun run build` = `vite build && bun run build:server` — emits
+        # dist/ (the SPA) and server/index.bundle.js (the artifact
+        # meta.json's server.entry names; both are gitignored).
+        working-directory: packages/docs-editor
+        run: bun run build
+      - name: assemble package
+        # Exactly the installer's layout — meta.json + dist/ + the bundled
+        # entry, nothing else (no TS sources, no __tests__, no node_modules).
+        # meta.json's server.entry already names server/index.bundle.js (the
+        # repo meta points at the build artifact, unlike the WovenBoulder
+        # template's dev-entry rewrite) — only `version` is stamped from the
+        # tag. The jq filter PRESERVES server.capabilities (["websocket"]).
+        working-directory: packages/docs-editor
+        run: |
+          rm -rf .pack  # idempotent: a stale .pack would ship stale files on re-run
+          mkdir -p .pack/package/server
+          cp -R dist .pack/package/dist
+          cp server/index.bundle.js .pack/package/server/index.bundle.js
+          VERSION="${GITHUB_REF_NAME#docs-editor-v}"
+          jq --arg v "$VERSION" '.version = $v' meta.json > .pack/package/meta.json
+      - name: pack tarball
+        id: pack
+        working-directory: packages/docs-editor
+        run: |
+          VERSION="${GITHUB_REF_NAME#docs-editor-v}"
+          TARBALL="docs-editor-surface-${VERSION}.tgz"
+          tar -czf "$TARBALL" -C .pack package
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+      - name: validate tarball layout (the installer's expectations)
+        # Two layers: the tar listing carries every path the install flow
+        # requires, and the bundled entry actually loads as a standalone
+        # module exporting the P1 default-export factory (the same
+        # self-containment pin as the package's install-simulation test).
+        working-directory: packages/docs-editor
+        run: |
+          LISTING="$(tar -tzf "${{ steps.pack.outputs.tarball }}")"
+          for required in package/meta.json package/dist/index.html package/server/index.bundle.js; do
+            echo "$LISTING" | grep -qx "$required" || { echo "::error::tarball is missing $required"; exit 1; }
+          done
+          # meta.json must name the entry the tarball actually carries.
+          ENTRY=$(jq -r '.server.entry' .pack/package/meta.json)
+          if [ "$ENTRY" != "server/index.bundle.js" ]; then
+            echo "::error::meta.json server.entry is $ENTRY, expected server/index.bundle.js"
+            exit 1
+          fi
+          bun -e 'const m = await import(process.cwd() + "/.pack/package/server/index.bundle.js");
+                  if (typeof m.default !== "function") { console.error("no default-export factory"); process.exit(1); }
+                  console.log("server entry OK: default-export factory present");'
+          echo "tarball layout OK"
+      - name: create the GitHub Release if none exists, attach the tarball
+        # Tag-triggered (no `release: published` event in this repo), so the
+        # Release object may not exist yet — create it for the pushed tag,
+        # marked prerelease on rc tags. --clobber makes re-runs idempotent.
+        working-directory: packages/docs-editor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            PRERELEASE_FLAG=""
+            if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+              PRERELEASE_FLAG="--prerelease"
+            fi
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag $PRERELEASE_FLAG \
+              --title "docs-editor ${GITHUB_REF_NAME#docs-editor-v}" \
+              --notes "Installable tarball for the Docs surface (collaborative markdown editor). Install via Surface admin → Add surface → paste: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME — requires hub ≥ 0.7.1 (the \`surface\` audience tier). See packages/docs-editor/README.md."
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            "${{ steps.pack.outputs.tarball }}" --clobber

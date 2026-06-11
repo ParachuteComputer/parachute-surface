@@ -10,13 +10,7 @@
     "url": "https://github.com/ParachuteComputer/parachute-surface.git",
     "directory": "packages/docs-editor"
   },
-  "files": [
-    "dist",
-    "server",
-    "meta.json",
-    "README.md",
-    "LICENSE"
-  ],
+  "files": ["dist", "server", "meta.json", "README.md", "SECURITY.md", "LICENSE"],
   "scripts": {
     "build": "vite build && bun run build:server",
     "build:server": "bun build server/index.ts --target=bun --outfile=server/index.bundle.js",
