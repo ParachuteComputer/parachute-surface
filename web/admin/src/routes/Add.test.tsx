@@ -112,13 +112,31 @@ const INSPECT_NO_META = {
   server: null,
 };
 
+const GITHUB_DOWNLOAD_URL =
+  "https://github.com/Unforced-Dev/WovenBoulder/releases/download/v1.2.3/woven-boulder-surface-1.2.3.tgz";
+
+const INSPECT_GITHUB = {
+  ...INSPECT_WITH_META,
+  source_kind: "url",
+  github_release: {
+    owner: "Unforced-Dev",
+    repo: "WovenBoulder",
+    tag: "v1.2.3",
+    asset_name: "woven-boulder-surface-1.2.3.tgz",
+    download_url: GITHUB_DOWNLOAD_URL,
+  },
+};
+
 describe("validateSource", () => {
   test("npm kind rejects paths + urls, accepts specs", () => {
     expect(validateSource("npm", "@openparachute/notes-ui")).toBeNull();
     expect(validateSource("npm", "@openparachute/notes-ui@1.0.0")).toBeNull();
     expect(validateSource("npm", "/tmp/x")).toMatch(/Server path/);
-    expect(validateSource("npm", "https://x.com/a.tgz")).toMatch(/URL tarball/);
+    expect(validateSource("npm", "https://x.com/a.tgz")).toMatch(/URL \/ GitHub release/);
     expect(validateSource("npm", "Not A Spec!")).toMatch(/Not a valid npm/);
+  });
+  test("npm kind nudges a GitHub shorthand toward the URL kind", () => {
+    expect(validateSource("npm", "Unforced-Dev/WovenBoulder")).toMatch(/GitHub owner\/repo/);
   });
   test("path kind requires an absolute path", () => {
     expect(validateSource("path", "/abs/dir")).toBeNull();
@@ -129,6 +147,12 @@ describe("validateSource", () => {
     expect(validateSource("url", "http://127.0.0.1:9999/a.tgz")).toBeNull();
     expect(validateSource("url", "http://example.com/a.tgz")).toMatch(/loopback/);
     expect(validateSource("url", "ftp://example.com/a.tgz")).toMatch(/http\(s\)/);
+  });
+  test("url kind accepts the GitHub owner/repo shorthand (+ #asset)", () => {
+    expect(validateSource("url", "Unforced-Dev/WovenBoulder")).toBeNull();
+    expect(validateSource("url", "owner/repo#my-surface-1.2.3.tgz")).toBeNull();
+    expect(validateSource("url", "https://github.com/Unforced-Dev/WovenBoulder")).toBeNull();
+    expect(validateSource("url", "owner/repo/extra")).toMatch(/http\(s\)/);
   });
 });
 
@@ -188,6 +212,19 @@ describe("Add — inspect step", () => {
     expect(await screen.findByText(/ships no meta.json/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("my-surface")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("/surface/my-surface")).toBeInTheDocument();
+  });
+
+  test("a GitHub-resolved source shows the release (tag + asset) in the confirm step", async () => {
+    mockHostFetch({ inspect: INSPECT_GITHUB });
+    renderWithRouter();
+    await userEvent.click(screen.getByRole("radio", { name: /URL \/ GitHub release/ }));
+    await userEvent.type(screen.getByPlaceholderText(/owner\/repo/), "Unforced-Dev/WovenBoulder");
+    await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
+
+    expect(await screen.findByText(/Resolved GitHub release/)).toBeInTheDocument();
+    expect(screen.getByText("Unforced-Dev/WovenBoulder")).toBeInTheDocument();
+    expect(screen.getByText("v1.2.3")).toBeInTheDocument();
+    expect(screen.getByText("woven-boulder-surface-1.2.3.tgz")).toBeInTheDocument();
   });
 
   test("inspect error surfaces inline", async () => {
@@ -275,6 +312,27 @@ describe("Add — install step", () => {
       const body = addCall?.body as Record<string, unknown>;
       expect(body.name).toBe("bare");
       expect(body.path).toBe("/surface/bare");
+    });
+  });
+
+  test("a GitHub-resolved source installs the exact inspected asset URL", async () => {
+    const log: Captured[] = [];
+    mockHostFetch({
+      inspect: INSPECT_GITHUB,
+      add: { ok: true, ui: { name: "myui", path: "/surface/myui" } },
+      log,
+    });
+    renderWithRouter();
+    await userEvent.click(screen.getByRole("radio", { name: /URL \/ GitHub release/ }));
+    await userEvent.type(screen.getByPlaceholderText(/owner\/repo/), "Unforced-Dev/WovenBoulder");
+    await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
+    await screen.findByText(/Resolved GitHub release/);
+    await userEvent.click(screen.getByRole("button", { name: /Install surface/ }));
+    await waitFor(() => {
+      const addCall = log.find((c) => c.url.endsWith("/surface/add"));
+      // The install rides the resolved download_url, NOT the shorthand — the
+      // operator gets exactly the artifact the confirm step showed.
+      expect((addCall?.body as { source: string }).source).toBe(GITHUB_DOWNLOAD_URL);
     });
   });
 
