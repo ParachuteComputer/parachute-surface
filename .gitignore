@@ -6,6 +6,8 @@ out
 dist
 package
 *.tgz
+# generated backed-surface server bundles (bun run build:server)
+packages/*/server/index.bundle.js
 
 # code coverage
 coverage

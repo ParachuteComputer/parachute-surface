@@ -21,7 +21,9 @@ share links).
 
 ```
 meta.json            audience: hub-users · server.capabilities: ["websocket"]
-server/index.ts      createBackend(ctx) — auth + grants + reconciler + collab + routes
+                     server.entry: server/index.bundle.js (the SELF-CONTAINED build artifact —
+                     installs copy dist/ + server/ + meta.json, never node_modules)
+server/index.ts      createBackend(ctx) — auth + grants + reconciler + collab + routes (source)
 server/collab.ts     Hocuspocus engine ←pump← host WS handlers; ticket auth; readOnly enforcement
 server/codec.ts      markdown ⇄ Y.Doc through @openparachute/doc-schema (ONE codec, both faces)
 server/tickets.ts    single-use short-TTL WS tickets minted over the HTTP gateway
@@ -55,6 +57,18 @@ web/                 Vite + React + TipTap 3 (docSchemaExtensions + Collaboratio
 4. Edits converge via Yjs; the reconciler debounces canonical-markdown
    writebacks; agent/sync/Notes edits to the same note flow back in live
    over the vault's SSE watch — and win.
+
+## Development
+
+`bun run build` produces BOTH artifacts: the web bundle (`dist/`, via
+Vite) and the server bundle (`server/index.bundle.js`, via
+`bun build --target=bun`). **The host mounts the bundle named by
+meta.json, not the TS sources** — after changing anything under
+`server/`, re-run `bun run build` (or just `bun run build:server`)
+before reloading the surface, or the daemon keeps serving the stale
+backend. The bundle is gitignored (generated); the install-simulation
+test (`server/__tests__/install-simulation.test.ts`) pins that it loads
+and serves from a node_modules-free install dir.
 
 ## Tests
 
