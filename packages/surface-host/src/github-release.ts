@@ -103,7 +103,10 @@ function validateOwnerRepo(owner: string, repoRaw: string): { owner: string; rep
   const repo = repoRaw.endsWith(".git") ? repoRaw.slice(0, -4) : repoRaw;
   if (!OWNER_RE.test(owner)) return null;
   if (!REPO_RE.test(repo)) return null;
-  if (repo === "." || repo === "..") return null; // API-path traversal guard
+  // MANDATORY, not redundant: REPO_RE's charset deliberately admits dots, so
+  // "." / ".." pass the regex — this is the only thing keeping them out of
+  // the constructed API path. Do not remove in a cleanup.
+  if (repo === "." || repo === "..") return null;
   return { owner, repo };
 }
 
@@ -251,7 +254,7 @@ export async function resolveGithubRelease(
       );
     }
     throw new GithubResolveError(
-      `the GitHub API refused the request (HTTP ${res.status}) for ${repoLabel}`,
+      `the GitHub API refused the request (HTTP ${res.status}) for ${repoLabel} — if you have the release asset's direct URL, paste that instead`,
       "forbidden",
       { httpStatus: res.status },
     );

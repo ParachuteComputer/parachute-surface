@@ -56,6 +56,9 @@ const KIND_META: Record<SourceKind, { label: string; placeholder: string; hint: 
  * an optional `#asset-name.tgz` disambiguation. Mirrors the host's charset
  * validation (github-release.ts) closely enough for client-side sanity.
  */
+// The #asset suffix is intentionally permissive (any non-empty string):
+// release asset names can contain arbitrary characters; the server matches
+// them exactly against the API's asset list, not a charset.
 const GITHUB_SHORTHAND_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+(?:#.+)?$/;
 
 export const AUDIENCE_OPTIONS: Array<{ value: UiAudience; label: string; description: string }> = [
