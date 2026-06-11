@@ -273,6 +273,34 @@ describe("collab loop", () => {
     expect(missingDoc.denyReason).toBe(wrongDoc.denyReason as string);
   });
 
+  test("a note OUTSIDE the working tag refuses collab — same refusal as missing", async () => {
+    // The reconciler's watch is tag-scoped: an untagged note would
+    // collaborate fine until the first SSE snapshot treats it as REMOVED
+    // and silently drops its state without flushing. So out-of-scope
+    // notes must never reach the engine — refused at onAuthenticate,
+    // indistinguishable from not-found.
+    made = await makeBackend();
+    const m = made;
+    m.vault.noteFixture("doc-in", "# In scope"); // carries the working tag
+    m.vault.noteFixture("doc-out", "# Out of scope", { tags: ["journal"] });
+
+    // Positive control first: the SAME operator path reaches a tagged note.
+    const inScope = new CollabTestClient("doc-in", await operatorTicket(m));
+    inScope.connect(m.backend.websocket ?? {});
+    await waitUntil(() => inScope.authState === "authenticated", { label: "tagged note ok" });
+
+    const outOfScope = new CollabTestClient("doc-out", await operatorTicket(m));
+    outOfScope.connect(m.backend.websocket ?? {});
+    await waitUntil(() => outOfScope.authState === "denied", { label: "untagged note denied" });
+
+    const missing = new CollabTestClient("doc-ghost", await operatorTicket(m));
+    missing.connect(m.backend.websocket ?? {});
+    await waitUntil(() => missing.authState === "denied", { label: "missing note denied" });
+    expect(outOfScope.denyReason).toBe(missing.denyReason as string);
+
+    inScope.disconnect();
+  });
+
   test("tickets are single-use and expire; garbage is denied", async () => {
     made = await makeBackend();
     const m = made;

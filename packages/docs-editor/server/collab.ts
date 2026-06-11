@@ -60,6 +60,13 @@ export interface CollabDeps {
   authz: SurfaceAuthz;
   reconciler: VaultReconciler;
   tickets: TicketStore;
+  /**
+   * The surface's working tag. Collab is REFUSED for notes outside it:
+   * the reconciler's watch is tag-scoped, so a tracked-but-untagged note
+   * would collaborate fine until the first SSE snapshot — which treats
+   * it as REMOVED and silently drops its state without flushing.
+   */
+  workingTag: string;
 }
 
 /** What the backend factory mounts. */
@@ -80,7 +87,7 @@ interface CollabContext {
 }
 
 export function createCollab(deps: CollabDeps): Collab {
-  const { ctx, authz, reconciler, tickets } = deps;
+  const { ctx, authz, reconciler, tickets, workingTag } = deps;
 
   // socketId + documentName → present. The ONLY mutable disconnect
   // bookkeeping; keyed so the upstream double-onDisconnect dedupes.
@@ -99,8 +106,14 @@ export function createCollab(deps: CollabDeps): Collab {
         throw new Error("invalid ticket");
       }
       const note = await ctx.vault.getNote(data.documentName);
-      // Missing and denied are the SAME refusal — no existence oracle.
-      if (note === null || !(await authz.can(actor, note, "read"))) {
+      // Missing, OUT-OF-SCOPE (not carrying the working tag — see
+      // CollabDeps.workingTag for why that would lose edits), and denied
+      // are the SAME refusal — no existence oracle.
+      if (
+        note === null ||
+        !(Array.isArray(note.tags) && note.tags.includes(workingTag)) ||
+        !(await authz.can(actor, note, "read"))
+      ) {
         throw new Error("document access denied");
       }
       const writable = await authz.can(actor, note, "edit_content");

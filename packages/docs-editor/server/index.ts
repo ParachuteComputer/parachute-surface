@@ -92,7 +92,7 @@ export async function buildBackend(
   const tickets = new TicketStore(
     opts.ticketTtlMs !== undefined ? { ttlMs: opts.ticketTtlMs } : {},
   );
-  const collab = createCollab({ ctx, authz, reconciler, tickets });
+  const collab = createCollab({ ctx, authz, reconciler, tickets, workingTag });
 
   const router = createSurfaceRouter(ctx, auth, authz, {
     routes: buildRoutes({ ctx, auth, authz, tickets, collab, workingTag }),

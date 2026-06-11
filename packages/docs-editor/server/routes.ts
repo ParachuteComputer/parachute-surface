@@ -201,10 +201,13 @@ export function buildRoutes(deps: RoutesDeps): SurfaceRoute[] {
         const level: Level = body.level;
         const expiresAt =
           typeof body.expiresAt === "string" && body.expiresAt.length > 0 ? body.expiresAt : null;
-        // The share must point at a real doc in the working scope — refuse
-        // dangling grants instead of minting a link to nothing.
+        // The share must point at a real doc IN THE WORKING SCOPE — refuse
+        // dangling grants and out-of-scope notes alike (the reconciler's
+        // tag-scoped watch would silently drop an untagged note's edits on
+        // its first snapshot). Missing and untagged are the SAME 404 — no
+        // existence oracle.
         const note = await ctx.vault.getNote(body.noteId);
-        if (note === null) {
+        if (note === null || !(Array.isArray(note.tags) && note.tags.includes(workingTag))) {
           return Response.json({ error: "not_found" }, { status: 404 });
         }
 

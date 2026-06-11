@@ -180,6 +180,36 @@ describe("grant enforcement", () => {
     ).toBe(400);
   });
 
+  test("share minting refuses notes OUTSIDE the working tag — same 404 as missing", async () => {
+    // A grant on an out-of-scope note would invite collaborators into a
+    // doc whose edits the tag-scoped reconciler watch silently discards
+    // on its first snapshot. Untagged and missing are the SAME 404.
+    const m = await makeBackend();
+    made = m;
+    m.vault.noteFixture("doc-in", "# In scope"); // working tag (positive control)
+    m.vault.noteFixture("doc-out", "# Out of scope", { tags: ["journal"] });
+    const auth = { authorization: `Bearer ${OPERATOR_JWT}` };
+
+    const ok = await post(m.backend, "/api/shares", { noteId: "doc-in", level: "view" }, auth);
+    expect(ok.status).toBe(201);
+
+    const untagged = await post(
+      m.backend,
+      "/api/shares",
+      { noteId: "doc-out", level: "view" },
+      auth,
+    );
+    const missing = await post(
+      m.backend,
+      "/api/shares",
+      { noteId: "doc-ghost", level: "view" },
+      auth,
+    );
+    expect(untagged.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await untagged.text()).toBe(await missing.text());
+  });
+
   test("deny-by-default: undeclared API paths 404; wrong method 405", async () => {
     const m = await makeBackend();
     made = m;
