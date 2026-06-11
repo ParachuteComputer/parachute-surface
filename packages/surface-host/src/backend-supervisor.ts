@@ -37,7 +37,7 @@
  * (ESM caches by specifier).
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -81,6 +81,18 @@ export type BackendSupervisorOpts = {
    * Called once per mount with the mount's abort signal.
    */
   buildContext: (ui: RegisteredUi, signal: AbortSignal) => SurfaceHostContext;
+  /**
+   * Credential gate (#101). When supplied, evaluated at mount time: a
+   * non-null return (the operator-actionable reason) parks the record in
+   * `pending-credential` WITHOUT calling the factory — factories that
+   * await a vault token at startup (store/reconciler start) would block
+   * the add/boot path until a credential is delivered. The deferred mount
+   * runs via {@link BackendSupervisor.retryPendingCredentialMounts} when
+   * the credential lands (delivery endpoint, binding-config change) or on
+   * an operator reload. Absent → every mount proceeds immediately
+   * (today's behavior; unit tests / contexts without a credential store).
+   */
+  pendingCredentialReason?: (ui: RegisteredUi) => string | null;
   logger?: Pick<Console, "log" | "warn" | "error">;
   /** Test seam — dynamic import. Defaults to the real `import()`. */
   importFn?: (specifier: string) => Promise<unknown>;
@@ -141,6 +153,7 @@ export function mountSpecFor(ui: RegisteredUi): BackendMountSpec | null {
 export class BackendSupervisor {
   private readonly mounts = new Map<string, MountRecord>();
   private readonly buildContext: BackendSupervisorOpts["buildContext"];
+  private readonly pendingCredentialReason: BackendSupervisorOpts["pendingCredentialReason"];
   private readonly logger: Pick<Console, "log" | "warn" | "error">;
   private readonly importFn: (specifier: string) => Promise<unknown>;
   private readonly now: () => number;
@@ -151,6 +164,7 @@ export class BackendSupervisor {
 
   constructor(opts: BackendSupervisorOpts) {
     this.buildContext = opts.buildContext;
+    this.pendingCredentialReason = opts.pendingCredentialReason;
     this.logger = opts.logger ?? console;
     this.importFn = opts.importFn ?? ((specifier) => import(specifier));
     this.now = opts.now ?? Date.now;
@@ -255,6 +269,18 @@ export class BackendSupervisor {
       return;
     }
 
+    // Credential gate (#101) — AFTER the structural checks (a broken entry
+    // honestly reads backend-error, never pending) but BEFORE any module
+    // execution: a factory that awaits a vault token at startup must not
+    // run until the credential exists, or it blocks the add/boot path.
+    const pendingReason = this.pendingCredentialReason?.(ui) ?? null;
+    if (pendingReason !== null) {
+      rec.status = "pending-credential";
+      rec.reason = pendingReason;
+      this.logger.log(`[app] backend ${spec.name}: mount deferred — ${pendingReason}`);
+      return;
+    }
+
     let factory: SurfaceBackendFactory;
     try {
       // Fresh-module discipline for reload, belt and suspenders:
@@ -267,6 +293,17 @@ export class BackendSupervisor {
       try {
         if (typeof require !== "undefined" && require.cache) {
           delete require.cache[entryPath];
+          // Bun keys require.cache by REALPATH. When any segment of the
+          // uis dir is a symlink (macOS /tmp → /private/tmp; a symlinked
+          // $PARACHUTE_HOME), the literal entryPath misses the entry and a
+          // rapid same-mtime replace (#103's force-add) keeps serving the
+          // OLD module. Delete the realpath key too.
+          try {
+            delete require.cache[realpathSync(entryPath)];
+          } catch {
+            // entry vanished mid-mount — the existsSync gate above already
+            // covered the honest-missing case; the import below reports it
+          }
         }
       } catch {
         // no require.cache in this runtime — the query stamp covers it
@@ -339,6 +376,27 @@ export class BackendSupervisor {
     await this.mount(ui);
   }
 
+  /**
+   * Re-attempt the deferred factory mount for every record parked in
+   * `pending-credential` (#101). Called when a credential lands (the hub
+   * delivery endpoint) and after a `credential_connections` binding change;
+   * harmless any time — records whose gate still refuses stay pending
+   * untouched. Returns the names whose mount was retried (their status now
+   * reflects the real factory outcome).
+   */
+  async retryPendingCredentialMounts(uis: ReadonlyArray<RegisteredUi>): Promise<string[]> {
+    const retried: string[] = [];
+    for (const [name, rec] of [...this.mounts]) {
+      if (rec.status !== "pending-credential") continue;
+      const ui = uis.find((u) => u.meta.name === name);
+      if (!ui?.meta.server) continue; // removed/de-backed since — sync()'s job
+      if ((this.pendingCredentialReason?.(ui) ?? null) !== null) continue; // still gated
+      await this.mount(ui);
+      retried.push(name);
+    }
+    return retried;
+  }
+
   /** Unmount everything (daemon shutdown). */
   async stop(): Promise<void> {
     for (const name of [...this.mounts.keys()]) {
@@ -361,6 +419,13 @@ export class BackendSupervisor {
         503,
         "backend_disabled",
         "this surface's backend is quarantined after repeated failures — reload it from the surface admin",
+      );
+    }
+    if (rec.status === "pending-credential") {
+      return jsonError(
+        503,
+        "credential_pending",
+        "this surface's backend is waiting for a vault credential — approve a credential connection in the hub admin",
       );
     }
     if (!rec.backend) {

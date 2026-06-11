@@ -321,6 +321,73 @@ describe("containment (§11 — NON-OPTIONAL)", () => {
   });
 });
 
+describe("pending-credential gate (#101)", () => {
+  test("gated mount defers the factory: pending-credential, reason set, 503 credential_pending", async () => {
+    const ui = makeSurface(
+      "gated",
+      // A factory that would FAIL the test if it ran while gated.
+      `globalThis.__gatedRan = (globalThis.__gatedRan ?? 0) + 1;
+       export default () => ({ fetch: () => new Response("ok") });`,
+    );
+    let reason: string | null = 'no vault credential provisioned for surface "gated"';
+    const { supervisor } = makeSupervisor({
+      pendingCredentialReason: () => reason,
+    });
+    const g = globalThis as Record<string, unknown>;
+    g.__gatedRan = 0;
+    await supervisor.mount(ui);
+    expect(supervisor.statusFor(ui)).toBe("pending-credential");
+    expect(supervisor.reasonFor("gated")).toContain("no vault credential");
+    // Entry module never imported, factory never ran.
+    expect(g.__gatedRan).toBe(0);
+    const res = await supervisor.handleRequest(ui, new Request("http://x/api"));
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { error: string }).error).toBe("credential_pending");
+
+    // Retry while still gated → stays pending, factory still not run.
+    expect(await supervisor.retryPendingCredentialMounts([ui])).toEqual([]);
+    expect(supervisor.statusFor(ui)).toBe("pending-credential");
+    expect(g.__gatedRan).toBe(0);
+
+    // Gate clears (credential landed) → retry mounts for real.
+    reason = null;
+    expect(await supervisor.retryPendingCredentialMounts([ui])).toEqual(["gated"]);
+    expect(supervisor.statusFor(ui)).toBe("active");
+    expect(g.__gatedRan).toBe(1);
+    expect(await (await supervisor.handleRequest(ui, new Request("http://x/api"))).text()).toBe(
+      "ok",
+    );
+    g.__gatedRan = undefined;
+  });
+
+  test("operator reload also exits pending once the gate clears", async () => {
+    const ui = makeSurface("reloadable", OK_BACKEND);
+    let reason: string | null = "waiting";
+    const { supervisor } = makeSupervisor({ pendingCredentialReason: () => reason });
+    await supervisor.mount(ui);
+    expect(supervisor.statusFor(ui)).toBe("pending-credential");
+    reason = null;
+    await supervisor.reload(ui);
+    expect(supervisor.statusFor(ui)).toBe("active");
+  });
+
+  test("no gate supplied → mounts exactly as before", async () => {
+    const ui = makeSurface("ungated", OK_BACKEND);
+    const { supervisor } = makeSupervisor();
+    await supervisor.mount(ui);
+    expect(supervisor.statusFor(ui)).toBe("active");
+  });
+
+  test("structural errors win over the gate (broken entry reads backend-error, not pending)", async () => {
+    const ui = makeSurface("brokenfirst", OK_BACKEND);
+    rmSync(path.join(ui.uiDir, "server", "index.js"));
+    const { supervisor } = makeSupervisor({ pendingCredentialReason: () => "waiting" });
+    await supervisor.mount(ui);
+    expect(supervisor.statusFor(ui)).toBe("backend-error");
+    expect(supervisor.reasonFor("brokenfirst")).toContain("not found");
+  });
+});
+
 describe("shutdown contract", () => {
   test("unmount aborts ctx.shutdownSignal BEFORE awaiting shutdown()", async () => {
     const order: string[] = [];

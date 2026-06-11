@@ -20,7 +20,7 @@ import { BackendSupervisor } from "./backend-supervisor.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { startCredentialRenewal } from "./credential-renewal.ts";
-import { createCredentialTokenProvider } from "./credential-store.ts";
+import { createCredentialTokenProvider, createPendingCredentialGate } from "./credential-store.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
 import { createHostContextBuilder } from "./host-context.ts";
@@ -220,9 +220,11 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   // with the full host context (P2): ScopedVaultClient + SurfaceStateStore
   // + hub-stamped trust readers. The vault token provider reads the
   // HOST-custodied credential store fresh per request (P3) — deliveries +
-  // renewals take effect without a remount; until a credential connection
-  // is provisioned, vault calls fail with a clear operator-actionable
-  // error while the backend still mounts and serves credential-free routes.
+  // renewals take effect without a remount. A surface that declares
+  // scopes_required with NO stored credential yet parks in
+  // "pending-credential" (#101) — the factory runs when the credential
+  // lands (delivery endpoint / binding change / reload) instead of
+  // blocking the add/boot path awaiting a token that can't exist yet.
   const backends = new BackendSupervisor({
     buildContext: createHostContextBuilder({
       config,
@@ -232,6 +234,10 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
           ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
           getConfig: () => state.config,
         }),
+    }),
+    pendingCredentialReason: createPendingCredentialGate({
+      ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+      getConfig: () => state.config,
     }),
     logger,
   });

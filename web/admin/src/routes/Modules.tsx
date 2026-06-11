@@ -55,6 +55,12 @@ function statusChip(u: UiSummary): { label: string; tone: string; title?: string
       return { label: "static", tone: "inactive" };
     case "active":
       return { label: "active", tone: "active" };
+    case "pending-credential":
+      return {
+        label: "awaiting credential",
+        tone: "pending",
+        ...(u.statusReason ? { title: u.statusReason } : {}),
+      };
     case "failing":
       return {
         label: "failing",

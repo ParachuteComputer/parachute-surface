@@ -282,9 +282,10 @@ async function handleList(req: Request, opts: AdminHandlerOpts): Promise<Respons
 /**
  * REAL per-surface status (P5 — replaces the hardcoded `"active"`):
  * static surfaces report `"static-only"`; backed surfaces report the
- * supervisor's lifecycle state (`active | failing | backend-error |
- * backend-disabled`). Without a supervisor in scope (runOnce, unit tests),
- * a declared-but-unmounted backend honestly reads `"backend-error"`.
+ * supervisor's lifecycle state (`active | pending-credential | failing |
+ * backend-error | backend-disabled`). Without a supervisor in scope
+ * (runOnce, unit tests), a declared-but-unmounted backend honestly reads
+ * `"backend-error"`.
  */
 function statusFor(
   u: RegisteredUi,
@@ -547,7 +548,26 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
     // Missing token/jti/expires_at on a provisioned/renewed op.
     return bad((e as Error).message);
   }
-  return Response.json({ ok: true, op: body.op, connection_id: body.connection_id });
+
+  // #101 — a landed credential is the mount trigger for surfaces parked in
+  // "pending-credential" (their factory was deferred at add/boot because no
+  // credential was stored). Run the deferred mounts now; still-gated
+  // records (different vault, ambiguous binding) stay pending untouched.
+  let mounted: string[] = [];
+  if (body.op !== "removed" && opts.state.backends) {
+    mounted = await opts.state.backends.retryPendingCredentialMounts(opts.state.registeredUis);
+    if (mounted.length > 0) {
+      opts.logger?.log(
+        `[app-admin] credential ${body.connection_id} unblocked deferred backend mount(s): ${mounted.join(", ")}`,
+      );
+    }
+  }
+  return Response.json({
+    ok: true,
+    op: body.op,
+    connection_id: body.connection_id,
+    ...(mounted.length > 0 ? { mounted } : {}),
+  });
 }
 
 // --- POST /surface/add -------------------------------------------------------
@@ -949,7 +969,10 @@ export async function addUiInternal(
     const uisDir = opts.uisDir ?? resolveUisDir();
     const targetDir = path.join(uisDir, parsedMeta.name);
 
-    if (existsSync(targetDir) && !body.force) {
+    // Captured BEFORE the rmSync below — a force-add over an installed
+    // surface must REMOUNT its backend (#103), not just replace the files.
+    const replacedExisting = existsSync(targetDir);
+    if (replacedExisting && !body.force) {
       return {
         response: Response.json(
           {
@@ -1086,9 +1109,23 @@ export async function addUiInternal(
       reason: s.reason,
     }));
 
-    // Backed surfaces (P5): mount the new backend / remount a force-replaced
-    // one. sync() reconciles, so unrelated mounted backends are untouched.
-    await opts.state.backends?.sync(opts.state.registeredUis);
+    const added = opts.state.registeredUis.find((u) => u.meta.name === parsedMeta.name);
+
+    // Backed surfaces (P5): mount the new backend. A force-replace of an
+    // installed backed surface goes through the SAME generation-bumped
+    // remount the reload route uses (#103) — sync() leaves an
+    // unchanged-spec mount alone, which would keep the OLD in-process
+    // module serving the replaced surface: status "active", files new,
+    // code stale, until an explicit reload. sync() still reconciles the
+    // non-replace cases (fresh mounts, a force-replace that DROPPED the
+    // server block) and never churns unrelated mounted backends.
+    if (opts.state.backends) {
+      if (replacedExisting && added?.meta.server) {
+        await opts.state.backends.reload(added);
+      } else {
+        await opts.state.backends.sync(opts.state.registeredUis);
+      }
+    }
 
     // Refresh services.json so hub picks up the new uis-map entry.
     if (!opts.skipSelfRegisterRefresh) {
@@ -1104,8 +1141,6 @@ export async function addUiInternal(
         opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
       }
     }
-
-    const added = opts.state.registeredUis.find((u) => u.meta.name === parsedMeta.name);
 
     // Phase 2.1 — auto-provision required_schema. Best-effort; failures
     // surface as a `provision_schema` warning slot on the response but
@@ -1752,6 +1787,11 @@ async function handlePatchConfig(req: Request, opts: AdminHandlerOpts): Promise<
   }
   opts.state.config.credential_connections = next;
 
+  // #101 — a binding change can make a previously-unresolvable credential
+  // resolve (the "ambiguous"/"missing" pending cases); run any deferred
+  // mounts the new map unblocks.
+  await opts.state.backends?.retryPendingCredentialMounts(opts.state.registeredUis);
+
   return Response.json({ ok: true, credential_connections: next });
 }
 
@@ -1822,10 +1862,16 @@ function buildUisExtraField(
     // Map the rich SurfaceStatus onto hub's UiSubUnitStatus vocabulary
     // (active|pending|inactive|failing — services-manifest.ts validation
     // REJECTS unknown values, dropping the whole row): a serving surface
-    // (static-only or healthy backend) is "active"; any backend trouble is
-    // "failing". The rich status lives on /surface/list (`serializeUi`).
+    // (static-only or healthy backend) is "active"; a credential-deferred
+    // mount (#101) is "pending"; any backend trouble is "failing". The
+    // rich status lives on /surface/list (`serializeUi`).
     const rich = statusFor(u, backends);
-    const hubStatus = rich === "static-only" || rich === "active" ? "active" : "failing";
+    const hubStatus =
+      rich === "static-only" || rich === "active"
+        ? "active"
+        : rich === "pending-credential"
+          ? "pending"
+          : "failing";
     out[u.meta.name] = {
       displayName: u.meta.displayName,
       tagline: u.meta.tagline,

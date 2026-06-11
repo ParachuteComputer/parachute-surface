@@ -265,6 +265,36 @@ export function resolveCredentialForSurface(
 }
 
 /**
+ * The supervisor's `pendingCredentialReason` gate (#101 — P3↔P5 seam).
+ * A backed surface that DECLARES vault access (`scopes_required`
+ * non-empty) but has no resolvable stored credential must not have its
+ * factory called — factories that await a vault token at startup (the
+ * docs editor's store/reconciler start) would block the add/boot path
+ * until the credential is delivered. Returns the operator-actionable
+ * reason to defer, or null to mount now.
+ *
+ * Backwards compat: surfaces with `scopes_required: []` (no credential
+ * required) and surfaces whose credential resolves (even expired /
+ * needs-operator — the tokenProvider surfaces those per-call) mount
+ * exactly as before.
+ */
+export function createPendingCredentialGate(deps: {
+  /** Override the credentials dir (tests). */
+  dir?: string;
+  /** Live config read — the binding map can change without a remount. */
+  getConfig: () => Pick<AppConfig, "credential_connections">;
+}): (ui: RegisteredUi) => string | null {
+  return (ui) => {
+    if (!ui.meta.server || ui.meta.scopes_required.length === 0) return null;
+    const resolution = resolveCredentialForSurface(ui, {
+      ...(deps.dir !== undefined ? { dir: deps.dir } : {}),
+      config: deps.getConfig(),
+    });
+    return resolution.ok ? null : resolution.reason;
+  };
+}
+
+/**
  * The host-side tokenProvider for a surface's ScopedVaultClient (P2↔P3
  * seam). Reads the store FRESH per call (deliveries + renewals take effect
  * without a remount); throws operator-actionable errors on every
