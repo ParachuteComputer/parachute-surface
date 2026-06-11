@@ -146,6 +146,8 @@ export class GrantStore {
   /** Single-flight degraded-mode revalidation. */
   #revalidating: Promise<void> | null = null;
   #revalidatedAt = 0;
+  /** Change listeners — see {@link onChange}. */
+  readonly #changeHandlers = new Set<() => void>();
 
   constructor(ctx: SurfaceHostContext, opts: GrantStoreOptions = {}) {
     this.#ctx = ctx;
@@ -157,6 +159,37 @@ export class GrantStore {
   /** The ACL tag this store watches (`surface-acl/<surface>`). */
   get tag(): string {
     return this.#tag;
+  }
+
+  /**
+   * Subscribe to grant-set changes — fired after ANY cache mutation:
+   * stream snapshot/upsert/remove, degraded-revalidation rebuild, and the
+   * local optimistic createGrant/revokeGrant writes. Coarse by design (no
+   * payload): consumers holding long-lived authorization (live collab
+   * connections) re-evaluate against `grantsForSubjects`/`can()` — the
+   * enforcement read stays the single source of truth. Returns the
+   * detach function. Handler errors are contained (warn, never thrown
+   * into the stream).
+   */
+  onChange(handler: () => void): () => void {
+    this.#changeHandlers.add(handler);
+    return () => {
+      this.#changeHandlers.delete(handler);
+    };
+  }
+
+  // NOTE: a revalidation triggered FROM a consumer's change-handler work
+  // (e.g. a session sweep calling can() in degraded mode) fires this again —
+  // consumers must tolerate re-entrant notifications (the docs-editor sweep
+  // handles it with a single-flight + re-queue bit).
+  #notifyChange(): void {
+    for (const handler of this.#changeHandlers) {
+      try {
+        handler();
+      } catch (err) {
+        this.#ctx.log.warn(`GrantStore: onChange handler threw (${(err as Error).message ?? err})`);
+      }
+    }
   }
 
   /** Is the live stream currently feeding the cache? */
@@ -181,6 +214,7 @@ export class GrantStore {
             this.#cache = new Map();
             for (const note of notes) this.#absorb(note);
             this.#live = true;
+            this.#notifyChange();
             if (!settled) {
               settled = true;
               resolveFirst();
@@ -188,9 +222,11 @@ export class GrantStore {
           },
           onUpsert: (note) => {
             this.#absorb(note);
+            this.#notifyChange();
           },
           onRemove: (id) => {
             this.#cache.delete(id);
+            this.#notifyChange();
           },
           onError: (err) => {
             this.#ctx.log.warn(`GrantStore stream error: ${(err as Error).message ?? err}`);
@@ -274,6 +310,7 @@ export class GrantStore {
         this.#cache = new Map();
         for (const note of notes) this.#absorb(note);
         this.#revalidatedAt = this.#now().getTime();
+        this.#notifyChange();
       } finally {
         this.#revalidating = null;
       }
@@ -315,6 +352,7 @@ export class GrantStore {
       expiresAt: args.expiresAt ?? null,
     };
     this.#cache.set(note.id, grant);
+    this.#notifyChange();
     return grant;
   }
 
@@ -325,6 +363,7 @@ export class GrantStore {
    */
   async revokeGrant(id: string): Promise<void> {
     this.#cache.delete(id);
+    this.#notifyChange();
     await this.#ctx.vault.deleteNote(id);
   }
 

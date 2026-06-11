@@ -65,16 +65,33 @@ export interface SurfaceSocketData {
   readonly layer: TrustLayer;
   /** Client IP at upgrade time, or null when unattributable. */
   readonly clientIp: string | null;
+  /**
+   * Unique id for this connection, stable for its lifetime — the host-
+   * plane connection identity for logging and Map keys. Note: engine-
+   * class protocols may mint their OWN connection ids (Hocuspocus's
+   * ClientConnection does, and its disconnect hooks dedupe by THAT id);
+   * this one identifies the host connection wrapping them.
+   */
+  readonly socketId: string;
 }
 
 /**
  * The socket handed to a backend's websocket handlers — a narrow,
  * runtime-agnostic view over Bun's `ServerWebSocket` so backends don't
  * couple to Bun types.
+ *
+ * IDENTITY CONTRACT: the host hands the SAME SurfaceSocket instance to
+ * every open/message/close event of one connection, so backends may use
+ * the object itself (or `data.socketId`) as a Map key for per-connection
+ * state. `readyState` mirrors the underlying socket live (WebSocket
+ * readyState vocabulary: 0 connecting, 1 open, 2 closing, 3 closed) —
+ * engine classes that probe liveness before sending (Hocuspocus's
+ * `WebSocketLike`) read it directly.
  */
 export interface SurfaceSocket {
   send(data: string | Uint8Array): void;
   close(code?: number, reason?: string): void;
+  readonly readyState: number;
   readonly data: SurfaceSocketData;
 }
 

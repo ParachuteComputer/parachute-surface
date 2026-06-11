@@ -177,9 +177,15 @@ describe("audience field (§12 transport)", () => {
     );
   });
 
+  test('audience: "surface" parses (backend-owned admission — needs the hub tier)', () => {
+    const meta = parseMeta({ ...BASE, audience: "surface" });
+    expect(meta.audience).toBe("surface");
+    expect(meta.public).toBe(false); // never the legacy-public alias
+  });
+
   test("metaSchemaJson exposes audience + server", () => {
     const props = metaSchemaJson().properties as Record<string, Record<string, unknown>>;
-    expect(props.audience?.enum).toEqual(["public", "hub-users", "operator"]);
+    expect(props.audience?.enum).toEqual(["public", "hub-users", "operator", "surface"]);
     expect((props.server?.properties as Record<string, unknown>) ?? {}).toHaveProperty("entry");
   });
 });

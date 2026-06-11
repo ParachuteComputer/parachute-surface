@@ -325,3 +325,71 @@ describe("GrantStore mutation (operator surface-domain ops)", () => {
     expect(store.listGrants()).toEqual([]);
   });
 });
+
+describe("GrantStore onChange (the long-lived-authorization seam)", () => {
+  test("fires on snapshot, upsert, remove, and local create/revoke; detach stops it", async () => {
+    const t = makeTestCtx();
+    const store = new GrantStore(t.ctx);
+    let fired = 0;
+    const detach = store.onChange(() => {
+      fired++;
+    });
+
+    const started = store.start();
+    const sub = t.vault.subscriptions[0];
+    if (!sub) throw new Error("no subscription registered");
+    deliverSnapshot(sub, []);
+    await started;
+    expect(fired).toBe(1); // snapshot
+
+    sub.handlers.onUpsert(
+      grantNote({
+        id: "g1",
+        subjectType: "public",
+        resourceType: "note",
+        resource: "n1",
+        level: "view",
+      }),
+    );
+    expect(fired).toBe(2); // upsert
+
+    sub.handlers.onRemove("g1");
+    expect(fired).toBe(3); // remove
+
+    const grant = await store.createGrant({
+      subject: "public",
+      resourceType: "note",
+      resource: "n1",
+      level: "view",
+    });
+    expect(fired).toBe(4); // optimistic create
+
+    await store.revokeGrant(grant.id);
+    expect(fired).toBe(5); // optimistic revoke
+
+    detach();
+    sub.handlers.onRemove("whatever");
+    expect(fired).toBe(5); // detached — no further notifications
+    store.stop();
+  });
+
+  test("a throwing handler is contained (warned, siblings still notified)", async () => {
+    const t = makeTestCtx();
+    const store = new GrantStore(t.ctx);
+    let siblingFired = 0;
+    store.onChange(() => {
+      throw new Error("handler boom");
+    });
+    store.onChange(() => {
+      siblingFired++;
+    });
+    await store.createGrant({
+      subject: "public",
+      resourceType: "note",
+      resource: "n1",
+      level: "view",
+    });
+    expect(siblingFired).toBe(1);
+    expect(t.logs.warns.some((w) => w.includes("handler boom"))).toBe(true);
+  });
+});

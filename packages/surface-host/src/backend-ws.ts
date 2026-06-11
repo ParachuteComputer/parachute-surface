@@ -38,20 +38,48 @@ export interface SurfaceWsData {
   clientIp: string | null;
 }
 
-/** Wrap Bun's socket in the narrow runtime-agnostic SurfaceSocket view. */
-function toSurfaceSocket(ws: ServerWebSocket<SurfaceWsData>): SurfaceSocket {
-  return {
-    send: (data) => {
-      ws.send(data);
-    },
-    close: (code?: number, reason?: string) => {
-      ws.close(code, reason);
-    },
-    data: {
-      surface: ws.data.surface,
-      layer: ws.data.layer,
-      clientIp: ws.data.clientIp,
-    },
+/**
+ * Wrap Bun's socket in the narrow runtime-agnostic SurfaceSocket view.
+ *
+ * MEMOIZED per CONNECTION: one connection sees ONE wrapper instance across
+ * its open/message/close events — the identity contract stateful protocols
+ * (Hocuspocus, y-protocols) need to key per-connection state. The wrapper
+ * also mints the connection's `socketId` (first wrap) and exposes a live
+ * `readyState` view.
+ *
+ * The memoization KEY is `ws.data` — NOT the ServerWebSocket object.
+ * Nothing contracts that Bun hands a fresh socket object per logical
+ * connection, but the host's own dispatch DOES mint a fresh `data`
+ * payload on every `server.upgrade` (http-server.ts `handleWsRoute`) —
+ * that is the per-connection invariant we own. A recycled runtime socket
+ * carrying fresh upgrade data therefore gets a fresh wrapper + socketId
+ * instead of inheriting the previous connection's identity.
+ */
+function createSocketWrapper(): (ws: ServerWebSocket<SurfaceWsData>) => SurfaceSocket {
+  const wrappers = new WeakMap<SurfaceWsData, SurfaceSocket>();
+  let counter = 0;
+  return (ws) => {
+    const existing = wrappers.get(ws.data);
+    if (existing) return existing;
+    const wrapper: SurfaceSocket = {
+      send: (data) => {
+        ws.send(data);
+      },
+      close: (code?: number, reason?: string) => {
+        ws.close(code, reason);
+      },
+      get readyState() {
+        return ws.readyState;
+      },
+      data: {
+        surface: ws.data.surface,
+        layer: ws.data.layer,
+        clientIp: ws.data.clientIp,
+        socketId: `ws-${++counter}-${Date.now().toString(36)}`,
+      },
+    };
+    wrappers.set(ws.data, wrapper);
+    return wrapper;
   };
 }
 
@@ -68,6 +96,7 @@ export type SurfaceWsDeps = {
  */
 export function createSurfaceWsHandlers(deps: SurfaceWsDeps): WebSocketHandler<SurfaceWsData> {
   const logger = deps.logger ?? console;
+  const toSurfaceSocket = createSocketWrapper();
 
   function handlersFor(surface: string): BackendWebSocketHandlers | undefined {
     return deps.getSupervisor()?.websocketHandlersFor(surface);

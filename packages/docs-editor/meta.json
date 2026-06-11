@@ -1,0 +1,27 @@
+{
+  "name": "docs",
+  "displayName": "Docs",
+  "tagline": "Collaborative markdown docs — live multi-cursor editing over vault notes, shared by capability link.",
+  "path": "/surface/docs",
+  "version": "0.1.0",
+  "audience": "hub-users",
+  "vault_default": "default",
+  "scopes_required": ["vault:default:write"],
+  "server": {
+    "entry": "server/index.bundle.js",
+    "format": "markdown",
+    "capabilities": ["websocket"]
+  },
+  "required_schema": {
+    "tags": [
+      {
+        "name": "doc",
+        "description": "Working tag for the Docs surface — notes carrying it appear in the doc list and are editable collaboratively."
+      },
+      {
+        "name": "surface-acl/docs",
+        "description": "Grant rows for the Docs surface (vault-native GrantStore) — one note per share/grant; revocation = delete the note. The surface credential needs read/write on this tag as well as on the working tag."
+      }
+    ]
+  }
+}
