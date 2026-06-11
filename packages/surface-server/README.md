@@ -9,6 +9,11 @@ Part of the [Surface Runtime design](../../design/2026-06-10-surface-runtime-pri
 (R4: P7–P9; R6 foundation: P10). Companion pattern:
 `parachute-patterns/patterns/backed-surface.md`.
 
+> **Bun required.** This package publishes raw TypeScript source (no compiled
+> `dist/`) — it runs where backed surfaces run: inside the Bun-native surface
+> host. Node consumers would need their own TS loader; that path is untested
+> and unsupported.
+
 ## What's in the box
 
 ### P7 — `createSurfaceAuth`
