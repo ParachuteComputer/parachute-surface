@@ -602,7 +602,7 @@ describe("POST /surface/<name>/register-oauth", () => {
   test("re-registers + stamps .oauth-client.json with the hub's status", async () => {
     seedUi("alpha", "/surface/alpha");
     const state = makeState();
-    let dcrBody: { redirect_uris?: string[] } | null = null;
+    let dcrBody: { redirect_uris?: string[] } | undefined;
     const fetchFn = async (_url: string | URL | Request, _init?: RequestInit) => {
       if (_init?.body) dcrBody = JSON.parse(String(_init.body)) as { redirect_uris?: string[] };
       return new Response(
@@ -628,7 +628,11 @@ describe("POST /surface/<name>/register-oauth", () => {
     // The registration must include surface-client's hosted-mode RUNTIME
     // callback (`/oauth/callback`) — the live docs editor sign-in broke
     // because only the legacy hyphen form was registered (surface#118).
-    expect(dcrBody?.redirect_uris).toContain("http://127.0.0.1:1939/surface/alpha/oauth/callback");
+    const sentUris = (dcrBody as { redirect_uris?: string[] } | undefined)?.redirect_uris ?? [];
+    expect(sentUris).toContain("http://127.0.0.1:1939/surface/alpha/oauth/callback");
+    // Root + legacy hyphen forms stay registered (pre-R2 clients).
+    expect(sentUris).toContain("http://127.0.0.1:1939/surface/alpha/");
+    expect(sentUris).toContain("http://127.0.0.1:1939/surface/alpha/oauth-callback");
     const body = (await res.json()) as AnyJson;
     expect(body.ok).toBe(true);
     expect(body.oauth_client.client_id).toBe("client_alpha_retry");

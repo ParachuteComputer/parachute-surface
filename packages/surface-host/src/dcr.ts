@@ -10,7 +10,7 @@
  *
  *   {
  *     "client_name": "<displayName>",
- *     "redirect_uris": ["<hub_url><meta.path>/", "<hub_url><meta.path>/oauth-callback"],
+ *     "redirect_uris": ["<hub_url><meta.path>/", "<hub_url><meta.path>/oauth/callback", "<hub_url><meta.path>/oauth-callback"],
  *     "scope": "<scopes_required joined by space>",
  *     "token_endpoint_auth_method": "none",
  *     "grant_types": ["authorization_code"],

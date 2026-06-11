@@ -1204,12 +1204,12 @@ export async function addUiInternal(
           hubUrl,
           clientName: oauthClientNameFor(parsedMeta.displayName, instanceName, parsedMeta.name),
           redirectUris: [
-        `${redirectBase}/`,
-        // surface-client's hosted-mode runtime callback (the canonical form).
-        `${redirectBase}/oauth/callback`,
-        // Legacy hyphenated form kept for pre-R2 clients.
-        `${redirectBase}/oauth-callback`,
-      ],
+            `${redirectBase}/`,
+            // surface-client's hosted-mode runtime callback (the canonical form).
+            `${redirectBase}/oauth/callback`,
+            // Legacy hyphenated form kept for pre-R2 clients.
+            `${redirectBase}/oauth-callback`,
+          ],
           scopes: parsedMeta.scopes_required,
           operatorToken,
           fetchFn: opts.fetchFn,
