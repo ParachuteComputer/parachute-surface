@@ -104,6 +104,9 @@ describe("Modules", () => {
     renderWithRouter();
     expect(await screen.findByText("Notes")).toBeInTheDocument();
     expect(screen.getByText("/surface/notes")).toBeInTheDocument();
+    // Pre-#105 rows (no packageName) fall back to the instance name in the
+    // Package slot — backwards-compatible against older daemons.
+    expect(screen.getAllByText("notes")).toHaveLength(2);
     // Card layout (post-redesign) doesn't render the raw OAuth client_id as
     // visible text — it surfaces as a `title` attribute on the OAuth-status
     // badge so operators see "OAuth connected" / "OAuth pending" at a glance.
@@ -111,6 +114,34 @@ describe("Modules", () => {
     const oauthBadge = screen.getByTitle("client_notes");
     expect(oauthBadge).toBeInTheDocument();
     expect(screen.getByText("PWA")).toBeInTheDocument();
+  });
+
+  test("a renamed instance (#105) shows the instance name with the package as secondary", async () => {
+    withFetchMock(
+      buildFetch({
+        uis: [
+          {
+            name: "boulder-docs",
+            dirName: "boulder-docs",
+            packageName: "docs",
+            displayName: "Docs",
+            path: "/surface/boulder-docs",
+            version: "1.2.3",
+            scopes_required: [],
+            pwa: false,
+            public: false,
+            status: "active",
+          },
+        ],
+      }),
+    );
+    renderWithRouter();
+    expect(await screen.findByText("Docs")).toBeInTheDocument();
+    expect(screen.getByText("/surface/boulder-docs")).toBeInTheDocument();
+    // Instance identity is primary; the package name/version is secondary.
+    expect(screen.getByText("boulder-docs")).toBeInTheDocument();
+    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.getByText("1.2.3")).toBeInTheDocument();
   });
 
   test("error surfaces an alert", async () => {

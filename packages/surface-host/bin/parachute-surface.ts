@@ -32,6 +32,9 @@ Usage:
                                              <source>: local path OR npm spec (@scope/pkg[@version])
                                              flags: --name <n> --path </surface/n> [--display <d>]
                                                     [--scopes <s1,s2>] [--force]
+                                                    [--instance-name <n>] [--mount-path </surface/n>]
+                                                    (install a 2nd instance of one package under
+                                                     its own name + mount — instance-per-vault)
   parachute-surface remove <name>                Unregister a UI + revoke its OAuth client
   parachute-surface list                         List installed UIs with status + OAuth state
   parachute-surface reload <name>                Refresh a UI's bundle (no daemon restart)
@@ -167,6 +170,9 @@ async function runAdd(rest: string[]): Promise<void> {
   const body: Record<string, unknown> = { source: positionals[0] };
   if (typeof flags.name === "string") body.name = flags.name;
   if (typeof flags.path === "string") body.path = flags.path;
+  // #105 — instance identity overrides (multiple instances of one package).
+  if (typeof flags["instance-name"] === "string") body.instance_name = flags["instance-name"];
+  if (typeof flags["mount-path"] === "string") body.mount_path = flags["mount-path"];
   if (typeof flags.display === "string") body.displayName = flags.display;
   if (typeof flags.tagline === "string") body.tagline = flags.tagline;
   if (typeof flags.scopes === "string") {
@@ -417,7 +423,10 @@ async function runDev(rest: string[]): Promise<void> {
   }
 
   // Default sub-verb: enable dev mode.
-  const { status, body } = await callDaemon("POST", `/surface/${encodeURIComponent(name)}/dev/enable`);
+  const { status, body } = await callDaemon(
+    "POST",
+    `/surface/${encodeURIComponent(name)}/dev/enable`,
+  );
   if (status >= 200 && status < 300) {
     const r = body as {
       watcher?:

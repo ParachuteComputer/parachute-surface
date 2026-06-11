@@ -1103,6 +1103,26 @@ input[type="password"] {
   gap: 1rem;
 }
 
+/* #105 — collapsed advanced section (instance name/mount override). Follows
+   the token-setup__advanced details/summary shape; block display keeps the
+   native disclosure marker (grid on <details> would swallow it). */
+.add__advanced {
+  display: block;
+}
+.add__advanced summary {
+  cursor: pointer;
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: var(--fg);
+}
+.add__advanced[open] summary {
+  margin-bottom: 0.75rem;
+}
+.add__advanced .form-field {
+  margin-bottom: 0.75rem;
+}
+
 /* Left-aligned action rows inside info cards. */
 .form-actions--start {
   justify-content: flex-start;

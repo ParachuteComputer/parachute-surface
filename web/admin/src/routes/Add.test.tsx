@@ -336,6 +336,60 @@ describe("Add — install step", () => {
     });
   });
 
+  test("instance overrides (#105) ride the add body when typed", async () => {
+    const log: Captured[] = [];
+    mockHostFetch({
+      inspect: INSPECT_WITH_META,
+      add: {
+        ok: true,
+        ui: { name: "boulder-myui", path: "/surface/boulder-myui", packageName: "myui" },
+      },
+      log,
+    });
+    renderWithRouter();
+    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
+    await screen.findByText(/From the bundle's meta.json/);
+
+    // The advanced section is collapsed by default but its fields exist.
+    expect(screen.getByText(/Install as a separate instance/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Instance name"), "boulder-myui");
+    await userEvent.type(screen.getByLabelText("Instance mount path"), "/surface/boulder-myui");
+    await userEvent.click(screen.getByRole("button", { name: /Install surface/ }));
+
+    await screen.findByText(/Added boulder-myui/);
+    const addCall = log.find((c) => c.url.endsWith("/surface/add"));
+    const body = addCall?.body as Record<string, unknown>;
+    expect(body.instance_name).toBe("boulder-myui");
+    expect(body.mount_path).toBe("/surface/boulder-myui");
+    // The package-meta identity fields are still NOT retyped back.
+    expect(body.name).toBeUndefined();
+    expect(body.path).toBeUndefined();
+  });
+
+  test("blank instance overrides (or values equal to the package's own) send neither field", async () => {
+    const log: Captured[] = [];
+    mockHostFetch({
+      inspect: INSPECT_WITH_META,
+      add: { ok: true, ui: { name: "myui", path: "/surface/myui" } },
+      log,
+    });
+    renderWithRouter();
+    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
+    await screen.findByText(/From the bundle's meta.json/);
+    // Typing the package's OWN name is the same as leaving it blank.
+    await userEvent.type(screen.getByLabelText("Instance name"), "myui");
+    await userEvent.click(screen.getByRole("button", { name: /Install surface/ }));
+    await waitFor(() => {
+      const addCall = log.find((c) => c.url.endsWith("/surface/add"));
+      const body = addCall?.body as Record<string, unknown>;
+      expect(body).toBeDefined();
+      expect(body.instance_name).toBeUndefined();
+      expect(body.mount_path).toBeUndefined();
+    });
+  });
+
   test("install error surfaces inline (409 name_exists)", async () => {
     mockHostFetch({
       inspect: INSPECT_WITH_META,

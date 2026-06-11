@@ -423,9 +423,17 @@ export function Modules() {
 
                 <dl className="ui-card__meta">
                   <div>
-                    <dt>Package</dt>
+                    <dt>Instance</dt>
                     <dd>
                       <code>{u.name}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Package</dt>
+                    <dd>
+                      {/* The package identity is secondary to the instance name
+                          (#105) — older daemons omit packageName; fall back. */}
+                      <code>{u.packageName ?? u.name}</code>
                     </dd>
                   </div>
                   <div>

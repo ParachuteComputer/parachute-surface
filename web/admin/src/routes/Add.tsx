@@ -129,6 +129,11 @@ export function Add() {
   const [pathField, setPathField] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [force, setForce] = useState(false);
+  // #105 — instance identity overrides (advanced, collapsed by default).
+  // Lets one package install several times: distinct instance name + mount,
+  // each instance bound to its own vault + credential after install.
+  const [instanceName, setInstanceName] = useState("");
+  const [mountPath, setMountPath] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,6 +162,10 @@ export function Add() {
       setName(res.meta?.name ?? "");
       setPathField(res.meta?.path ?? "");
       setDisplayName(res.meta?.displayName ?? "");
+      // Instance overrides start blank — empty means "use the package's own
+      // name + mount" (the default, single-instance install).
+      setInstanceName("");
+      setMountPath("");
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -189,6 +198,16 @@ export function Add() {
       }
       if (needsManualIdentity || displayName !== (inspected.meta?.displayName ?? "")) {
         if (displayName) body.displayName = displayName;
+      }
+      // Instance overrides (#105) ride only when the operator typed one that
+      // actually differs from the package's own identity.
+      const instance = instanceName.trim();
+      if (instance && instance !== (inspected.meta?.name ?? "")) {
+        body.instance_name = instance;
+      }
+      const mount = mountPath.trim();
+      if (mount && mount !== (inspected.meta?.path ?? "")) {
+        body.mount_path = mount;
       }
       if (force) body.force = true;
       const res = await addUi(body);
@@ -505,6 +524,43 @@ export function Add() {
               surface's detail page.
             </p>
           </fieldset>
+
+          <details className="form-section add__advanced">
+            <summary className="form-section__title">Install as a separate instance</summary>
+            <p className="form-section__sub">
+              One package can be installed several times — give this install its own instance name
+              and mount path (e.g. <code>boulder-docs</code> at <code>/surface/boulder-docs</code>{" "}
+              next to an existing <code>docs</code>). Each instance keeps its own configuration and
+              its own vault credential — link it to a different vault from the instance's detail
+              page after install. Leave blank to use the package's own name and mount.
+            </p>
+            <label className="form-field">
+              <span className="form-field__label">Instance name</span>
+              <input
+                type="text"
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
+                placeholder={inspected.meta?.name ?? "my-instance"}
+                pattern="^[a-z][a-z0-9-]*$"
+                aria-label="Instance name"
+              />
+              <small>Lowercase, hyphenated — same rules as a surface name.</small>
+            </label>
+            <label className="form-field">
+              <span className="form-field__label">Instance mount path</span>
+              <input
+                type="text"
+                value={mountPath}
+                onChange={(e) => setMountPath(e.target.value)}
+                placeholder={inspected.meta?.path ?? "/surface/my-instance"}
+                pattern="^/surface/[a-z0-9-]+$"
+                aria-label="Instance mount path"
+              />
+              <small>
+                Always under <code>/surface/</code>; must not collide with another surface's mount.
+              </small>
+            </label>
+          </details>
 
           <label className="form-checkbox">
             <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
