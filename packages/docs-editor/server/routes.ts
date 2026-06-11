@@ -21,7 +21,7 @@
 import type { SurfaceHostContext } from "@openparachute/surface";
 import type { Note } from "@openparachute/surface-client";
 import type { Level, SurfaceAuth, SurfaceAuthz, SurfaceRoute } from "@openparachute/surface-server";
-import { isLevel } from "@openparachute/surface-server";
+import { isLevel, isVaultNotFound } from "@openparachute/surface-server";
 import type { Collab } from "./collab.ts";
 import type { TicketStore } from "./tickets.ts";
 
@@ -56,6 +56,33 @@ function badRequest(message: string): Response {
 
 export function buildRoutes(deps: RoutesDeps): SurfaceRoute[] {
   const { ctx, auth, authz, tickets, collab, workingTag } = deps;
+
+  /** Literal working-tag membership — the reconciler's watch scope. */
+  const inWorkingScope = (note: Note): boolean =>
+    Array.isArray(note.tags) && note.tags.includes(workingTag);
+
+  /**
+   * Resolve a note-kind target FROM THE WORKING SCOPE. The docs editor
+   * never serves a note outside its working tag — for ANY actor,
+   * operator included: the tag-scoped reconciler doesn't track untagged
+   * notes, so a doc served from one would accept collab edits and
+   * silently drop them on the watch's next snapshot (the edit-loss class
+   * the share mint refuses for the same reason). Missing, untagged, and
+   * (downstream, via `can`) denied all produce the SAME not_found — no
+   * existence oracle. Only the vault's typed not-found maps to null;
+   * outages propagate to the gateway's 500 boundary.
+   */
+  const resolveWorkingNote = async (id: string | undefined): Promise<Note | null> => {
+    if (id === undefined || id.length === 0) return null;
+    let note: Note | null;
+    try {
+      note = await ctx.vault.getNote(id);
+    } catch (err) {
+      if (isVaultNotFound(err)) return null;
+      throw err;
+    }
+    return note !== null && inWorkingScope(note) ? note : null;
+  };
 
   return [
     // -- session probe ----------------------------------------------------
@@ -141,7 +168,17 @@ export function buildRoutes(deps: RoutesDeps): SurfaceRoute[] {
     {
       method: "GET",
       path: "/api/doc/:id",
-      access: { kind: "note", action: "read" },
+      // Working-scope resolution, NOT the kit default: an untagged note
+      // must read as not_found even for the operator — `can()` passes
+      // operators unconditionally, but the reconciler would silently drop
+      // their collab edits on a note it doesn't track (see
+      // resolveWorkingNote). Every note-kind route this surface declares
+      // resolves through the same scope gate.
+      access: {
+        kind: "note",
+        action: "read",
+        resolve: (params) => resolveWorkingNote(params.id),
+      },
       handler: async (_req, { actor, note }) => {
         const n = note as Note;
         const editable = actor.kind === "operator" || (await authz.can(actor, n, "edit_content"));
@@ -206,8 +243,8 @@ export function buildRoutes(deps: RoutesDeps): SurfaceRoute[] {
         // tag-scoped watch would silently drop an untagged note's edits on
         // its first snapshot). Missing and untagged are the SAME 404 — no
         // existence oracle.
-        const note = await ctx.vault.getNote(body.noteId);
-        if (note === null || !(Array.isArray(note.tags) && note.tags.includes(workingTag))) {
+        const note = await resolveWorkingNote(body.noteId);
+        if (note === null) {
           return Response.json({ error: "not_found" }, { status: 404 });
         }
 

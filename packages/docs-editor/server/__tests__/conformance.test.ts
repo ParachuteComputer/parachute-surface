@@ -12,12 +12,16 @@ import { MOUNT, type MadeBackend, OPERATOR_JWT, ORIGIN, makeBackend, post } from
 
 const SECRET_A = "granted-doc-marker-alpha";
 const SECRET_B = "ungranted-doc-marker-bravo";
+const SECRET_C = "untagged-note-marker-charlie";
 
 // The kit's cases are generated synchronously up front — build the backend
 // and its fixtures at module load (woven-boulder's pattern).
 const made: MadeBackend = await makeBackend();
 made.vault.noteFixture("doc-a", `# Granted\n\n${SECRET_A}`);
 made.vault.noteFixture("doc-b", `# Ungranted\n\n${SECRET_B}`);
+// Outside the working tag: must be indistinguishable from missing on every
+// note-kind read (the tag-scoped reconciler would silently drop its edits).
+made.vault.noteFixture("note-out", `# Journal\n\n${SECRET_C}`, { tags: ["journal"] });
 
 async function mintCap(level: string, noteId: string): Promise<string> {
   const res = await post(
@@ -51,6 +55,10 @@ describe("kit gateway conformance", () => {
       { path: "/api/docs", mustNotContain: [SECRET_A, SECRET_B] },
       { path: "/api/doc/doc-a", mustNotContain: [SECRET_A] },
       { path: "/api/doc/doc-b", mustNotContain: [SECRET_B] },
+      { path: "/api/doc/note-out", mustNotContain: [SECRET_C] },
+      // Nonexistent id: anon must get a REFUSAL (401/403/404), never a 500
+      // — the missing-note existence oracle the kit normalizes away.
+      { path: "/api/doc/doc-ghost" },
       { method: "POST", path: "/api/collab/ticket" },
       { method: "POST", path: "/api/docs", body: { title: "x" } },
       { path: "/api/shares" },
@@ -68,6 +76,8 @@ describe("kit gateway conformance", () => {
         allowed: [{ path: "/api/doc/doc-a" }, { path: "/api/docs" }],
         denied: [
           { path: "/api/doc/doc-b", mustNotContain: [SECRET_B] },
+          { path: "/api/doc/note-out", mustNotContain: [SECRET_C] },
+          { path: "/api/doc/doc-ghost" },
           { path: "/api/shares", mustNotContain: [SECRET_A, SECRET_B] },
           { method: "POST", path: "/api/docs", body: { title: "esc" } },
           {

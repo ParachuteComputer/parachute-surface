@@ -210,6 +210,42 @@ describe("grant enforcement", () => {
     expect(await untagged.text()).toBe(await missing.text());
   });
 
+  test("doc read refuses notes OUTSIDE the working tag — same 404 as missing, even for the operator", async () => {
+    // The live-smoke finding: an operator opening a pre-existing non-doc
+    // note got 200 + editable: true — but the tag-scoped reconciler does
+    // not track untagged notes, so collab edits on it would be silently
+    // dropped. Untagged must be byte-identical to missing on EVERY
+    // note-kind read path, operator included (`can()` passes operators
+    // unconditionally, so the scope gate must sit in resolution).
+    const m = await makeBackend();
+    made = m;
+    m.vault.noteFixture("doc-in", "# In scope"); // working tag (positive control)
+    m.vault.noteFixture("note-out", "# Journal entry", { tags: ["journal"] });
+    const auth = { authorization: `Bearer ${OPERATOR_JWT}` };
+
+    const tagged = await get(m.backend, "/api/doc/doc-in", auth);
+    expect(tagged.status).toBe(200); // positive control: in-scope still serves
+
+    const untagged = await get(m.backend, "/api/doc/note-out", auth);
+    const missing = await get(m.backend, "/api/doc/doc-ghost", auth);
+    expect(untagged.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await untagged.text()).toBe(await missing.text());
+  });
+
+  test("a vault outage on the doc read is a 500 — never masked as not_found", async () => {
+    const m = await makeBackend();
+    made = m;
+    m.vault.noteFixture("doc-a", "# A");
+    m.vault.getNoteError = new Error("vault unreachable");
+    const res = await get(m.backend, "/api/doc/doc-a", {
+      authorization: `Bearer ${OPERATOR_JWT}`,
+    });
+    m.vault.getNoteError = null;
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal" });
+  });
+
   test("deny-by-default: undeclared API paths 404; wrong method 405", async () => {
     const m = await makeBackend();
     made = m;
