@@ -53,7 +53,12 @@ import {
 type ClientConnection = ReturnType<Hocuspocus["handleConnection"]>;
 import type { SurfaceHostContext } from "@openparachute/surface";
 import type { BackendWebSocketHandlers, SurfaceSocket } from "@openparachute/surface";
-import type { Actor, SurfaceAuthz, VaultReconciler } from "@openparachute/surface-server";
+import {
+  type Actor,
+  type SurfaceAuthz,
+  type VaultReconciler,
+  isVaultNotFound,
+} from "@openparachute/surface-server";
 import type { TicketStore } from "./tickets.ts";
 
 export interface CollabDeps {
@@ -115,7 +120,17 @@ export function createCollab(deps: CollabDeps): Collab {
         // Unknown, expired, and reused tickets all look alike.
         throw new Error("invalid ticket");
       }
-      const note = await ctx.vault.getNote(data.documentName);
+      // Explicit not-found handling: Hocuspocus's outer catch would also
+      // collapse a VaultNotFoundError throw to "permission-denied" (verified
+      // against the 4.1.1 dist), but relying on that couples our no-oracle
+      // property to an upstream error path — convert it ourselves.
+      let note: Awaited<ReturnType<typeof ctx.vault.getNote>>;
+      try {
+        note = await ctx.vault.getNote(data.documentName);
+      } catch (err) {
+        if (isVaultNotFound(err)) throw new Error("document access denied");
+        throw err;
+      }
       // Missing, OUT-OF-SCOPE (not carrying the working tag — see
       // CollabDeps.workingTag for why that would lose edits), and denied
       // are the SAME refusal — no existence oracle.

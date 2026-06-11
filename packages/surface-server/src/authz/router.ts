@@ -66,7 +66,9 @@ export type RouteAccess =
       action: Action;
       /** Which `:param` carries the note id/path. Default `"id"`. */
       noteParam?: string;
-      /** Custom resolution (overrides `noteParam`). Null → 404. */
+      /** Custom resolution (overrides `noteParam`). Null → 404. May also
+       *  throw the vault's typed not-found — the router normalizes it to
+       *  the same 404 as null (missing ≡ denied; see isVaultNotFound). */
       resolve?: (params: Record<string, string>, req: Request) => Promise<Note | null>;
     };
 
@@ -266,6 +268,13 @@ async function resolveNoteByParam(
  */
 export function isVaultNotFound(err: unknown): boolean {
   return (
-    err instanceof VaultNotFoundError || (err instanceof Error && err.name === "VaultNotFoundError")
+    err instanceof VaultNotFoundError ||
+    // Structural match for the bundled-surface case (the bundle carries its
+    // own surface-client class copy, so instanceof fails cross-copy). Two
+    // discriminants — name AND the class's literal status field — so an
+    // unrelated error that merely shares the name can't false-positive.
+    (err instanceof Error &&
+      err.name === "VaultNotFoundError" &&
+      (err as { status?: unknown }).status === 404)
   );
 }

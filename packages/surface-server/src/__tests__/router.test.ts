@@ -180,9 +180,11 @@ describe("note routes (no existence oracle)", () => {
   test("a custom resolve raising the typed not-found is normalized to the same 404 — including a foreign surface-client copy's instance", async () => {
     // A bundled surface can carry its OWN surface-client copy while the
     // host's ctx.vault raises the host copy's class — `instanceof` fails
-    // across copies, so the router discriminates on the `name` too.
+    // across copies, so the router discriminates structurally: name AND the
+    // class's literal `status: 404` field (both present on any real copy).
     const foreignCopyError = Object.assign(new Error("note n-x not found"), {
       name: "VaultNotFoundError",
+      status: 404,
     });
     const { router } = await makeWiring({
       routes: [
