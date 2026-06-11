@@ -4,7 +4,7 @@
   "tagline": "Collaborative markdown docs — live multi-cursor editing over vault notes, shared by capability link.",
   "path": "/surface/docs",
   "version": "0.1.0",
-  "audience": "hub-users",
+  "audience": "surface",
   "vault_default": "default",
   "scopes_required": ["vault:default:write"],
   "server": {

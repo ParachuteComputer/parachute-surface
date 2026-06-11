@@ -114,6 +114,22 @@ git push origin "$VERSION"
 
 The other publish jobs skip on these tags. surface-server publishes raw TypeScript sources (no build step). It depends on `@openparachute/surface` and `@openparachute/surface-client` by concrete semver — if shipping those too, publish them FIRST.
 
+### Releasing the docs-editor tarball (GitHub Release, not npm)
+
+`@openparachute/docs-editor` is `private: true` and never publishes to npm — its distribution is an installable tarball attached to a GitHub Release (the WovenBoulder packaging pattern; see `release-docs-editor-tarball` in release.yml).
+
+```sh
+git fetch && git checkout main && git pull --ff-only
+# Bump packages/docs-editor/package.json, commit, push.
+VERSION="docs-editor-v$(bun -e "console.log(require('./packages/docs-editor/package.json').version)")"
+git tag "$VERSION"
+git push origin "$VERSION"
+```
+
+CI builds the web dist + the self-contained server bundle, packs `docs-editor-surface-<version>.tgz` in the installer layout (`package/` → `meta.json` + `dist/` + `server/index.bundle.js`), validates the layout (tar listing + the bundle's default-export factory loads standalone), creates the GitHub Release for the tag if none exists (rc tags are marked prerelease), and attaches the asset. No npm Trusted Publisher rule involved.
+
+Operators install by pasting the release-tag URL into Surface admin → Add surface — see [packages/docs-editor/README.md](./packages/docs-editor/README.md#install) (requires hub ≥ 0.7.1).
+
 ### Promoting an rc chain to stable
 
 Open a PR (or commit directly) that drops the `-rc.N` suffix from the relevant `package.json`, merge, then tag with the bare version (`vX.Y.Z` for app, `client-vX.Y.Z` for app-client, `notes-ui-vX.Y.Z` for notes-ui). CI publishes with `dist-tag=latest`.
