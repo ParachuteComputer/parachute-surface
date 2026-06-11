@@ -292,12 +292,12 @@ for (const c of gatewayConformanceCases({
 
 ## Notes for surface authors
 
-- **Entry + MCP paths live under `/api/`.** The design names
-  `${mount}/a/<token>` and `${mount}/mcp`, but the host forwards exactly
+- **Entry + MCP paths live under `/api/`.** The host forwards exactly
   `${mount}/api/*` and `${mount}/ws` to a backend — so the kit emits
-  `${mount}/api/a/<token>` and serves `${mount}/api/mcp` (both short forms
-  are also accepted/declared, and become live if the host ever forwards
-  them).
+  `${mount}/api/a/<token>` and serves `${mount}/api/mcp`. `/api/mcp` is the
+  CANONICAL (and only) MCP route (#104 — the spec was amended to name it;
+  the bare `${mount}/mcp` route was dropped as dead code). The short entry
+  form `${mount}/a/<token>` is still accepted when *parsing* entry URLs.
 - **Credential scope:** the surface's working-tag credential must include
   `surface-acl/<surface>` so the GrantStore can read/write grant notes —
   declare it in the surface's `required_schema` / tag scope at install time.

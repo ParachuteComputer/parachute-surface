@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { Note } from "@openparachute/surface-client";
+import { type Note, VaultNotFoundError } from "@openparachute/surface-client";
 import * as Y from "yjs";
 import {
   RECONCILER_ORIGIN,
@@ -96,10 +96,14 @@ describe("load", () => {
     expect(t.vault.updateCalls.length).toBe(0);
   });
 
-  test("throws for a note the vault doesn't have", async () => {
+  test("throws the FRIENDLY error for a note the vault doesn't have (typed not-found normalized, #109)", async () => {
     const t = makeTestCtx();
     const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks });
-    await expect(rec.load("missing")).rejects.toThrow(/not found/);
+    // The vault client THROWS a typed not-found (never resolves null) —
+    // the machine normalizes it so the guidance branch is reachable.
+    await expect(rec.load("missing")).rejects.toThrow(
+      /create the note in the vault before loading its doc/,
+    );
   });
 
   test("double-load returns the same doc; a different provided doc throws", async () => {
@@ -512,6 +516,101 @@ describe("persistence over ctx.store (the SurfaceStateStore substrate)", () => {
     // Nothing got registered: no doc state persisted, no vault fetch fired.
     expect(t.store.get("ydoc/n1")).toBeNull();
     expect(t.vault.updateCalls.length).toBe(0);
+  });
+});
+
+describe("typed not-found normalization (#109)", () => {
+  // The live vault client THROWS `VaultNotFoundError` for a deleted note —
+  // it never resolves null. These tests pin that a thrown typed not-found
+  // during reconciler ops lands in the deleted-note branches (note-removed,
+  // tracking dropped) instead of crashing the machine or retrying forever
+  // against a gone note. Deletion normally arrives via SSE removal; these
+  // are the fetch paths racing it.
+
+  test("external check racing a deletion → note-removed, tracking dropped, no crash", async () => {
+    const t = makeTestCtx();
+    const note = t.vault.noteFixture("n1", "base");
+    const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks, debounceMs: 60_000 });
+    const events = collectEvents(rec);
+    const sub = await startLive(rec, t, [note]);
+    await rec.load("n1");
+
+    // The note is gone by the time the stream hint triggers our fetch —
+    // the fake (faithful to the live client) THROWS the typed not-found.
+    t.vault.notes.delete("n1");
+    sub.handlers.onUpsert({ ...note, updatedAt: "v-phantom" });
+
+    await until(() => events.length === 1);
+    expect(events[0]).toEqual({ type: "note-removed", noteId: "n1" });
+    expect(t.store.get("ydoc/n1")).toBeNull();
+    expect(t.logs.warns.some((w) => w.includes("external check"))).toBe(false); // not the failure path
+  });
+
+  test("degraded revalidation against a deleted note → note-removed, never writes, never retries", async () => {
+    const t = makeTestCtx();
+    const note = t.vault.noteFixture("n1", "base");
+    const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks, debounceMs: 5 });
+    const events = collectEvents(rec);
+    const sub = await startLive(rec, t, [note]);
+    const doc = await rec.load("n1");
+
+    sub.handlers.onStatus?.("reconnecting"); // degraded: revalidate-first
+    editText(doc, " + doomed");
+    t.vault.notes.delete("n1"); // deleted while blind
+
+    await rec.flush("n1");
+    expect(events).toEqual([{ type: "note-removed", noteId: "n1" }]);
+    expect(t.vault.updateCalls.length).toBe(0); // never wrote against the gone note
+    expect(t.store.get("ydoc/n1")).toBeNull();
+
+    const fetchesAfter = t.vault.getNoteCalls;
+    await sleep(30); // no deferred-writeback retry loop survives the removal
+    expect(t.vault.getNoteCalls).toBe(fetchesAfter);
+    expect(t.vault.updateCalls.length).toBe(0);
+  });
+
+  test("conflict-winner fetch hits a typed not-found → note-removed, no retry", async () => {
+    const t = makeTestCtx();
+    const note = t.vault.noteFixture("n1", "base");
+    const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks, debounceMs: 60_000 });
+    const events = collectEvents(rec);
+    await startLive(rec, t, [note]);
+    const doc = await rec.load("n1");
+
+    editText(doc, " + stale");
+    t.vault.externalEdit("n1", "bumped under us"); // the writeback will 409
+    // The winner fetch then sees the note already gone (typed not-found).
+    t.vault.getNoteError = new VaultNotFoundError("note n1 not found");
+
+    await rec.flush("n1");
+    expect(t.vault.updateCalls.length).toBe(1); // the 409ed attempt
+    expect(events).toEqual([{ type: "note-removed", noteId: "n1" }]); // NOT writeback-error
+    expect(t.store.get("ydoc/n1")).toBeNull();
+
+    t.vault.getNoteError = null;
+    await sleep(30); // removal is terminal: no backoff retry fires
+    expect(t.vault.updateCalls.length).toBe(1);
+  });
+
+  test("a NON-not-found fetch failure still rides the degraded path (normalization is narrow)", async () => {
+    const t = makeTestCtx();
+    const note = t.vault.noteFixture("n1", "base");
+    const rec = createVaultReconciler(t.ctx, { tag: "doc", hooks: textHooks, debounceMs: 5 });
+    const events = collectEvents(rec);
+    const sub = await startLive(rec, t, [note]);
+    const doc = await rec.load("n1");
+    sub.handlers.onStatus?.("reconnecting");
+
+    t.vault.getNoteError = new Error("vault unreachable");
+    editText(doc, "!");
+    await rec.flush("n1");
+    expect(events).toEqual([]); // no spurious removal
+    expect(t.logs.warns.some((w) => w.includes("writeback deferred"))).toBe(true);
+    expect(t.store.get("ydoc/n1")).not.toBeNull(); // tracking intact, retry pending
+
+    t.vault.getNoteError = null;
+    await until(() => t.vault.updateCalls.length === 1); // the retry lands
+    expect(t.vault.notes.get("n1")?.content).toBe("base!");
   });
 });
 

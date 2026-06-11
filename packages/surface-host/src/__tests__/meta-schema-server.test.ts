@@ -20,6 +20,7 @@ import {
   SERVER_TIMEOUT_DEFAULT_MS,
   SERVER_TIMEOUT_MAX_MS,
   SERVER_TIMEOUT_MIN_MS,
+  SURFACE_AUDIENCE_HUB_HINT,
   metaSchemaJson,
   parseMeta,
   parseMetaWithDiagnostics,
@@ -181,6 +182,17 @@ describe("audience field (§12 transport)", () => {
     const meta = parseMeta({ ...BASE, audience: "surface" });
     expect(meta.audience).toBe("surface");
     expect(meta.public).toBe(false); // never the legacy-public alias
+  });
+
+  test('audience: "surface" emits the hub-tier diagnostic (#99 — unconditional, no cheap probe)', () => {
+    const { meta, warnings } = parseMetaWithDiagnostics({ ...BASE, audience: "surface" });
+    expect(meta.audience).toBe("surface");
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain(SURFACE_AUDIENCE_HUB_HINT);
+    // Every other audience stays warning-free.
+    for (const audience of ["public", "hub-users", "operator"]) {
+      expect(parseMetaWithDiagnostics({ ...BASE, audience }).warnings).toEqual([]);
+    }
   });
 
   test("metaSchemaJson exposes audience + server", () => {

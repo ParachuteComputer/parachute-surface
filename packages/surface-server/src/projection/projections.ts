@@ -37,10 +37,11 @@
  * caller therefore sees exactly the audience policy's public slice.
  *
  * ENTRY-PATH NOTE (same containment reality as P7's entry route): the
- * design names `${mount}/mcp`, but the host forwards ONLY
- * `${mount}/api/*` + `${mount}/ws` to a backend — so the kit serves
- * `${mount}/api/mcp` and ALSO declares `${mount}/mcp`, which becomes
- * live automatically if the host ever forwards the short namespace.
+ * host forwards ONLY `${mount}/api/*` + `${mount}/ws` to a backend, so
+ * `${mount}/api/mcp` is the CANONICAL (and only) MCP path — the spec
+ * was amended to name it (#104). A bare `${mount}/mcp` route used to be
+ * forward-declared here but never received traffic; it was dropped
+ * rather than asking the host to grow a second forwarding rule.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -118,15 +119,14 @@ export function createSurfaceProjections(
       instructions,
     })(req);
   // POST only — see the module header for why GET/DELETE 405 instead.
-  routes.push(
-    { method: "POST", path: "/api/mcp", access: { kind: "public" }, handler: mcpHandler },
-    // UNREACHABLE TODAY: the host forwards only `${mount}/api/*` (+ `/ws`)
-    // to a backend, so this short-namespace route never receives traffic —
-    // it's forward-declared for the day the host forwards `${mount}/mcp`
-    // (the design's named path), at which point it goes live with no kit
-    // change. The reachable MCP path today is `/api/mcp` above.
-    { method: "POST", path: "/mcp", access: { kind: "public" }, handler: mcpHandler },
-  );
+  // `/api/mcp` is the canonical MCP path (#104): the host forwards only
+  // `${mount}/api/*`, so a bare `/mcp` route would be dead code.
+  routes.push({
+    method: "POST",
+    path: "/api/mcp",
+    access: { kind: "public" },
+    handler: mcpHandler,
+  });
 
   return { routes, projections };
 }

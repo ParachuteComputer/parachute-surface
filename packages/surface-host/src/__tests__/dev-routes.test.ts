@@ -171,7 +171,10 @@ describe("dev-routes — enable / disable / status / list", () => {
   });
 
   test("POST /surface/<name>/dev/disable flips state off + reports was_on", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     expect(isDevMode("notes")).toBe(true);
 
     const res = await dispatch(
@@ -203,7 +206,10 @@ describe("dev-routes — enable / disable / status / list", () => {
   });
 
   test("GET /surface/dev/list reports enabled UIs", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     await dispatch(
       new Request("http://x/surface/gitcoin-brain/dev/enable", { method: "POST" }),
       makeOpts(),
@@ -230,7 +236,10 @@ describe("dev-routes — trigger", () => {
   });
 
   test("POST /surface/<name>/dev/trigger broadcasts when dev mode is on", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     const sseRes = await dispatch(new Request("http://x/surface/notes/_dev/reload"), makeOpts());
     expect(sseRes.status).toBe(200);
     const reader = sseRes.body!.getReader();
@@ -263,7 +272,10 @@ describe("dev-routes — SSE stream", () => {
   });
 
   test("GET /surface/<name>/_dev/reload returns text/event-stream when on", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     const res = await dispatch(new Request("http://x/surface/notes/_dev/reload"), makeOpts());
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
@@ -277,11 +289,17 @@ describe("dev-routes — SSE stream", () => {
   });
 
   test("disable closes active SSE streams", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     const res = await dispatch(new Request("http://x/surface/notes/_dev/reload"), makeOpts());
     expect(subscriberCount("notes")).toBe(1);
 
-    await dispatch(new Request("http://x/surface/notes/dev/disable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/disable", { method: "POST" }),
+      makeOpts(),
+    );
     expect(subscriberCount("notes")).toBe(0);
     await res.body!.cancel();
   });
@@ -398,7 +416,10 @@ describe("dev-routes — auth gates", () => {
   });
 
   test("SSE stream is unauthenticated — UI's JS reads it pre-token", async () => {
-    await dispatch(new Request("http://x/surface/notes/dev/enable", { method: "POST" }), makeOpts());
+    await dispatch(
+      new Request("http://x/surface/notes/dev/enable", { method: "POST" }),
+      makeOpts(),
+    );
     const res = await dispatch(new Request("http://x/surface/notes/_dev/reload"), makeOpts());
     expect(res.status).toBe(200);
     await res.body!.cancel();

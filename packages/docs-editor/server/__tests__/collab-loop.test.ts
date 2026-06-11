@@ -19,7 +19,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { VaultConflictError } from "@openparachute/surface-client";
 import type { ReconcilerEvent } from "@openparachute/surface-server";
-import { type MadeBackend, OPERATOR_JWT, makeBackend, post, waitUntil } from "./helpers.ts";
+import {
+  ACL_TAG,
+  type MadeBackend,
+  OPERATOR_JWT,
+  makeBackend,
+  post,
+  waitUntil,
+} from "./helpers.ts";
 import { CollabTestClient } from "./test-client.ts";
 
 let made: MadeBackend | null = null;
@@ -455,6 +462,58 @@ describe("collab loop", () => {
     expect(m.vault.notes.get("doc-rv")?.content ?? "").not.toContain("ghost edit after revocation");
 
     bystander.disconnect();
+  });
+
+  test("UPGRADING a grant (view→edit) mid-session closes the WS session; re-auth picks up the new verdict (#99)", async () => {
+    // The sweep closes on ANY write-verdict change — upgrades included
+    // (in-place mutation of a live engine connection has no supported
+    // seam): only the revocation direction was test-pinned until now.
+    made = await makeBackend();
+    const m = made;
+    m.vault.noteFixture("doc-up", "# Upgradable\n\nbody");
+    const capToken = await mintShare(m, "doc-up", "view");
+
+    const viewer = new CollabTestClient("doc-up", await audienceTicket(m, capToken));
+    viewer.connect(m.backend.websocket ?? {});
+    await waitUntil(() => viewer.authState === "authenticated", { label: "viewer authed" });
+    expect(viewer.scope).toBe("readonly");
+    await waitUntil(() => viewer.fragmentText().includes("body"), { label: "viewer synced" });
+
+    // The operator upgrades the SAME grant to edit. Grants are vault-
+    // native notes, so the live mutation path is the ACL-tag SSE upsert.
+    const grantNote = [...m.vault.notes.values()].find(
+      (n) => Array.isArray(n.tags) && n.tags.includes(ACL_TAG) && n.metadata?.resource === "doc-up",
+    );
+    expect(grantNote).toBeDefined();
+    const upgraded = {
+      ...(grantNote as NonNullable<typeof grantNote>),
+      metadata: { ...(grantNote as NonNullable<typeof grantNote>).metadata, level: "edit" },
+      updatedAt: m.vault.nextVersion(),
+    };
+    m.vault.notes.set(upgraded.id, upgraded);
+    m.vault.pushUpsert(upgraded);
+
+    // The read-only session is CLOSED — verdict changed, not revoked.
+    await waitUntil(() => viewer.serverClosedReason !== null, {
+      label: "viewer closed on upgrade",
+    });
+
+    // Re-auth with a fresh ticket: the SAME capability is now read-write.
+    const editor = new CollabTestClient("doc-up", await audienceTicket(m, capToken));
+    editor.connect(m.backend.websocket ?? {});
+    await waitUntil(() => editor.authState === "authenticated", { label: "re-authed writable" });
+    expect(editor.scope).toBe("read-write");
+    await waitUntil(() => editor.fragmentText().includes("body"), { label: "editor synced" });
+    editor.appendParagraph("post-upgrade edit");
+    await waitUntil(() => editor.fragmentText().includes("post-upgrade edit"), {
+      label: "edit local",
+    });
+    await m.reconciler.flush();
+    await waitUntil(
+      () => (m.vault.notes.get("doc-up")?.content ?? "").includes("post-upgrade edit"),
+      { label: "post-upgrade edit written back", timeoutMs: 4_000 },
+    );
+    editor.disconnect();
   });
 
   test("disconnect bookkeeping is idempotent (upstream double-onDisconnect)", async () => {
