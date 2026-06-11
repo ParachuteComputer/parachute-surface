@@ -108,6 +108,7 @@ import type {
 } from "@openparachute/surface-client";
 import { VaultConflictError } from "@openparachute/surface-client";
 import * as Y from "yjs";
+import { isVaultNotFound } from "../authz/router.ts";
 import type { SurfaceHostContext } from "../types.ts";
 
 /**
@@ -301,6 +302,29 @@ class Reconciler implements VaultReconciler {
     return next;
   }
 
+  /**
+   * `getNote` normalized for the machine: the live vault client THROWS
+   * the typed not-found for a missing/deleted note (its declared
+   * `Note | null` return is defensive — vault 404s the by-id read), so
+   * a bare call never actually resolves null. Normalizing the throw to
+   * null here (`isVaultNotFound`, the #102 router precedent / #109)
+   * makes every deleted-note branch below REACHABLE: a note deleted
+   * out from under an external check, a degraded revalidation, or a
+   * conflict-winner fetch drops tracking instead of surfacing as a
+   * generic fetch failure that retries forever against a gone note.
+   * (Deletion is normally observed via the SSE snapshot-removal path;
+   * these branches cover the fetch racing it.) Every OTHER error still
+   * throws to the call site's degraded-path handling.
+   */
+  async #getNoteOrNull(noteId: string): Promise<Note | null> {
+    try {
+      return await this.#ctx.vault.getNote(noteId);
+    } catch (err) {
+      if (isVaultNotFound(err)) return null;
+      throw err;
+    }
+  }
+
   // -------------------------------------------------------------------
   // The external-edit signal (SSE on the working tag)
   // -------------------------------------------------------------------
@@ -382,13 +406,15 @@ class Reconciler implements VaultReconciler {
       if (cur.externalHint !== undefined && cur.externalHint === cur.tracked) return;
       let winner: Note | null;
       try {
-        winner = await this.#ctx.vault.getNote(noteId);
+        winner = await this.#getNoteOrNull(noteId);
       } catch (err) {
         // The next event / reconnect snapshot self-corrects.
         this.#ctx.log.warn(`reconciler: external check for ${noteId} failed (${errMessage(err)})`);
         return;
       }
       if (winner === null) {
+        // Deleted between the stream event and our fetch — same outcome
+        // as the SSE removal this fetch raced.
         this.#removeTracking(noteId);
         return;
       }
@@ -463,7 +489,7 @@ class Reconciler implements VaultReconciler {
     } else {
       // No usable persisted state (an entry without a sourceVersion is
       // untrusted — vault-as-source-of-truth): fetch and seed.
-      const note = await this.#ctx.vault.getNote(noteId);
+      const note = await this.#getNoteOrNull(noteId);
       if (note === null) {
         throw new Error(
           `reconciler: note ${noteId} not found — create the note in the vault before loading its doc`,
@@ -571,7 +597,7 @@ class Reconciler implements VaultReconciler {
       // writing rather than assuming no external edits happened.
       let current: Note | null;
       try {
-        current = await this.#ctx.vault.getNote(noteId);
+        current = await this.#getNoteOrNull(noteId);
       } catch (err) {
         this.#ctx.log.warn(
           `reconciler: degraded revalidation for ${noteId} failed — writeback deferred (${errMessage(err)})`,
@@ -580,6 +606,8 @@ class Reconciler implements VaultReconciler {
         return;
       }
       if (current === null) {
+        // Deleted while we were blind: drop tracking, never retry a
+        // writeback against a gone note.
         this.#removeTracking(noteId);
         return;
       }
@@ -624,7 +652,7 @@ class Reconciler implements VaultReconciler {
       if (isConflict(err)) {
         let winner: Note | null;
         try {
-          winner = await this.#ctx.vault.getNote(noteId);
+          winner = await this.#getNoteOrNull(noteId);
         } catch (fetchErr) {
           this.#ctx.log.warn(
             `reconciler: conflict winner fetch for ${noteId} failed (${errMessage(fetchErr)})`,
@@ -634,6 +662,7 @@ class Reconciler implements VaultReconciler {
           return;
         }
         if (winner === null) {
+          // The "conflict" was a deletion racing our write: drop tracking.
           this.#removeTracking(noteId);
           return;
         }
