@@ -10,7 +10,14 @@
   },
   "private": false,
   "license": "AGPL-3.0",
-  "files": ["src/**/*.ts", "!src/__tests__/**", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": [
+    "src/**/*.ts",
+    "!src/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.template.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
