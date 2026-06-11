@@ -273,6 +273,73 @@ describe("collab loop", () => {
     expect(missingDoc.denyReason).toBe(wrongDoc.denyReason as string);
   });
 
+  test("a connection racing in DURING unload re-adopts the doc — edits still flush", async () => {
+    // Hocuspocus 4.1.1: documents.delete happens only AFTER
+    // beforeUnloadDocument resolves, and createDocument returns the
+    // still-mapped doc WITHOUT re-firing onLoadDocument. A connection
+    // arriving while reconciler.unload is mid-flight (vault round-trip)
+    // makes the engine abort the unload — but the reconciler has already
+    // detached: live doc whose edits never write back.
+    made = await makeBackend();
+    const m = made;
+    m.vault.noteFixture("doc-race", "# Race\n\nbase");
+
+    // A connects and edits; wait for the steady-state writeback to ack.
+    const a = new CollabTestClient("doc-race", await operatorTicket(m));
+    a.connect(m.backend.websocket ?? {});
+    await waitUntil(() => a.fragmentText().includes("base"), { label: "A seeded" });
+    a.appendParagraph("first edit");
+    await waitUntil(
+      () => (m.vault.notes.get("doc-race")?.content ?? "").includes("first edit"),
+      { label: "first edit acked" },
+    );
+
+    // Script the in-flight unload: the disconnect-time engine store flush
+    // fails ONCE (transient) so the doc stays dirty into unloadDocument;
+    // the unload's own flush then blocks on the gated vault write.
+    a.appendParagraph("second edit");
+    await waitUntil(() => a.fragmentText().includes("second edit"), { label: "second edit" });
+    m.vault.updateErrorOnce = new Error("transient vault failure");
+    let releaseGate = () => {};
+    m.vault.updateGate = new Promise<void>((r) => {
+      releaseGate = r;
+    });
+    const callsBefore = m.vault.updateCalls.length;
+    a.disconnect();
+
+    // Two further update attempts: the failed executeNow flush, then the
+    // unload flush now BLOCKED on the gate → unload is mid-flight.
+    await waitUntil(() => m.vault.updateCalls.length >= callsBefore + 2, {
+      label: "unload flush in flight",
+    });
+
+    // B races in while the unload hook is awaiting the vault.
+    const b = new CollabTestClient("doc-race", await operatorTicket(m));
+    b.connect(m.backend.websocket ?? {});
+    await waitUntil(() => b.authState === "authenticated", { label: "B authenticated" });
+
+    releaseGate();
+    m.vault.updateGate = null;
+    await waitUntil(
+      () => (m.vault.notes.get("doc-race")?.content ?? "").includes("second edit"),
+      { label: "second edit acked after gate" },
+    );
+    // Engine kept serving the doc (the unload aborted on B's connection).
+    await waitUntil(() => b.fragmentText().includes("second edit"), { label: "B synced" });
+
+    // THE regression: B's post-race edit must still reach the vault. With
+    // a detached reconciler this never flushes and the waitUntil times out.
+    b.appendParagraph("post-race edit");
+    await waitUntil(() => b.fragmentText().includes("post-race edit"), { label: "B edit local" });
+    await m.reconciler.flush();
+    await waitUntil(
+      () => (m.vault.notes.get("doc-race")?.content ?? "").includes("post-race edit"),
+      { label: "post-race edit written back", timeoutMs: 4_000 },
+    );
+
+    b.disconnect();
+  });
+
   test("a note OUTSIDE the working tag refuses collab — same refusal as missing", async () => {
     // The reconciler's watch is tag-scoped: an untagged note would
     // collaborate fine until the first SSE snapshot treats it as REMOVED

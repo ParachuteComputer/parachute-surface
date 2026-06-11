@@ -136,10 +136,29 @@ export function createCollab(deps: CollabDeps): Collab {
     },
 
     async beforeUnloadDocument(data): Promise<void> {
+      // A live connection means this unload is already doomed — the
+      // engine re-checks getConnectionsCount() AFTER this hook and aborts
+      // (Hocuspocus 4.1.1, verified against the installed dist). Throwing
+      // aborts it EARLY and keeps the reconciler attached, instead of a
+      // pointless flush → detach → re-adopt churn.
+      if (data.document.getConnectionsCount() > 0) {
+        throw new Error("connections present — unload aborted");
+      }
       // Before the engine destroys the Y.Doc: final flush + snapshot
       // persist + drop live tracking. (After reconciler.stop() this is a
       // no-op — tracking is already gone.)
       await reconciler.unload(data.documentName);
+      // A connection may have raced in DURING the unload's vault round
+      // trip: createDocument returns the still-mapped doc WITHOUT
+      // re-firing onLoadDocument, and the engine's post-hook re-check
+      // aborts the unload — leaving a live doc the reconciler has already
+      // detached from (edits would never write back; state destroyed at
+      // the final unload). Re-adopt it. The restored baseline is the
+      // just-persisted snapshot; any edit that landed inside this window
+      // rides out with the next flush (serialize covers the full doc).
+      if (data.document.getConnectionsCount() > 0) {
+        await reconciler.load(data.documentName, data.document);
+      }
     },
 
     async connected(data: connectedPayload<CollabContext>): Promise<void> {

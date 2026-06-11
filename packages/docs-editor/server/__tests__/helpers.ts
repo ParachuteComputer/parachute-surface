@@ -47,6 +47,8 @@ export class FakeVault {
   updateCalls: { id: string; payload: UpdateNotePayload }[] = [];
   /** When set, the NEXT updateNote throws it once (conflict scripting). */
   updateErrorOnce: Error | null = null;
+  /** When set, updateNote awaits it BEFORE applying (in-flight race tests). */
+  updateGate: Promise<void> | null = null;
   #idCounter = 0;
   #versionCounter = 0;
 
@@ -111,6 +113,9 @@ export class FakeVault {
       this.updateErrorOnce = null;
       throw err;
     }
+    // Pre-commit gate: a blocked write keeps the caller's flush in flight
+    // — the seam the connect-during-unload race test stretches.
+    if (this.updateGate) await this.updateGate;
     const existing = this.notes.get(id);
     if (!existing) throw new VaultNotFoundError(`note ${id} not found`);
     if (payload.force === true) {
