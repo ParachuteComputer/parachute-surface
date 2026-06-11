@@ -19,7 +19,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { VaultConflictError } from "@openparachute/surface-client";
 import type { ReconcilerEvent } from "@openparachute/surface-server";
-import { ACL_TAG, type MadeBackend, OPERATOR_JWT, makeBackend, post, waitUntil } from "./helpers.ts";
+import {
+  ACL_TAG,
+  type MadeBackend,
+  OPERATOR_JWT,
+  makeBackend,
+  post,
+  waitUntil,
+} from "./helpers.ts";
 import { CollabTestClient } from "./test-client.ts";
 
 let made: MadeBackend | null = null;
@@ -475,8 +482,7 @@ describe("collab loop", () => {
     // The operator upgrades the SAME grant to edit. Grants are vault-
     // native notes, so the live mutation path is the ACL-tag SSE upsert.
     const grantNote = [...m.vault.notes.values()].find(
-      (n) =>
-        Array.isArray(n.tags) && n.tags.includes(ACL_TAG) && n.metadata?.resource === "doc-up",
+      (n) => Array.isArray(n.tags) && n.tags.includes(ACL_TAG) && n.metadata?.resource === "doc-up",
     );
     expect(grantNote).toBeDefined();
     const upgraded = {

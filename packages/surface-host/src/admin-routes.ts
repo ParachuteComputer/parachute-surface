@@ -608,7 +608,10 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
             boundPort: 0, // ignored — existing entry's port preserves
             installDir: resolveProjectRoot(),
             manifestPath: opts.manifestPath,
-            extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+            extraFields: buildSelfRegisterExtraFields(
+              opts.state.registeredUis,
+              opts.state.backends,
+            ),
             logger: opts.logger,
           });
         } catch (e) {

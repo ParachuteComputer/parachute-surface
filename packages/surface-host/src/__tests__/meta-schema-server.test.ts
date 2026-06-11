@@ -20,9 +20,9 @@ import {
   SERVER_TIMEOUT_DEFAULT_MS,
   SERVER_TIMEOUT_MAX_MS,
   SERVER_TIMEOUT_MIN_MS,
+  SURFACE_AUDIENCE_HUB_HINT,
   metaSchemaJson,
   parseMeta,
-  SURFACE_AUDIENCE_HUB_HINT,
   parseMetaWithDiagnostics,
 } from "../meta-schema.ts";
 import type { RegisteredUi } from "../ui-registry.ts";

@@ -221,10 +221,10 @@ describe("provisionSchemaForUi", () => {
     const fetchFn = makeFetch(
       calls,
       () =>
-        new Response(
-          JSON.stringify({ error: "Unauthorized", message: "token has been revoked" }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        ),
+        new Response(JSON.stringify({ error: "Unauthorized", message: "token has been revoked" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
     );
     const result = await provisionSchemaForUi({
       ui: makeUi({ required_schema: { tags: [{ name: "capture" }] } }),

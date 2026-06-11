@@ -387,7 +387,12 @@ describe("parseMeta — Phase 3.0 dev-mode fields", () => {
 
   test("rejects non-string dev_build_cmd", () => {
     expect(() =>
-      parseMeta({ name: "x", displayName: "X", path: "/surface/x", dev_build_cmd: true as unknown }),
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/surface/x",
+        dev_build_cmd: true as unknown,
+      }),
     ).toThrow(InvalidMetaError);
   });
 
@@ -402,7 +407,12 @@ describe("parseMeta — Phase 3.0 dev-mode fields", () => {
       parseMeta({ name: "x", displayName: "X", path: "/surface/x", dev_debounce_ms: 250.5 }),
     ).toThrow(InvalidMetaError);
     expect(() =>
-      parseMeta({ name: "x", displayName: "X", path: "/surface/x", dev_debounce_ms: "250" as unknown }),
+      parseMeta({
+        name: "x",
+        displayName: "X",
+        path: "/surface/x",
+        dev_debounce_ms: "250" as unknown,
+      }),
     ).toThrow(InvalidMetaError);
   });
 });

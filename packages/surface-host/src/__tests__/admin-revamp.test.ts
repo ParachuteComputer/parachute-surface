@@ -559,7 +559,10 @@ describe("PATCH /surface/<name>", () => {
     // unconditional statusReason hint the admin SPA renders.
     expect(body.ui.statusReason).toContain(SURFACE_AUDIENCE_HUB_HINT);
     // Other audiences carry no hint.
-    const back = await dispatch(jsonReq("PATCH", "/surface/alpha", { audience: "hub-users" }), state);
+    const back = await dispatch(
+      jsonReq("PATCH", "/surface/alpha", { audience: "hub-users" }),
+      state,
+    );
     expect((((await back.json()) as AnyJson).ui as AnyJson).statusReason).toBeUndefined();
   });
 

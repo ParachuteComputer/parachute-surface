@@ -189,7 +189,11 @@ describe("scanUis — registration-time diagnostics (#99)", () => {
       audience: "surface",
     });
     const warns: string[] = [];
-    const logger = { log: () => {}, warn: (...a: unknown[]) => warns.push(a.join(" ")), error: () => {} };
+    const logger = {
+      log: () => {},
+      warn: (...a: unknown[]) => warns.push(a.join(" ")),
+      error: () => {},
+    };
     const result = scanUis({ uisDir, logger });
     expect(result.registered).toHaveLength(1); // a warn, never a skip
     expect(result.registered[0]!.meta.audience).toBe("surface");
@@ -199,7 +203,11 @@ describe("scanUis — registration-time diagnostics (#99)", () => {
   test("other audiences scan without the hub-tier warn", () => {
     seedUi("plain", { name: "plain", displayName: "Plain", path: "/surface/plain" });
     const warns: string[] = [];
-    const logger = { log: () => {}, warn: (...a: unknown[]) => warns.push(a.join(" ")), error: () => {} };
+    const logger = {
+      log: () => {},
+      warn: (...a: unknown[]) => warns.push(a.join(" ")),
+      error: () => {},
+    };
     scanUis({ uisDir, logger });
     expect(warns.some((w) => w.includes(SURFACE_AUDIENCE_HUB_HINT))).toBe(false);
   });

@@ -71,7 +71,7 @@ export type UiAudience = (typeof UI_AUDIENCES)[number];
  * `statusReason` hint on serialized rows.
  */
 export const SURFACE_AUDIENCE_HUB_HINT =
-  'audience "surface" requires a hub that ships the surface audience tier (hub#651 — releases after hub 0.7.0): an older hub\'s manifest validation drops this surface\'s services.json row and the mount 404s';
+  "audience \"surface\" requires a hub that ships the surface audience tier (hub#651 — releases after hub 0.7.0): an older hub's manifest validation drops this surface's services.json row and the mount 404s";
 
 /** Default audience when neither `audience` nor legacy `public` is declared. */
 export const DEFAULT_AUDIENCE: UiAudience = "hub-users";
