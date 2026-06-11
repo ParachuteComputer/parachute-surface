@@ -130,6 +130,44 @@ describe("backend-ws socket wrapper", () => {
     expect(ids[2]).not.toBe(ids[0] as string);
   });
 
+  test("a reused runtime socket object with FRESH upgrade data is a NEW connection", async () => {
+    // Nothing contracts that Bun hands a fresh ServerWebSocket object per
+    // logical connection — but the host's own dispatch DOES mint a fresh
+    // `data` payload per `server.upgrade` (http-server.ts). The wrapper
+    // identity must key on that invariant, not on runtime object reuse:
+    // a recycled socket carrying new upgrade data is a new connection and
+    // must get a new wrapper + socketId (else per-connection state from
+    // the previous connection bleeds into the next).
+    const seen: SurfaceSocket[] = [];
+    const { supervisor } = supervisorWith({
+      open: (ws) => {
+        seen.push(ws);
+      },
+    });
+    const pump = makePump({
+      getSupervisor: () => supervisor,
+      logger: { warn: () => {}, error: () => {} },
+    });
+    const ws = fakeBunSocket();
+    pump.open(ws);
+    pump.close(ws, 1000, "first connection done");
+    await settle();
+    // Simulate runtime reuse: same object, fresh per-upgrade data payload.
+    ws.state = 1;
+    (ws as { data: SurfaceWsData }).data = {
+      surface: "demo",
+      layer: "public",
+      clientIp: null,
+    } as SurfaceWsData;
+    pump.open(ws);
+    await settle();
+    expect(seen).toHaveLength(2);
+    const first = seen[0] as SurfaceSocket;
+    const second = seen[1] as SurfaceSocket;
+    expect(second).not.toBe(first);
+    expect(second.data.socketId).not.toBe(first.data.socketId);
+  });
+
   test("readyState mirrors the underlying socket live", async () => {
     let socket: SurfaceSocket | undefined;
     const { supervisor } = supervisorWith({

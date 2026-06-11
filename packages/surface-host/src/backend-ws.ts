@@ -41,17 +41,25 @@ export interface SurfaceWsData {
 /**
  * Wrap Bun's socket in the narrow runtime-agnostic SurfaceSocket view.
  *
- * MEMOIZED per underlying socket (WeakMap): one connection sees ONE wrapper
- * instance across its open/message/close events — the identity contract
- * stateful protocols (Hocuspocus, y-protocols) need to key per-connection
- * state. The wrapper also mints the connection's `socketId` (first wrap)
- * and exposes a live `readyState` view.
+ * MEMOIZED per CONNECTION: one connection sees ONE wrapper instance across
+ * its open/message/close events — the identity contract stateful protocols
+ * (Hocuspocus, y-protocols) need to key per-connection state. The wrapper
+ * also mints the connection's `socketId` (first wrap) and exposes a live
+ * `readyState` view.
+ *
+ * The memoization KEY is `ws.data` — NOT the ServerWebSocket object.
+ * Nothing contracts that Bun hands a fresh socket object per logical
+ * connection, but the host's own dispatch DOES mint a fresh `data`
+ * payload on every `server.upgrade` (http-server.ts `handleWsRoute`) —
+ * that is the per-connection invariant we own. A recycled runtime socket
+ * carrying fresh upgrade data therefore gets a fresh wrapper + socketId
+ * instead of inheriting the previous connection's identity.
  */
 function createSocketWrapper(): (ws: ServerWebSocket<SurfaceWsData>) => SurfaceSocket {
-  const wrappers = new WeakMap<ServerWebSocket<SurfaceWsData>, SurfaceSocket>();
+  const wrappers = new WeakMap<SurfaceWsData, SurfaceSocket>();
   let counter = 0;
   return (ws) => {
-    const existing = wrappers.get(ws);
+    const existing = wrappers.get(ws.data);
     if (existing) return existing;
     const wrapper: SurfaceSocket = {
       send: (data) => {
@@ -70,7 +78,7 @@ function createSocketWrapper(): (ws: ServerWebSocket<SurfaceWsData>) => SurfaceS
         socketId: `ws-${++counter}-${Date.now().toString(36)}`,
       },
     };
-    wrappers.set(ws, wrapper);
+    wrappers.set(ws.data, wrapper);
     return wrapper;
   };
 }
