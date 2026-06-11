@@ -83,6 +83,7 @@ import {
   resolveGithubRelease,
 } from "./github-release.ts";
 import { removeSurfaceState } from "./host-context.ts";
+import { readInstanceRecord, writeInstanceRecord } from "./instance-record.ts";
 import {
   InvalidMetaError,
   NAME_PATTERN,
@@ -391,6 +392,21 @@ function credentialSummaryFor(ui: RegisteredUi, opts: AdminHandlerOpts): Credent
   };
 }
 
+/**
+ * The OAuth client name for a surface instance (#105). A renamed instance
+ * gets the instance name appended so two instances of one package register
+ * as DISTINCT hub clients (the hub upserts by client_name + redirects —
+ * identical names across instances could fold their registrations).
+ * Default installs keep the bare displayName, exactly as before.
+ */
+function oauthClientNameFor(
+  displayName: string,
+  instanceName: string,
+  packageName: string,
+): string {
+  return instanceName !== packageName ? `${displayName} (${instanceName})` : displayName;
+}
+
 function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
   const backends = opts.state.backends;
   const oauth = readOauthClientFile(u.uiDir);
@@ -398,6 +414,12 @@ function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
   return {
     name: u.meta.name,
     dirName: u.dirName,
+    // The PACKAGE's identity (#105) — equals `name`/`path` unless this
+    // install is an overridden instance. The admin list renders the package
+    // name as the secondary line; the pair is normalized (both set or
+    // neither) at scan time.
+    packageName: u.packageName ?? u.meta.name,
+    packagePath: u.packagePath ?? u.meta.path,
     displayName: u.meta.displayName,
     tagline: u.meta.tagline,
     path: u.meta.path,
@@ -425,6 +447,14 @@ function serializeUi(u: RegisteredUi, opts: AdminHandlerOpts): SerializedUi {
 export type SerializedUi = {
   name: string;
   dirName: string;
+  /**
+   * The PACKAGE's own name/path from its meta.json (#105). Equal `name`/
+   * `path` unless the install is an overridden instance (instance_name /
+   * mount_path at add time). Normalized: both reflect the package whenever
+   * either was overridden.
+   */
+  packageName: string;
+  packagePath: string;
   displayName: string;
   tagline?: string;
   path: string;
@@ -597,6 +627,20 @@ export type AddRequestBody = {
    * Validated through `parseMeta` like every other merged field.
    */
   audience?: UiAudience;
+  /**
+   * Instance name override (#105) — install this package under a distinct
+   * INSTANCE identity so one package can be installed several times
+   * (instance-per-vault). Defaults to the package meta's `name`. Unlike
+   * `name` (which rewrites the installed meta.json — the meta-less-bundle
+   * affordance), this is recorded in an `instance.json` sidecar and the
+   * package meta stays untouched. Same charset rules as meta names.
+   */
+  instance_name?: string;
+  /**
+   * Mount path override for this instance (#105). Defaults to the package
+   * meta's `path`. Same pattern rules as meta paths (under `/surface/`).
+   */
+  mount_path?: string;
   /** Force reinstall over an existing UI of the same name. */
   force?: boolean;
 };
@@ -871,6 +915,37 @@ export async function addUiInternal(
     };
   }
 
+  // Instance overrides (#105) — validated BEFORE staging (fail fast, no
+  // fetch on bad input). Charset rules are exactly the meta name/path rules.
+  if (
+    body.instance_name !== undefined &&
+    (typeof body.instance_name !== "string" || !NAME_PATTERN.test(body.instance_name))
+  ) {
+    return {
+      response: Response.json(
+        {
+          error: "invalid_instance",
+          message: `instance_name must match ${NAME_PATTERN.source}`,
+        },
+        { status: 400 },
+      ),
+    };
+  }
+  if (
+    body.mount_path !== undefined &&
+    (typeof body.mount_path !== "string" || !PATH_PATTERN.test(body.mount_path))
+  ) {
+    return {
+      response: Response.json(
+        {
+          error: "invalid_instance",
+          message: `mount_path must match ${PATH_PATTERN.source}`,
+        },
+        { status: 400 },
+      ),
+    };
+  }
+
   // Stage the source — local path copy, npm fetch, or URL-tarball download.
   const staged = await stageSource(body.source, opts);
   if (!staged.ok) return { response: staged.response };
@@ -955,30 +1030,45 @@ export async function addUiInternal(
         ),
       };
     }
-    if (RESERVED_PATHS.has(parsedMeta.path)) {
+    // Instance identity (#105): the override wins; for a force-replace of an
+    // EXISTING instance the PRIOR instance record is the next default (an
+    // upgrade must not silently change identity — re-specifying overrides on
+    // every upgrade was the footgun the #115 review caught); the package
+    // meta is the last default. Everything downstream of this point — the
+    // uis dir, the registry key, the mount, the credential binding, DCR,
+    // services.json — keys off these two values.
+    const instanceName = body.instance_name ?? parsedMeta.name;
+
+    const uisDir = opts.uisDir ?? resolveUisDir();
+    const targetDir = path.join(uisDir, instanceName);
+
+    // Captured BEFORE the rmSync below — a force-add over an installed
+    // surface must REMOUNT its backend (#103), not just replace the files.
+    const replacedExisting = existsSync(targetDir);
+    // Prior identity, read before the wipe: preserves a renamed instance's
+    // mount across upgrades when the request doesn't re-specify it.
+    const priorRecord = replacedExisting ? readInstanceRecord(targetDir) : null;
+    const mountPath = body.mount_path ?? priorRecord?.path ?? parsedMeta.path;
+
+    // Reserved-path check runs on the EFFECTIVE mount (when no override is
+    // present this is exactly the package path — behavior unchanged).
+    if (RESERVED_PATHS.has(mountPath)) {
       return {
         response: Response.json(
           {
             error: "reserved_path",
-            message: `\`${parsedMeta.path}\` is reserved by the surface host (admin SPA / dev routes / host API)`,
+            message: `\`${mountPath}\` is reserved by the surface host (admin SPA / dev routes / host API)`,
           },
           { status: 409 },
         ),
       };
     }
-
-    const uisDir = opts.uisDir ?? resolveUisDir();
-    const targetDir = path.join(uisDir, parsedMeta.name);
-
-    // Captured BEFORE the rmSync below — a force-add over an installed
-    // surface must REMOUNT its backend (#103), not just replace the files.
-    const replacedExisting = existsSync(targetDir);
     if (replacedExisting && !body.force) {
       return {
         response: Response.json(
           {
             error: "name_exists",
-            message: `UI named "${parsedMeta.name}" is already installed at ${targetDir}; pass force=true to replace`,
+            message: `UI named "${instanceName}" is already installed at ${targetDir}; pass force=true to replace (or pass instance_name to install a second instance of the package)`,
           },
           { status: 409 },
         ),
@@ -986,16 +1076,18 @@ export async function addUiInternal(
     }
 
     // Mount-path collision check against the in-memory state (skipped UIs
-    // can share a path-by-collision; we want a clean reject).
+    // can share a path-by-collision; we want a clean reject). Registered
+    // metas carry EFFECTIVE paths, so two instances of one package are
+    // compared on their real mounts.
     const collision = opts.state.registeredUis.find(
-      (u) => u.meta.path === parsedMeta.path && u.meta.name !== parsedMeta.name,
+      (u) => u.meta.path === mountPath && u.meta.name !== instanceName,
     );
     if (collision) {
       return {
         response: Response.json(
           {
             error: "path_taken",
-            message: `mount path ${parsedMeta.path} is already claimed by "${collision.meta.name}"`,
+            message: `mount path ${mountPath} is already claimed by "${collision.meta.name}"`,
           },
           { status: 409 },
         ),
@@ -1057,6 +1149,14 @@ export async function addUiInternal(
       )}\n`,
     );
 
+    // Instance-record sidecar (#105): written ONLY when the instance
+    // identity differs from the package meta — a default add keeps the
+    // exact pre-override on-disk format (no migration, perfect round-trip).
+    // The PACKAGE meta.json above stays untouched by the override.
+    if (instanceName !== parsedMeta.name || mountPath !== parsedMeta.path) {
+      writeInstanceRecord(targetDir, { name: instanceName, path: mountPath });
+    }
+
     // DCR registration. Best-effort — failures don't unwind the install
     // because the UI is still mountable; the operator can re-register
     // later or click approve in hub admin.
@@ -1068,11 +1168,11 @@ export async function addUiInternal(
           ? opts.operatorTokenOverride()
           : readOperatorToken({ logger: opts.logger })) ?? undefined;
       const hubUrl = opts.state.config.hub_url;
-      const redirectBase = `${hubUrl.replace(/\/$/, "")}${parsedMeta.path}`;
+      const redirectBase = `${hubUrl.replace(/\/$/, "")}${mountPath}`;
       try {
         const reg = await registerOauthClient({
           hubUrl,
-          clientName: parsedMeta.displayName,
+          clientName: oauthClientNameFor(parsedMeta.displayName, instanceName, parsedMeta.name),
           redirectUris: [`${redirectBase}/`, `${redirectBase}/oauth-callback`],
           scopes: parsedMeta.scopes_required,
           operatorToken,
@@ -1081,7 +1181,9 @@ export async function addUiInternal(
         });
         oauthRecord = {
           client_id: reg.client_id,
-          client_name: reg.client_name ?? parsedMeta.displayName,
+          client_name:
+            reg.client_name ??
+            oauthClientNameFor(parsedMeta.displayName, instanceName, parsedMeta.name),
           redirect_uris: reg.redirect_uris,
           scope: reg.scope ?? parsedMeta.scopes_required.join(" "),
           status: reg.status,
@@ -1093,7 +1195,7 @@ export async function addUiInternal(
         if (e instanceof DcrError) {
           dcrWarning = e.message;
           opts.logger?.warn(
-            `[app-admin] DCR registration failed for ${parsedMeta.name}: ${e.message}`,
+            `[app-admin] DCR registration failed for ${instanceName}: ${e.message}`,
           );
         } else {
           throw e;
@@ -1110,7 +1212,8 @@ export async function addUiInternal(
       reason: s.reason,
     }));
 
-    const added = opts.state.registeredUis.find((u) => u.meta.name === parsedMeta.name);
+    // Registered metas carry EFFECTIVE identity — find by the instance name.
+    const added = opts.state.registeredUis.find((u) => u.meta.name === instanceName);
 
     // Backed surfaces (P5): mount the new backend. A force-replace of an
     // installed backed surface goes through the SAME generation-bumped
@@ -1158,7 +1261,7 @@ export async function addUiInternal(
         });
       } catch (e) {
         opts.logger?.warn(
-          `[app-admin] schema auto-provision failed for ${parsedMeta.name}: ${(e as Error).message}`,
+          `[app-admin] schema auto-provision failed for ${instanceName}: ${(e as Error).message}`,
         );
       }
     }
@@ -1462,6 +1565,11 @@ export type PatchUiRequestBody = {
  * `public` boolean kept consistent), then the standard re-scan + services.json
  * refresh — the hub's audience gate reads the refreshed `uis{}` map
  * per-request, so the change takes effect on the next proxied request.
+ *
+ * Renamed instances (#105): meta.json carries PACKAGE identity; the rescan
+ * re-applies the instance.json sidecar, so this PATCH must never write
+ * `name`/`path` into meta.json (today it can't — only audience/public are
+ * editable; keep it that way or route identity edits through the sidecar).
  */
 async function handlePatchUi(
   req: Request,
@@ -1591,10 +1699,18 @@ async function handleRegisterOauth(
   const hubUrl = opts.state.config.hub_url;
   const redirectBase = `${hubUrl.replace(/\/$/, "")}${ui.meta.path}`;
 
+  // Instance-scoped client name (#105) — `packageName` is set iff this
+  // install is a renamed instance; the redirectBase already derives from
+  // the EFFECTIVE mount (ui.meta.path).
+  const clientName = oauthClientNameFor(
+    ui.meta.displayName,
+    ui.meta.name,
+    ui.packageName ?? ui.meta.name,
+  );
   try {
     const reg = await registerOauthClient({
       hubUrl,
-      clientName: ui.meta.displayName,
+      clientName,
       redirectUris: [`${redirectBase}/`, `${redirectBase}/oauth-callback`],
       scopes: ui.meta.scopes_required,
       operatorToken,
@@ -1603,7 +1719,7 @@ async function handleRegisterOauth(
     });
     const record: OauthClientRecord = {
       client_id: reg.client_id,
-      client_name: reg.client_name ?? ui.meta.displayName,
+      client_name: reg.client_name ?? clientName,
       redirect_uris: reg.redirect_uris,
       scope: reg.scope ?? ui.meta.scopes_required.join(" "),
       status: reg.status,

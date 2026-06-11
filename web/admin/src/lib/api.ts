@@ -69,6 +69,13 @@ export type CredentialSummary = {
 export type UiSummary = {
   name: string;
   dirName: string;
+  /**
+   * The PACKAGE's own name from its meta.json (#105). Equals `name` unless
+   * the install is a renamed instance (instance_name override at add time).
+   * Optional: older daemons don't send it — fall back to `name`.
+   */
+  packageName?: string;
+  packagePath?: string;
   displayName: string;
   tagline?: string;
   path: string;
@@ -122,6 +129,14 @@ export type AddRequestBody = {
   vault_default?: string;
   /** Audience exposure chosen in the add form (default hub-users). */
   audience?: UiAudience;
+  /**
+   * Instance name override (#105) — install the package under a distinct
+   * instance identity so one package can be installed several times
+   * (instance-per-vault). Defaults to the package meta's name.
+   */
+  instance_name?: string;
+  /** Mount path override for this instance (#105). Defaults to meta's path. */
+  mount_path?: string;
   force?: boolean;
 };
 

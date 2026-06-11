@@ -22,6 +22,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import { resolveUisDir } from "./config.ts";
+import { InvalidInstanceRecordError, readInstanceRecord } from "./instance-record.ts";
 import { InvalidMetaError, type UiMeta, parseMetaWithDiagnostics } from "./meta-schema.ts";
 
 export type UiStatus =
@@ -29,6 +30,7 @@ export type UiStatus =
   | "missing-meta"
   | "missing-dist"
   | "invalid-meta"
+  | "invalid-instance"
   | "collision"
   | "reserved-path";
 
@@ -39,8 +41,20 @@ export type RegisteredUi = {
   uiDir: string;
   /** Absolute path to the `<uis>/<dirName>/dist/` directory. */
   distDir: string;
-  /** Parsed meta.json. */
+  /**
+   * The EFFECTIVE meta: the package's parsed meta.json with any
+   * `instance.json` overrides applied (#105 — `meta.name`/`meta.path`
+   * carry the INSTANCE identity; everything downstream keys off them).
+   */
   meta: UiMeta;
+  /**
+   * The PACKAGE's own name from meta.json, recorded iff an instance.json
+   * override renamed this install (#105). Absent when the instance uses
+   * the package identity unchanged — pre-override installs + default adds.
+   */
+  packageName?: string;
+  /** The package's own mount path from meta.json, iff overridden (#105). */
+  packagePath?: string;
 };
 
 export type SkippedUi = {
@@ -163,6 +177,49 @@ export function scanUis(opts: ScanOpts = {}): ScanResult {
       continue;
     }
 
+    // instance.json sidecar (#105) — apply the instance identity override
+    // BEFORE the reserved-path check so the check sees the EFFECTIVE mount.
+    // Pre-override installs have no sidecar and take none of these branches.
+    let packageName: string | undefined;
+    let packagePath: string | undefined;
+    try {
+      const instance = readInstanceRecord(uiDir);
+      if (instance) {
+        if (instance.name !== undefined && instance.name !== dirName) {
+          // Instance identity IS the uis/ directory name (delete/reload
+          // resolve `uis/<name>` from the URL); a disagreeing sidecar would
+          // split the registry key from the on-disk key — refuse it.
+          const reason = `instance.json name "${instance.name}" must match the directory name "${dirName}"`;
+          logger.warn(`[app] skip ${dirName}: ${reason}`);
+          candidates.push({ dirName, uiDir, status: "invalid-instance", reason });
+          continue;
+        }
+        // Normalized pair: when EITHER field is overridden, record BOTH
+        // package values — display logic ("instance of <package>") never has
+        // to reason about which half changed (#115 review nit).
+        const overridden =
+          (instance.name !== undefined && instance.name !== meta.name) ||
+          (instance.path !== undefined && instance.path !== meta.path);
+        if (overridden) {
+          packageName = meta.name;
+          packagePath = meta.path;
+        }
+        meta = {
+          ...meta,
+          name: instance.name ?? meta.name,
+          path: instance.path ?? meta.path,
+        };
+      }
+    } catch (e) {
+      const reason =
+        e instanceof InvalidInstanceRecordError
+          ? e.message
+          : `instance.json validation failed: ${(e as Error).message}`;
+      logger.warn(`[app] skip ${dirName}: ${reason}`);
+      candidates.push({ dirName, uiDir, status: "invalid-instance", reason });
+      continue;
+    }
+
     if (RESERVED_PATHS.has(meta.path)) {
       const reason = `meta.path "${meta.path}" is reserved (admin SPA)`;
       logger.warn(`[app] skip ${dirName}: ${reason}`);
@@ -170,7 +227,14 @@ export function scanUis(opts: ScanOpts = {}): ScanResult {
       continue;
     }
 
-    candidates.push({ dirName, uiDir, distDir, meta });
+    candidates.push({
+      dirName,
+      uiDir,
+      distDir,
+      meta,
+      ...(packageName !== undefined ? { packageName } : {}),
+      ...(packagePath !== undefined ? { packagePath } : {}),
+    });
   }
 
   // Resolve mount-path collisions deterministically: among UIs declaring the

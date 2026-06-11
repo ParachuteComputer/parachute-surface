@@ -273,9 +273,17 @@ export function UiInfo() {
               </dd>
             </div>
             <div>
-              <dt>Package</dt>
+              <dt>Instance</dt>
               <dd>
                 <code>{ui.name}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Package</dt>
+              <dd>
+                {/* Package identity (#105) — differs from the instance name on
+                    a renamed instance; older daemons omit packageName. */}
+                <code>{ui.packageName ?? ui.name}</code>
                 {ui.version && <span className="muted"> · v{ui.version}</span>}
               </dd>
             </div>
@@ -488,7 +496,14 @@ export function UiInfo() {
       )}
 
       <article className="info-card">
-        <h2 className="info-card__title">meta.json</h2>
+        {/* A renamed instance's effective meta carries the INSTANCE identity
+            (#105) — labelling it "meta.json" would misrepresent the on-disk
+            package file, which keeps the package's own name/path. */}
+        <h2 className="info-card__title">
+          {ui.packageName && ui.packageName !== ui.name
+            ? "Effective meta (instance overrides applied)"
+            : "meta.json"}
+        </h2>
         <pre className="meta-json">{JSON.stringify(data.meta, null, 2)}</pre>
       </article>
     </section>
