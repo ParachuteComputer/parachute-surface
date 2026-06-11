@@ -590,15 +590,36 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
   // "pending-credential" (their factory was deferred at add/boot because no
   // credential was stored). Run the deferred mounts now; still-gated
   // records (different vault, ambiguous binding) stay pending untouched.
+  // `removed` retries too (#111): deleting a credential can RESOLVE the
+  // multi-credential ambiguity gate (two candidates for a vault → one).
   let mounted: string[] = [];
-  if (body.op !== "removed" && opts.state.backends) {
+  if (opts.state.backends) {
     mounted = await opts.state.backends.retryPendingCredentialMounts(opts.state.registeredUis);
     if (mounted.length > 0) {
       opts.logger?.log(
         `[app-admin] credential ${body.connection_id} unblocked deferred backend mount(s): ${mounted.join(", ")}`,
       );
+      // A delivery-triggered mount changes hub-visible status (pending →
+      // active): refresh services.json exactly like add/reload do (#111),
+      // or the hub tile reads "pending" until the next lifecycle event.
+      if (!opts.skipSelfRegisterRefresh) {
+        try {
+          selfRegister({
+            boundPort: 0, // ignored — existing entry's port preserves
+            installDir: resolveProjectRoot(),
+            manifestPath: opts.manifestPath,
+            extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+            logger: opts.logger,
+          });
+        } catch (e) {
+          opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
+        }
+      }
     }
   }
+  // `mounted` lists only instances whose retried factory SUCCEEDED — a
+  // retry that fails reads backend-error and is reported by /surface/list,
+  // not here (#111; see retryPendingCredentialMounts).
   return Response.json({
     ok: true,
     op: body.op,
