@@ -25,6 +25,7 @@ import * as Y from "yjs";
 const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const MESSAGE_AUTH = 2;
+const MESSAGE_CLOSE = 7;
 
 /** Auth sub-message types (@hocuspocus/common auth.ts). */
 const AUTH_TOKEN = 0;
@@ -107,6 +108,8 @@ export class CollabTestClient {
   /** Server-granted scope from the Authenticated reply ("read-write" | "readonly"). */
   scope: string | null = null;
   denyReason: string | null = null;
+  /** Reason from a server-sent protocol CLOSE message (Connection.close). */
+  serverClosedReason: string | null = null;
   readonly #token: string;
   #connection: FakeConnection | null = null;
 
@@ -238,8 +241,16 @@ export class CollabTestClient {
         );
         break;
       }
+      case MESSAGE_CLOSE: {
+        // The engine's Connection.close sends a protocol-level Close
+        // message (it never closes the raw socket itself); the real
+        // provider reacts by closing the connection — mirror that.
+        this.serverClosedReason = decoding.readVarString(decoder);
+        this.disconnect();
+        break;
+      }
       default:
-        // SyncStatus / Stateless / Close — irrelevant to these tests.
+        // SyncStatus / Stateless — irrelevant to these tests.
         break;
     }
   }

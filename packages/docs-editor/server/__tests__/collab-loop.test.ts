@@ -289,10 +289,9 @@ describe("collab loop", () => {
     a.connect(m.backend.websocket ?? {});
     await waitUntil(() => a.fragmentText().includes("base"), { label: "A seeded" });
     a.appendParagraph("first edit");
-    await waitUntil(
-      () => (m.vault.notes.get("doc-race")?.content ?? "").includes("first edit"),
-      { label: "first edit acked" },
-    );
+    await waitUntil(() => (m.vault.notes.get("doc-race")?.content ?? "").includes("first edit"), {
+      label: "first edit acked",
+    });
 
     // Script the in-flight unload: the disconnect-time engine store flush
     // fails ONCE (transient) so the doc stays dirty into unloadDocument;
@@ -320,10 +319,9 @@ describe("collab loop", () => {
 
     releaseGate();
     m.vault.updateGate = null;
-    await waitUntil(
-      () => (m.vault.notes.get("doc-race")?.content ?? "").includes("second edit"),
-      { label: "second edit acked after gate" },
-    );
+    await waitUntil(() => (m.vault.notes.get("doc-race")?.content ?? "").includes("second edit"), {
+      label: "second edit acked after gate",
+    });
     // Engine kept serving the doc (the unload aborted on B's connection).
     await waitUntil(() => b.fragmentText().includes("second edit"), { label: "B synced" });
 
@@ -390,6 +388,63 @@ describe("collab loop", () => {
     expect(garbage.denyReason).toBe(replay.denyReason as string);
 
     first.disconnect();
+  });
+
+  test("revoking a share TERMINATES the live WS session — edits stop immediately", async () => {
+    // Auth is evaluated once at onAuthenticate; without the grant-change
+    // sweep a revoked collaborator keeps editing until they disconnect,
+    // while HTTP-plane revocation is immediate.
+    made = await makeBackend();
+    const m = made;
+    m.vault.noteFixture("doc-rv", "# Revocable\n\nbody");
+    m.vault.noteFixture("doc-keep", "# Keeper\n\nbody");
+
+    const revokedCap = await mintShare(m, "doc-rv", "edit");
+    const keptCap = await mintShare(m, "doc-keep", "edit");
+
+    const victim = new CollabTestClient("doc-rv", await audienceTicket(m, revokedCap));
+    const bystander = new CollabTestClient("doc-keep", await audienceTicket(m, keptCap));
+    victim.connect(m.backend.websocket ?? {});
+    bystander.connect(m.backend.websocket ?? {});
+    await waitUntil(
+      () => victim.authState === "authenticated" && bystander.authState === "authenticated",
+      { label: "both authenticated" },
+    );
+    await waitUntil(() => victim.fragmentText().includes("body"), { label: "victim synced" });
+
+    // The operator revokes the victim's share over REST.
+    const shares = await m.backend.fetch(
+      new Request(`https://docs.test/surface/docs/api/shares`, {
+        headers: { authorization: `Bearer ${OPERATOR_JWT}` },
+      }),
+    );
+    const { grants } = (await shares.json()) as {
+      grants: { id: string; resource: string }[];
+    };
+    const target = grants.find((g) => g.resource === "doc-rv");
+    expect(target).toBeDefined();
+    const revoked = await m.backend.fetch(
+      new Request(`https://docs.test/surface/docs/api/shares/${(target as { id: string }).id}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${OPERATOR_JWT}` },
+      }),
+    );
+    expect(revoked.status).toBe(200);
+
+    // The live session is closed by the server (the engine's
+    // Connection.close ships a protocol-level Close message)…
+    await waitUntil(() => victim.serverClosedReason !== null, {
+      label: "victim connection closed on revocation",
+    });
+    // …the unaffected session is NOT…
+    expect(bystander.serverClosedReason).toBeNull();
+    // …and post-revocation edits never reach the vault.
+    victim.appendParagraph("ghost edit after revocation");
+    await new Promise((r) => setTimeout(r, 100));
+    await m.reconciler.flush();
+    expect(m.vault.notes.get("doc-rv")?.content ?? "").not.toContain("ghost edit after revocation");
+
+    bystander.disconnect();
   });
 
   test("disconnect bookkeeping is idempotent (upstream double-onDisconnect)", async () => {

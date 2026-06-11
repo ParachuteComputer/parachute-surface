@@ -41,6 +41,7 @@
  */
 
 import {
+  type Connection,
   Hocuspocus,
   type WebSocketLike,
   type connectedPayload,
@@ -89,9 +90,18 @@ interface CollabContext {
 export function createCollab(deps: CollabDeps): Collab {
   const { ctx, authz, reconciler, tickets, workingTag } = deps;
 
-  // socketId + documentName → present. The ONLY mutable disconnect
+  /** One live, authenticated document connection. */
+  interface CollabSession {
+    documentName: string;
+    actor: Actor;
+    /** edit_content verdict at auth time — a change forces re-auth. */
+    writable: boolean;
+    connection: Connection<CollabContext>;
+  }
+
+  // socketId + documentName → session. The ONLY mutable disconnect
   // bookkeeping; keyed so the upstream double-onDisconnect dedupes.
-  const sessions = new Map<string, string>(); // key → documentName
+  const sessions = new Map<string, CollabSession>();
 
   const sessionKey = (socketId: string, documentName: string): string =>
     `${socketId}\0${documentName}`;
@@ -162,7 +172,14 @@ export function createCollab(deps: CollabDeps): Collab {
     },
 
     async connected(data: connectedPayload<CollabContext>): Promise<void> {
-      sessions.set(sessionKey(data.socketId, data.documentName), data.documentName);
+      const actor = data.context.actor;
+      if (actor === undefined) return; // unreachable: onAuthenticate gates
+      sessions.set(sessionKey(data.socketId, data.documentName), {
+        documentName: data.documentName,
+        actor,
+        writable: data.connectionConfig.readOnly !== true,
+        connection: data.connection,
+      });
     },
 
     async onDisconnect(data: onDisconnectPayload<CollabContext>): Promise<void> {
@@ -170,6 +187,65 @@ export function createCollab(deps: CollabDeps): Collab {
       // the key already deleted and does nothing.
       sessions.delete(sessionKey(data.socketId, data.documentName));
     },
+  });
+
+  // LONG-LIVED AUTHORIZATION: the HTTP plane re-resolves grants on every
+  // request, but a WS connection authenticates ONCE — without this, a
+  // revoked collaborator keeps editing until they disconnect. The
+  // GrantStore's onChange seam (SSE-fed + local optimistic mutations)
+  // triggers a sweep of every live AUDIENCE session (the operator never
+  // consults grants): any session whose read access is gone — or whose
+  // write verdict changed — is closed, forcing re-auth on reconnect with
+  // a fresh ticket. Single-flight with a re-queue bit so a burst of
+  // grant changes costs one sweep.
+  let sweeping = false;
+  let sweepQueued = false;
+  const sweepSessions = async (): Promise<void> => {
+    if (sweeping) {
+      sweepQueued = true;
+      return;
+    }
+    sweeping = true;
+    try {
+      do {
+        sweepQueued = false;
+        for (const [key, session] of [...sessions]) {
+          if (session.actor.kind === "operator") continue;
+          if (!sessions.has(key)) continue; // disconnected mid-sweep
+          let allowed = false;
+          let writable = false;
+          try {
+            const note = await ctx.vault.getNote(session.documentName);
+            if (note !== null && Array.isArray(note.tags) && note.tags.includes(workingTag)) {
+              allowed = await authz.can(session.actor, note, "read");
+              writable = allowed && (await authz.can(session.actor, note, "edit_content"));
+            }
+          } catch (err) {
+            // Transient vault failure: the GrantStore already fails
+            // closed on its own plane; killing every live session here
+            // would be a self-DoS. Keep it — the next change re-sweeps.
+            ctx.log.warn(
+              `collab: re-auth sweep for ${session.documentName} failed (${(err as Error).message ?? err})`,
+            );
+            continue;
+          }
+          if (!allowed || writable !== session.writable) {
+            sessions.delete(key);
+            try {
+              // Generic reason — revoked and never-granted look alike.
+              session.connection.close({ code: 1008, reason: "permission changed" });
+            } catch {
+              // already closing
+            }
+          }
+        }
+      } while (sweepQueued);
+    } finally {
+      sweeping = false;
+    }
+  };
+  const detachGrantWatch = authz.grants.onChange(() => {
+    void sweepSessions();
   });
 
   // Stable SurfaceSocket identity (host contract) keys the engine's
@@ -216,12 +292,13 @@ export function createCollab(deps: CollabDeps): Collab {
     engine: hocuspocus,
     presence(): Record<string, number> {
       const counts: Record<string, number> = {};
-      for (const documentName of sessions.values()) {
-        counts[documentName] = (counts[documentName] ?? 0) + 1;
+      for (const session of sessions.values()) {
+        counts[session.documentName] = (counts[session.documentName] ?? 0) + 1;
       }
       return counts;
     },
     async shutdown(): Promise<void> {
+      detachGrantWatch();
       for (const connection of connections.values()) {
         connection.handleClose({ code: 1001, reason: "surface shutting down" });
       }
