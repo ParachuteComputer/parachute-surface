@@ -178,6 +178,10 @@ export class GrantStore {
     };
   }
 
+  // NOTE: a revalidation triggered FROM a consumer's change-handler work
+  // (e.g. a session sweep calling can() in degraded mode) fires this again —
+  // consumers must tolerate re-entrant notifications (the docs-editor sweep
+  // handles it with a single-flight + re-queue bit).
   #notifyChange(): void {
     for (const handler of this.#changeHandlers) {
       try {

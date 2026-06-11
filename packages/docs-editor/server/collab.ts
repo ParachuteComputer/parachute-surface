@@ -157,6 +157,11 @@ export function createCollab(deps: CollabDeps): Collab {
       // Before the engine destroys the Y.Doc: final flush + snapshot
       // persist + drop live tracking. (After reconciler.stop() this is a
       // no-op — tracking is already gone.)
+      // If unload() itself throws (vault write failure on the final
+      // flush), the exception escapes this hook: Hocuspocus aborts the
+      // unload (doc stays mapped) and the reconciler owns its own
+      // partial-unload recovery — the re-adopt below is only for the
+      // clean-unload + raced-connection case.
       await reconciler.unload(data.documentName);
       // A connection may have raced in DURING the unload's vault round
       // trip: createDocument returns the still-mapped doc WITHOUT
@@ -229,6 +234,10 @@ export function createCollab(deps: CollabDeps): Collab {
             );
             continue;
           }
+          // `writable !== session.writable` includes UPGRADES (view->edit):
+          // close + force re-auth so the connection picks up its new
+          // readOnly flag — in-place mutation of a live engine connection
+          // has no supported seam.
           if (!allowed || writable !== session.writable) {
             sessions.delete(key);
             try {
