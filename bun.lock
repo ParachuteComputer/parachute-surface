@@ -147,7 +147,7 @@
     },
     "packages/surface-host": {
       "name": "@openparachute/surface",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "bin": {
         "parachute-surface": "bin/parachute-surface.ts",
       },
@@ -204,7 +204,7 @@
     },
     "packages/surface-server": {
       "name": "@openparachute/surface-server",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@openparachute/scope-guard": "^0.4.0-rc.1",
