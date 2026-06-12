@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Server kit for backed Parachute surfaces — actor resolution (hub JWT / capability links / anon), audience store, vault-native grants with live SSE cache, deny-by-default routing, and a public conformance suite. A library surface backends import inside createBackend(ctx); never a host object.",
   "module": "src/index.ts",
   "type": "module",

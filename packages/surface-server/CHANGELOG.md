@@ -1,5 +1,24 @@
 # Changelog — @openparachute/surface-server
 
+## 0.1.2 (2026-06-12)
+
+- `GrantStore.onChange(handler)` — subscribe to grant-set changes, fired after
+  any cache mutation (stream snapshot/upsert/remove, degraded-revalidation
+  rebuild, optimistic local writes). Coarse by design (no payload): consumers
+  holding long-lived authorization (live collab connections) re-evaluate via
+  `can()`; handler errors are contained, never thrown into the stream. (#100)
+- Missing-note oracle closed: the deny-by-default router normalizes the
+  vault's typed not-found on note reads to the same 404 as a denied read
+  (missing ≡ denied) instead of leaking a 500-vs-404 existence oracle. The
+  `isVaultNotFound` helper is exported for backends doing their own note
+  reads. (#102)
+- Reconciler not-found normalization: `getNote` throws normalize to `null`
+  through the same `isVaultNotFound` seam, so deleted-note branches are
+  reachable — tracking drops instead of retrying forever against a gone
+  note. (#117)
+- `SECURITY.template.md` ships in the published package — the fill-in
+  security-posture template for surfaces built on the kit. (#116)
+
 ## 0.1.1 (2026-06-10)
 
 Dependency-range fix, no code changes.
