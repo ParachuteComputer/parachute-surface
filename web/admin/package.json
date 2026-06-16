@@ -2,7 +2,7 @@
   "name": "@openparachute/surface-admin-ui",
   "version": "0.2.0-rc.3",
   "private": true,
-  "description": "Vite + React admin SPA for parachute-app. Mounted at /surface/admin/ by the daemon.",
+  "description": "Vite + React admin SPA for parachute-surface. Mounted at /surface/admin/ by the daemon.",
   "license": "AGPL-3.0",
   "type": "module",
   "scripts": {
