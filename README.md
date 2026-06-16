@@ -2,7 +2,7 @@
 
 **Surface is the UI host module for [Parachute](https://parachute.computer).** It serves bundled reference surfaces over a vault and hosts your own custom surfaces — each as a self-contained static SPA, all under one origin, all wired to the hub's identity.
 
-**[Notes](https://github.com/ParachuteComputer/parachute-notes) is bundled and auto-installed today.** Calendar, tasks, and other reference surfaces land alongside it as the set grows. Bring your own surface too: drop a built bundle in (or point at an npm package), and Surface mounts it, registers it as an OAuth client of the hub, and serves it.
+**[Notes](./packages/notes-ui) is bundled and auto-installed today.** Calendar, tasks, and other reference surfaces land alongside it as the set grows. Bring your own surface too: drop a built bundle in (or point at an npm package), and Surface mounts it, registers it as an OAuth client of the hub, and serves it.
 
 > A *surface* is any UI that talks to a vault — a daily-capture inbox, a project dashboard, a graph explorer. Surface is the host that runs them. To build one, reach for [`@openparachute/surface-client`](./packages/surface-client) (browser auth + typed vault client) and [`@openparachute/surface-render`](./packages/surface-render) (note rendering); you don't hand-roll OAuth or the vault REST layer.
 
