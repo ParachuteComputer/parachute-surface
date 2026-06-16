@@ -21,8 +21,11 @@ import * as path from "node:path";
 import {
   DcrError,
   type OauthClientRecord,
+  buildSurfaceRedirectUris,
+  knownHubOrigins,
   readOauthClientFile,
   registerOauthClient,
+  selfHealRedirectUris,
   unregisterOauthClient,
   writeOauthClientFile,
 } from "../dcr.ts";
@@ -37,6 +40,17 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+/**
+ * Save/clear/restore PARACHUTE_HUB_ORIGIN around an env-sensitive block.
+ * The single biome-ignore lives here so the surface#118 blocks below don't
+ * each repeat it (matches the convention in auth.test.ts / http-server.test.ts).
+ */
+function setHubOriginEnv(value: string | undefined): void {
+  // biome-ignore lint/performance/noDelete: env-var cleanup is rare-path test code
+  if (value === undefined) delete process.env.PARACHUTE_HUB_ORIGIN;
+  else process.env.PARACHUTE_HUB_ORIGIN = value;
+}
 
 describe("registerOauthClient", () => {
   test("sends RFC 7591-shaped body with no auth", async () => {
@@ -308,5 +322,198 @@ describe("unregisterOauthClient", () => {
     });
     expect(result.hubDeleteStatus).toBe("skipped");
     expect(result.localFileRemoved).toBe(true);
+  });
+});
+
+// ===========================================================================
+// surface#118 — multi-hub-origin redirect_uri registration + boot self-heal
+// ===========================================================================
+
+describe("knownHubOrigins (surface#118)", () => {
+  const LOOPBACK = "http://127.0.0.1:1939";
+  const PUBLIC = "https://box.taildf9ce2.ts.net";
+  let savedEnv: string | undefined;
+  beforeEach(() => {
+    savedEnv = process.env.PARACHUTE_HUB_ORIGIN;
+    setHubOriginEnv(undefined);
+  });
+  afterEach(() => {
+    setHubOriginEnv(savedEnv);
+  });
+
+  test("loopback-only box (no env): single origin", () => {
+    expect(knownHubOrigins(LOOPBACK)).toEqual([LOOPBACK]);
+  });
+
+  test("exposed box (PARACHUTE_HUB_ORIGIN set): includes BOTH public + loopback", () => {
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    const origins = knownHubOrigins(LOOPBACK);
+    // env-resolved public origin first, loopback second.
+    expect(origins).toContain(PUBLIC);
+    expect(origins).toContain(LOOPBACK);
+    expect(origins[0]).toBe(PUBLIC);
+  });
+
+  test("env equal to config.hub_url collapses (no dupe)", () => {
+    process.env.PARACHUTE_HUB_ORIGIN = LOOPBACK;
+    expect(knownHubOrigins(LOOPBACK)).toEqual([LOOPBACK]);
+  });
+});
+
+describe("buildSurfaceRedirectUris (surface#118)", () => {
+  const LOOPBACK = "http://127.0.0.1:1939";
+  const PUBLIC = "https://box.taildf9ce2.ts.net";
+  let savedEnv: string | undefined;
+  beforeEach(() => {
+    savedEnv = process.env.PARACHUTE_HUB_ORIGIN;
+    setHubOriginEnv(undefined);
+  });
+  afterEach(() => {
+    setHubOriginEnv(savedEnv);
+  });
+
+  test("loopback-only: three callback forms on loopback", () => {
+    expect(buildSurfaceRedirectUris(LOOPBACK, "/surface/notes")).toEqual([
+      `${LOOPBACK}/surface/notes/`,
+      `${LOOPBACK}/surface/notes/oauth/callback`,
+      `${LOOPBACK}/surface/notes/oauth-callback`,
+    ]);
+  });
+
+  test("exposed box: the three forms registered on BOTH origins (the fix)", () => {
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    const uris = buildSurfaceRedirectUris(LOOPBACK, "/surface/notes");
+    // Public-origin runtime callback — what window.location.origin produces.
+    expect(uris).toContain(`${PUBLIC}/surface/notes/oauth/callback`);
+    expect(uris).toContain(`${PUBLIC}/surface/notes/`);
+    expect(uris).toContain(`${PUBLIC}/surface/notes/oauth-callback`);
+    // Loopback forms still there for the local-box flow.
+    expect(uris).toContain(`${LOOPBACK}/surface/notes/oauth/callback`);
+    expect(uris).toContain(`${LOOPBACK}/surface/notes/`);
+  });
+});
+
+describe("selfHealRedirectUris (surface#118 boot self-heal)", () => {
+  const LOOPBACK = "http://127.0.0.1:1939";
+  const PUBLIC = "https://box.taildf9ce2.ts.net";
+  let savedEnv: string | undefined;
+  beforeEach(() => {
+    savedEnv = process.env.PARACHUTE_HUB_ORIGIN;
+    setHubOriginEnv(undefined);
+  });
+  afterEach(() => {
+    setHubOriginEnv(savedEnv);
+  });
+
+  function seedUi(name: string, mountPath: string, redirectUris: string[]): string {
+    const uiDir = path.join(tmp, name);
+    fs.mkdirSync(uiDir, { recursive: true });
+    const record: OauthClientRecord = {
+      client_id: `client_${name}`,
+      client_name: `Surface ${name}`,
+      redirect_uris: redirectUris,
+      scope: "vault:default:read",
+      status: "approved",
+      registered_at: new Date().toISOString(),
+      hub_url: LOOPBACK,
+    };
+    writeOauthClientFile(uiDir, record);
+    return uiDir;
+  }
+
+  test("loopback-only registration on a now-exposed box → re-registers with public origin", async () => {
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    const uiDir = seedUi("notes", "/surface/notes", [
+      `${LOOPBACK}/surface/notes/`,
+      `${LOOPBACK}/surface/notes/oauth/callback`,
+      `${LOOPBACK}/surface/notes/oauth-callback`,
+    ]);
+
+    let sentUris: string[] | undefined;
+    const fakeFetch: import("../dcr.ts").FetchFn = (_url, init) => {
+      sentUris = JSON.parse(String(init?.body)).redirect_uris as string[];
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            client_id: "client_notes",
+            client_name: "Surface notes",
+            redirect_uris: sentUris,
+            grant_types: ["authorization_code"],
+            response_types: ["code"],
+            token_endpoint_auth_method: "none",
+            client_id_issued_at: 1,
+            status: "approved",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    };
+
+    const outcome = await selfHealRedirectUris({
+      uis: [{ uiDir, meta: { path: "/surface/notes", scopes_required: ["vault:default:read"] } }],
+      hubUrl: LOOPBACK,
+      operatorToken: "op-token",
+      fetchFn: fakeFetch,
+      logger: silentLogger,
+    });
+
+    expect(outcome.reregistered).toEqual([uiDir]);
+    // The re-register sent the public-origin runtime callback — the missing URI.
+    expect(sentUris).toContain(`${PUBLIC}/surface/notes/oauth/callback`);
+    // On-disk record updated to include the public origin.
+    const onDisk = readOauthClientFile(uiDir);
+    expect(onDisk?.redirect_uris).toContain(`${PUBLIC}/surface/notes/oauth/callback`);
+  });
+
+  test("already covers every known origin → no re-register (no network call)", async () => {
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    const uiDir = seedUi(
+      "notes",
+      "/surface/notes",
+      buildSurfaceRedirectUris(LOOPBACK, "/surface/notes"),
+    );
+    let called = false;
+    const fakeFetch: import("../dcr.ts").FetchFn = () => {
+      called = true;
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    };
+    const outcome = await selfHealRedirectUris({
+      uis: [{ uiDir, meta: { path: "/surface/notes" } }],
+      hubUrl: LOOPBACK,
+      fetchFn: fakeFetch,
+      logger: silentLogger,
+    });
+    expect(called).toBe(false);
+    expect(outcome.upToDate).toEqual([uiDir]);
+    expect(outcome.reregistered).toEqual([]);
+  });
+
+  test("UI with no .oauth-client.json is skipped (not counted)", async () => {
+    const uiDir = path.join(tmp, "unregistered");
+    fs.mkdirSync(uiDir, { recursive: true });
+    const outcome = await selfHealRedirectUris({
+      uis: [{ uiDir, meta: { path: "/surface/unregistered" } }],
+      hubUrl: LOOPBACK,
+      logger: silentLogger,
+    });
+    expect(outcome.checked).toBe(0);
+    expect(outcome.reregistered).toEqual([]);
+  });
+
+  test("hub-unreachable re-register is best-effort (recorded as failed, not thrown)", async () => {
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    const uiDir = seedUi("notes", "/surface/notes", [`${LOOPBACK}/surface/notes/`]);
+    const fakeFetch: import("../dcr.ts").FetchFn = () => Promise.reject(new Error("ECONNREFUSED"));
+    const outcome = await selfHealRedirectUris({
+      uis: [{ uiDir, meta: { path: "/surface/notes" } }],
+      hubUrl: LOOPBACK,
+      fetchFn: fakeFetch,
+      logger: silentLogger,
+    });
+    expect(outcome.reregistered).toEqual([]);
+    expect(outcome.failed).toHaveLength(1);
+    expect(outcome.failed[0]?.uiDir).toBe(uiDir);
+    // On-disk record untouched on failure.
+    expect(readOauthClientFile(uiDir)?.redirect_uris).toEqual([`${LOOPBACK}/surface/notes/`]);
   });
 });

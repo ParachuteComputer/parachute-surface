@@ -50,6 +50,83 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
+import { getHubOrigin } from "./auth.ts";
+
+/**
+ * The three redirect_uri path forms a hosted surface registers for a given
+ * mount, rooted at one hub origin. Kept in one place so the install-time DCR,
+ * the re-register entry point, and the self-heal all stay byte-identical.
+ *
+ *   - `<base>/`               — the SPA root (a callback-at-root flow).
+ *   - `<base>/oauth/callback` — surface-client's hosted-mode RUNTIME callback
+ *                               (the canonical form; closes surface#118 part 1).
+ *   - `<base>/oauth-callback` — legacy hyphenated form (pre-R2 clients).
+ */
+export function redirectFormsForBase(redirectBase: string): string[] {
+  const base = redirectBase.replace(/\/$/, "");
+  return [`${base}/`, `${base}/oauth/callback`, `${base}/oauth-callback`];
+}
+
+/**
+ * Resolve the SET of hub origins this surface-host knows about, for DCR
+ * redirect_uri registration (surface#118).
+ *
+ * THE PROBLEM. surface-host registers its OAuth client's redirect_uris from a
+ * single install-frozen origin (`config.hub_url`, default loopback). At
+ * sign-in the browser computes its redirect_uri from its REAL origin
+ * (`window.location.origin` — tailnet/public). The hub validates redirect_uris
+ * by strict exact-match (RFC 8252 anti-open-redirect), so a loopback-only
+ * registration rejects every off-localhost user with "Redirect mismatch".
+ *
+ * THE SEAM. surface-host learns the public hub origin the same way every
+ * committed-core module does: `getHubOrigin()` resolves `PARACHUTE_HUB_ORIGIN`
+ * (set by hub-as-supervisor when the box is exposed) first, then
+ * `config.hub_url`, then loopback. We register against BOTH the config
+ * loopback AND the env-resolved origin when they differ, so a supervised,
+ * exposed surface registers the public-origin variant directly — independent
+ * of (and belt-and-suspenders with) the hub-side DCR origin-expansion.
+ *
+ * Loopback is always included so the operator's local-box flow keeps working
+ * even after the public origin lands. Order: env-resolved origin first (the
+ * one most browsers will actually use once exposed), loopback second; deduped.
+ */
+export function knownHubOrigins(hubUrl: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | undefined) => {
+    if (!raw) return;
+    const trimmed = raw.replace(/\/$/, "");
+    if (trimmed.length === 0 || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+  // The env-resolved origin (PARACHUTE_HUB_ORIGIN → config.hub_url → loopback).
+  // On a supervised exposed box this is the PUBLIC origin; on a bare loopback
+  // box it equals config.hub_url and the dedupe collapses it.
+  push(getHubOrigin(hubUrl));
+  // The config loopback always stays registered.
+  push(hubUrl);
+  return out;
+}
+
+/**
+ * Build the full redirect_uris array a surface registers for `mountPath`,
+ * across every known hub origin. Each origin contributes the three path forms
+ * (`redirectFormsForBase`). The order is stable + deduped.
+ */
+export function buildSurfaceRedirectUris(hubUrl: string, mountPath: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const origin of knownHubOrigins(hubUrl)) {
+    for (const uri of redirectFormsForBase(`${origin}${mountPath}`)) {
+      if (seen.has(uri)) continue;
+      seen.add(uri);
+      out.push(uri);
+    }
+  }
+  return out;
+}
+
 /**
  * Persisted client record. Saved at `~/.parachute/surface/uis/<name>/.oauth-client.json`.
  * `same_hub: true` is hub's auto-trust flag (per design doc section 6) — we
@@ -331,4 +408,111 @@ export async function unregisterOauthClient(
   }
 
   return { localFileRemoved, hubDeleteStatus, detail };
+}
+
+// ===========================================================================
+// Boot-time redirect-uri self-heal (surface#118)
+// ===========================================================================
+
+/** Minimal shape the self-heal needs from a registered UI. */
+export type SelfHealUi = {
+  uiDir: string;
+  meta: { path: string; scopes_required?: string[] };
+};
+
+export type RedirectSelfHealOpts = {
+  uis: readonly SelfHealUi[];
+  hubUrl: string;
+  operatorToken?: string;
+  fetchFn?: FetchFn;
+  logger?: Pick<Console, "log" | "warn" | "error">;
+};
+
+export type RedirectSelfHealOutcome = {
+  checked: number;
+  /** UI dirs whose client was re-registered (a known hub origin was missing). */
+  reregistered: string[];
+  /** UI dirs already covering every known hub origin — no work. */
+  upToDate: string[];
+  /** Re-register attempts that failed (best-effort — retried next boot). */
+  failed: Array<{ uiDir: string; detail: string }>;
+};
+
+/**
+ * Boot-time self-heal for the surface#118 class: a surface that registered its
+ * OAuth client while the box was loopback-only (initial install pre-`expose`)
+ * has only loopback redirect_uris on file. Once the operator runs
+ * `parachute expose`, `PARACHUTE_HUB_ORIGIN` resolves to the public origin and
+ * the browser's `window.location.origin` redirect_uri is no longer registered
+ * → "Redirect mismatch" → no off-localhost sign-in.
+ *
+ * This sweep (mirrors the credential-renewal boot sweep, index.ts:300-306)
+ * walks every UI with a stored `.oauth-client.json`, and re-registers any
+ * whose stored `redirect_uris` are MISSING a currently-known hub origin. The
+ * re-register reuses the stored `client_name` (the hub upserts by
+ * client_name + redirects), registers all forms across all known origins via
+ * `buildSurfaceRedirectUris`, and overwrites the on-disk record.
+ *
+ * Best-effort: a hub-unreachable / rejected re-register logs + is retried on
+ * the next boot; it never blocks daemon startup. A no-op when nothing changed
+ * (the common steady-state case) — the membership check is pure-local.
+ */
+export async function selfHealRedirectUris(
+  opts: RedirectSelfHealOpts,
+): Promise<RedirectSelfHealOutcome> {
+  const logger = opts.logger ?? console;
+  const outcome: RedirectSelfHealOutcome = {
+    checked: 0,
+    reregistered: [],
+    upToDate: [],
+    failed: [],
+  };
+
+  for (const ui of opts.uis) {
+    const record = readOauthClientFile(ui.uiDir);
+    if (!record) continue; // no client registered for this UI — nothing to heal
+    outcome.checked++;
+
+    const wanted = buildSurfaceRedirectUris(opts.hubUrl, ui.meta.path);
+    const have = new Set(record.redirect_uris ?? []);
+    const missing = wanted.filter((uri) => !have.has(uri));
+    if (missing.length === 0) {
+      outcome.upToDate.push(ui.uiDir);
+      continue;
+    }
+
+    try {
+      const reg = await registerOauthClient({
+        hubUrl: opts.hubUrl,
+        clientName: record.client_name,
+        redirectUris: wanted,
+        scopes: ui.meta.scopes_required ?? [],
+        ...(opts.operatorToken !== undefined ? { operatorToken: opts.operatorToken } : {}),
+        ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+        logger,
+      });
+      const updated: OauthClientRecord = {
+        client_id: reg.client_id,
+        client_name: reg.client_name ?? record.client_name,
+        redirect_uris: reg.redirect_uris,
+        scope: reg.scope ?? record.scope,
+        ...(reg.status !== undefined ? { status: reg.status } : {}),
+        registered_at: new Date().toISOString(),
+        hub_url: opts.hubUrl,
+      };
+      writeOauthClientFile(ui.uiDir, updated);
+      outcome.reregistered.push(ui.uiDir);
+      logger.log(
+        `[app-dcr] self-heal: re-registered ${record.client_name} with ${missing.length} added redirect_uri(s) for newly-known hub origin(s)`,
+      );
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      outcome.failed.push({ uiDir: ui.uiDir, detail });
+      logger.warn(
+        `[app-dcr] self-heal: re-register failed for ${record.client_name} — will retry next boot: ${detail}`,
+      );
+    }
+  }
+
+  return outcome;
 }

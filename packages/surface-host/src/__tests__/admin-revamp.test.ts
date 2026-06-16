@@ -643,6 +643,49 @@ describe("POST /surface/<name>/register-oauth", () => {
     expect(onDisk.client_id).toBe("client_alpha_retry");
   });
 
+  test("registers the PUBLIC hub origin's callback when PARACHUTE_HUB_ORIGIN is set (surface#118)", async () => {
+    const PUBLIC = "https://box.taildf9ce2.ts.net";
+    const saved = process.env.PARACHUTE_HUB_ORIGIN;
+    process.env.PARACHUTE_HUB_ORIGIN = PUBLIC;
+    try {
+      seedUi("alpha", "/surface/alpha");
+      const state = makeState();
+      let dcrBody: { redirect_uris?: string[] } | undefined;
+      const fetchFn = async (_url: string | URL | Request, _init?: RequestInit) => {
+        if (_init?.body) dcrBody = JSON.parse(String(_init.body)) as { redirect_uris?: string[] };
+        return new Response(
+          JSON.stringify({
+            client_id: "client_alpha_pub",
+            client_name: "alpha",
+            redirect_uris: dcrBody?.redirect_uris ?? [],
+            scope: "vault:*:read",
+            grant_types: ["authorization_code"],
+            response_types: ["code"],
+            token_endpoint_auth_method: "none",
+            client_id_issued_at: 1,
+            status: "approved",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      };
+      const res = await dispatch(jsonReq("POST", "/surface/alpha/register-oauth"), state, {
+        fetchFn,
+        operatorTokenOverride: () => "op-token",
+      });
+      expect(res.status).toBe(200);
+      const sentUris = (dcrBody as { redirect_uris?: string[] } | undefined)?.redirect_uris ?? [];
+      // The public-origin runtime callback — what the off-localhost browser
+      // computes from window.location.origin. This is what surface#118 fixes.
+      expect(sentUris).toContain(`${PUBLIC}/surface/alpha/oauth/callback`);
+      // Loopback forms stay registered for the local-box flow.
+      expect(sentUris).toContain("http://127.0.0.1:1939/surface/alpha/oauth/callback");
+    } finally {
+      // biome-ignore lint/performance/noDelete: env-var cleanup is rare-path test code
+      if (saved === undefined) delete process.env.PARACHUTE_HUB_ORIGIN;
+      else process.env.PARACHUTE_HUB_ORIGIN = saved;
+    }
+  });
+
   test("hub rejection surfaces the hub's words (honest failure)", async () => {
     seedUi("alpha", "/surface/alpha");
     const fetchFn = async () =>
