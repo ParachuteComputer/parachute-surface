@@ -21,10 +21,12 @@ import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { startCredentialRenewal } from "./credential-renewal.ts";
 import { createCredentialTokenProvider, createPendingCredentialGate } from "./credential-store.ts";
+import { selfHealRedirectUris } from "./dcr.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
 import { createHostContextBuilder } from "./host-context.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
+import { readOperatorToken } from "./operator-token.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
 import { scanUis } from "./ui-registry.ts";
 
@@ -151,6 +153,14 @@ export type ServeOptions = {
   credentialsDir?: string;
   /** Skip the boot-time credential renewal sweep + loop (tests). */
   skipCredentialRenewal?: boolean;
+  /**
+   * Skip the boot-time OAuth-redirect-uri self-heal sweep (tests). When
+   * omitted, the sweep runs once on boot: any UI whose stored
+   * `.oauth-client.json` is missing a currently-known hub origin's
+   * redirect_uris (the surface#118 loopback-then-expose case) is
+   * re-registered. Best-effort; never blocks startup.
+   */
+  skipRedirectSelfHeal?: boolean;
 };
 
 export type ServeHandle = {
@@ -175,6 +185,12 @@ export type ServeHandle = {
    * await this to assert post-mount state.
    */
   backendsReady?: Promise<void>;
+  /**
+   * Resolves once the boot-time OAuth-redirect-uri self-heal sweep
+   * completes (surface#118). `undefined` when skipped. Fire-and-forget for
+   * the daemon; tests await it to assert re-registration happened.
+   */
+  redirectSelfHeal?: Promise<import("./dcr.ts").RedirectSelfHealOutcome>;
 };
 
 /**
@@ -305,6 +321,34 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
         logger,
       });
 
+  // OAuth redirect-uri self-heal (surface#118). A surface installed while the
+  // box was loopback-only registered only loopback redirect_uris; once the
+  // operator runs `parachute expose`, the browser's public-origin redirect_uri
+  // is unregistered and sign-in fails ("Redirect mismatch"). On each boot, any
+  // UI whose stored client is missing a now-known hub origin is re-registered.
+  // Fire-and-forget — best-effort, never blocks startup; retried next boot on
+  // failure. Mirrors the credential-renewal boot sweep above.
+  const redirectSelfHeal = opts.skipRedirectSelfHeal
+    ? undefined
+    : selfHealRedirectUris({
+        uis: state.registeredUis,
+        hubUrl: config.hub_url,
+        operatorToken:
+          (opts.operatorTokenOverride
+            ? opts.operatorTokenOverride()
+            : readOperatorToken({ logger })) ?? undefined,
+        ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
+        logger,
+      }).catch((e) => {
+        logger.warn(`[app] redirect self-heal sweep failed: ${(e as Error).message}`);
+        return {
+          checked: 0,
+          reregistered: [],
+          upToDate: [],
+          failed: [],
+        } satisfies import("./dcr.ts").RedirectSelfHealOutcome;
+      });
+
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
     // Fire-and-forget — daemon doesn't block on bootstrap. The add path
@@ -369,6 +413,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     stop,
     backendsReady,
     ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
+    ...(redirectSelfHeal ? { redirectSelfHeal } : {}),
   };
 }
 

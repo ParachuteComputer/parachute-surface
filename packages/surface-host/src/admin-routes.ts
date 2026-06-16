@@ -71,6 +71,7 @@ import {
 import {
   DcrError,
   type OauthClientRecord,
+  buildSurfaceRedirectUris,
   readOauthClientFile,
   registerOauthClient,
   unregisterOauthClient,
@@ -1198,18 +1199,14 @@ export async function addUiInternal(
           ? opts.operatorTokenOverride()
           : readOperatorToken({ logger: opts.logger })) ?? undefined;
       const hubUrl = opts.state.config.hub_url;
-      const redirectBase = `${hubUrl.replace(/\/$/, "")}${mountPath}`;
       try {
         const reg = await registerOauthClient({
           hubUrl,
           clientName: oauthClientNameFor(parsedMeta.displayName, instanceName, parsedMeta.name),
-          redirectUris: [
-            `${redirectBase}/`,
-            // surface-client's hosted-mode runtime callback (the canonical form).
-            `${redirectBase}/oauth/callback`,
-            // Legacy hyphenated form kept for pre-R2 clients.
-            `${redirectBase}/oauth-callback`,
-          ],
+          // Register the three callback forms on EVERY known hub origin
+          // (loopback + the exposed public origin, when known) so an
+          // off-localhost browser's redirect_uri matches — surface#118.
+          redirectUris: buildSurfaceRedirectUris(hubUrl, mountPath),
           scopes: parsedMeta.scopes_required,
           operatorToken,
           fetchFn: opts.fetchFn,
@@ -1733,11 +1730,10 @@ async function handleRegisterOauth(
       ? opts.operatorTokenOverride()
       : readOperatorToken({ logger: opts.logger })) ?? undefined;
   const hubUrl = opts.state.config.hub_url;
-  const redirectBase = `${hubUrl.replace(/\/$/, "")}${ui.meta.path}`;
 
   // Instance-scoped client name (#105) — `packageName` is set iff this
-  // install is a renamed instance; the redirectBase already derives from
-  // the EFFECTIVE mount (ui.meta.path).
+  // install is a renamed instance; the redirect URIs derive from the
+  // EFFECTIVE mount (ui.meta.path).
   const clientName = oauthClientNameFor(
     ui.meta.displayName,
     ui.meta.name,
@@ -1747,13 +1743,10 @@ async function handleRegisterOauth(
     const reg = await registerOauthClient({
       hubUrl,
       clientName,
-      redirectUris: [
-        `${redirectBase}/`,
-        // surface-client's hosted-mode runtime callback (the canonical form).
-        `${redirectBase}/oauth/callback`,
-        // Legacy hyphenated form kept for pre-R2 clients.
-        `${redirectBase}/oauth-callback`,
-      ],
+      // Register the three callback forms on EVERY known hub origin (loopback
+      // + the exposed public origin, when known) — surface#118. This is also
+      // the path the boot self-heal drives once a box gets exposed.
+      redirectUris: buildSurfaceRedirectUris(hubUrl, ui.meta.path),
       scopes: ui.meta.scopes_required,
       operatorToken,
       fetchFn: opts.fetchFn,
