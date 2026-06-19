@@ -277,9 +277,27 @@ describe("disclosure boundary — only the shape leaves", () => {
     expect(text).not.toContain(SECRET_TAG);
     expect(text).not.toContain(SECRET_PATH);
     expect(text).not.toContain("secret_handle");
+    expect(text).not.toContain("attendee_count");
     const envelope = JSON.parse(text);
     expect(envelope.projection).toBe("recent-meetings");
     expect(envelope.count).toBe(2);
+  });
+
+  test("MCP face: search-meetings + meeting ALSO hold the boundary (pin both AI-face paths)", async () => {
+    // The MCP + REST faces share runProjection, but pin the MCP path for EVERY
+    // projection so a future divergence in the MCP handler can't silently leak.
+    for (const [tool, args] of [
+      ["search-meetings", { query: "budget" }],
+      ["meeting", { id: "fireflies:abc123" }],
+    ] as const) {
+      const result = await callTool(tool, args);
+      expect(result.isError).toBeUndefined();
+      const text = result.content[0]?.text ?? "";
+      expect(text).not.toContain(SECRET_TAG);
+      expect(text).not.toContain(SECRET_PATH);
+      expect(text).not.toContain("secret_handle");
+      expect(text).not.toContain("attendee_count");
+    }
   });
 });
 
