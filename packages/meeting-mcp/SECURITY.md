@@ -33,6 +33,16 @@ sees exactly the curated fields:
 `server/__tests__/projections.test.ts` proves a raw-note field that is NOT in
 a shape (a distinctive content/tag marker) never appears in any response.
 
+**Snippet caveat (by design).** `search-meetings` returns a ~200-char window
+of the meeting BODY centered on the match (the `snippet` field), and the
+single `meeting` projection returns the full `body`. Both are deliberate —
+they ARE in the shape. But it means a public `search-meetings` query can
+surface a slice of transcript content near the matched term. If a vault's
+meeting bodies hold content you would not disclose publicly, set those two
+projections' `access` to `"audience"` (the knob below) before deploying — or
+keep only `recent-meetings` public (its summary is the first content line,
+not a query-targeted window).
+
 ## Access (public by design, one-line knob to gate)
 
 Every projection is `access: "public"` — the end-user MCP use case (anyone may

@@ -235,14 +235,25 @@ describe("disclosure boundary — only the shape leaves", () => {
     expect(text).not.toContain("secret_handle");
   });
 
-  test("search-meetings never leaks raw note fields outside the shape", async () => {
+  test("search-meetings never leaks raw note fields OUTSIDE the shape", async () => {
     const text = await (await get(made.backend, "/api/search-meetings?query=budget")).text();
-    // The snippet may quote BODY content around the match — but the
-    // out-of-shape fields (tag, path, secret metadata handle) never appear.
+    // The snippet is a body window (IN the shape — by design), so body content
+    // CAN appear. The boundary is about fields NOT in the shape: the private
+    // tag, the path, and the extra metadata never appear, ever.
     expect(text).not.toContain(SECRET_TAG);
     expect(text).not.toContain(SECRET_PATH);
     expect(text).not.toContain("secret_handle");
     expect(text).not.toContain("attendee_count");
+  });
+
+  test("search-meetings snippet IS a body window (by design) — proves the window reaches body content", async () => {
+    // Searching a term right before the deep marker pulls it into the window.
+    // This makes the documented snippet body-exposure trade-off VERIFIABLE
+    // (and explains why the test above does not assert SECRET_MARKER absent).
+    const body = await (await get(made.backend, "/api/search-meetings?query=Ada")).json();
+    const items = (body as { items: Array<{ snippet?: string }> }).items;
+    expect(items.length).toBe(1);
+    expect(items[0]?.snippet).toContain(SECRET_MARKER);
   });
 
   test("meeting (single): tag/path/secret-metadata never ride out, even with the body", async () => {
@@ -331,5 +342,33 @@ describe("read-only + error hygiene", () => {
     expect(text).not.toContain("exploded");
     expect(text).not.toContain("/internal/path");
     expect(made.logs.errors.some((e) => e.includes("exploded"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// re-targeting seam — the config `tag` overrides the default
+// ---------------------------------------------------------------------------
+
+describe("config `tag` override (the re-targeting seam)", () => {
+  test("a custom config tag drives the projection queries", async () => {
+    const vault = new FakeVault();
+    // Seed a note under a DIFFERENT tag (the council-meetings re-target case).
+    vault.seed("n-council", {
+      createdAt: "2026-06-15T00:00:00Z",
+      tags: ["council/meeting"],
+      content: "# Council session",
+      metadata: { title: "Council session", external_id: "ext:council-1" },
+    });
+    const custom = await makeBackend({ vault, config: { tag: "council/meeting" } });
+    try {
+      const body = await jsonBody(await get(custom.backend, "/api/recent-meetings"));
+      expect(body.count).toBe(1);
+      expect((body.items as Array<{ title?: string }>)[0]?.title).toBe("Council session");
+      // The query went out scoped to the configured tag, not the default.
+      expect((custom.vault.queryInputs.at(-1) as { tag?: string }).tag).toBe("council/meeting");
+    } finally {
+      await custom.backend.shutdown?.();
+      custom.controller.abort();
+    }
   });
 });

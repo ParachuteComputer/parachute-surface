@@ -94,11 +94,12 @@ function meetingSnippet(note: Note, query: string): string | undefined {
     const idx = body.toLowerCase().indexOf(query.trim().toLowerCase());
     if (idx >= 0) {
       const start = Math.max(0, idx - 80);
-      const slice = body
-        .slice(start, idx + query.length + 120)
-        .replace(/\s+/g, " ")
-        .trim();
-      return `${start > 0 ? "…" : ""}${slice}${start + slice.length < body.length ? "…" : ""}`;
+      // Compute the window END against the ORIGINAL body (the slice is
+      // whitespace-compressed below, so its length can't be used to detect
+      // truncation — that produced a spurious trailing "…").
+      const end = Math.min(idx + query.length + 120, body.length);
+      const slice = body.slice(start, end).replace(/\s+/g, " ").trim();
+      return `${start > 0 ? "…" : ""}${slice}${end < body.length ? "…" : ""}`;
     }
   }
   return meetingSummary(note);
