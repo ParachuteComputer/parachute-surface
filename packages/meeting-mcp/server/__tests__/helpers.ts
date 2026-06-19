@@ -122,6 +122,17 @@ export class FakeVault {
   async queryNotes(params: NotesQueryInput): Promise<Note[]> {
     this.queryInputs.push(params);
     if (this.queryError) throw this.queryError;
+    // Mirror the REAL vault: `order_by` works only on a field declared
+    // `indexed: true` — the built-in created_at/updated_at columns and any
+    // undeclared field 400 with FIELD_NOT_INDEXED. The fake declares none, so
+    // any `orderBy` throws. (Trip-wire for the bug the live vault caught:
+    // `orderBy: "created_at"` is invalid — use `sort: "desc"` for created_at.)
+    const orderBy = (params as { orderBy?: unknown }).orderBy;
+    if (typeof orderBy === "string" && orderBy.length > 0) {
+      throw new Error(
+        `metadata field "${orderBy}" is not indexed (order_by requires indexed:true) [FIELD_NOT_INDEXED]`,
+      );
+    }
     return this.matching(params);
   }
 

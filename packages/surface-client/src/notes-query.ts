@@ -121,8 +121,13 @@ export interface NotesQuery {
   metadata?: Record<string, MetadataFilter>;
   /** Date-range filter on `created_at` / `updated_at`. */
   date?: NotesDateFilter;
-  /** Sort column (vault validates — non-indexed columns 400). */
+  /**
+   * Order by an INDEXED METADATA field (declared `indexed: true` via update-tag).
+   * NOT for the built-in `created_at`/`updated_at` columns — those sort via
+   * {@link NotesQuery.sort} instead; passing them here 400s with FIELD_NOT_INDEXED.
+   */
   orderBy?: string;
+  /** Sort direction on the built-in `created_at` column (`"desc"` = newest first). */
   sort?: "asc" | "desc";
   limit?: number;
   offset?: number;
