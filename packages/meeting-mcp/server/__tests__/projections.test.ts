@@ -123,6 +123,15 @@ describe("recent-meetings", () => {
     });
   });
 
+  test("recent-meetings query uses sort, NOT orderBy (vault 400s order_by on created_at)", async () => {
+    await get(made.backend, "/api/recent-meetings");
+    const q = made.vault.queryInputs.at(-1) as { orderBy?: unknown; sort?: unknown };
+    // Direct regression assertion: created_at-desc must ride on `sort`, never
+    // `orderBy` (order_by is for indexed metadata only — live vault FIELD_NOT_INDEXED).
+    expect(q.orderBy).toBeUndefined();
+    expect(q.sort).toBe("desc");
+  });
+
   test("default limit is 20, cap is enforced at 100", async () => {
     await get(made.backend, "/api/recent-meetings");
     expect((made.vault.queryInputs.at(-1) as { limit?: number }).limit).toBe(20);
