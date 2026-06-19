@@ -29,19 +29,43 @@ function renderStatus(status: ConfigStatus): void {
   if (!section || !body) return;
   section.hidden = false;
 
-  const rows = status.providers
-    .map((p) => {
-      const api = p.apiKeySet ? "✓ set" : "✗ missing";
-      const secret = p.webhookSecretSet ? "✓ set" : "✗ missing";
-      return `<tr><td>${p.provider}</td><td>${api}</td><td>${secret}</td></tr>`;
-    })
-    .join("");
-  body.innerHTML = `
-    <p>Notes are tagged <code>#${status.tag}</code>.</p>
-    <table>
-      <thead><tr><th>Provider</th><th>API key</th><th>Webhook secret</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  // Built with DOM APIs + textContent (NOT innerHTML interpolation) so an
+  // operator-configured `tag` / a provider name can never inject markup into
+  // their own page.
+  body.replaceChildren();
+
+  const p = document.createElement("p");
+  p.append("Notes are tagged ");
+  const code = document.createElement("code");
+  code.textContent = `#${status.tag}`;
+  p.append(code, ".");
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const h of ["Provider", "API key", "Webhook secret"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+  const tbody = document.createElement("tbody");
+  for (const prov of status.providers) {
+    const tr = document.createElement("tr");
+    const cells = [
+      prov.provider,
+      prov.apiKeySet ? "✓ set" : "✗ missing",
+      prov.webhookSecretSet ? "✓ set" : "✗ missing",
+    ];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  body.append(p, table);
 }
 
 async function init(): Promise<void> {
