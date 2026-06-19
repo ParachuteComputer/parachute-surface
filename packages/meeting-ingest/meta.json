@@ -1,0 +1,23 @@
+{
+  "name": "meeting-ingest",
+  "displayName": "Meeting Ingest",
+  "tagline": "Receives meeting-transcription webhooks (Fireflies.ai) and files each meeting into the vault as a #meeting note — automatically, server-side.",
+  "path": "/surface/meeting-ingest",
+  "version": "0.1.0",
+  "audience": "surface",
+  "vault_default": "default",
+  "scopes_required": ["vault:default:write"],
+  "server": {
+    "entry": "server/index.bundle.js",
+    "format": "markdown",
+    "capabilities": []
+  },
+  "required_schema": {
+    "tags": [
+      {
+        "name": "meeting",
+        "description": "Meeting notes — one note per ingested meeting transcript. Written by the Meeting Ingest surface from provider webhooks; carries source/external_id/held_on metadata for dedup and timeline placement."
+      }
+    ]
+  }
+}

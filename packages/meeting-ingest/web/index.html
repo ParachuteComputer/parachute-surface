@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meeting Ingest</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Meeting Ingest</h1>
+      <p class="lead">
+        Receives a meeting provider's "Transcription complete" webhook and files each
+        meeting into your vault as a <code>#meeting</code> note — automatically.
+      </p>
+
+      <section id="status" class="card" hidden>
+        <h2>Configuration</h2>
+        <div id="status-body">Checking…</div>
+      </section>
+
+      <section class="card">
+        <h2>Set up Fireflies.ai</h2>
+        <ol>
+          <li>In Fireflies, create an <strong>API key</strong> (Settings → Developer).</li>
+          <li>
+            Write the surface config file at
+            <code id="config-path">~/.parachute/surface/state/meeting-ingest.config.json</code>
+            (chmod <code>600</code>):
+            <pre><code>{
+  "fireflies_api_key": "&lt;your Fireflies API key&gt;",
+  "fireflies_webhook_secret": "&lt;a long random shared secret&gt;",
+  "tag": "meeting"
+}</code></pre>
+          </li>
+          <li>
+            In Fireflies, set the <strong>webhook URL</strong> to
+            <code id="webhook-url">&lt;your-hub-origin&gt;/surface/meeting-ingest/api/webhook/fireflies</code>
+            and the <strong>secret</strong> to the same value as
+            <code>fireflies_webhook_secret</code>.
+          </li>
+          <li>Restart the surface (<code>parachute restart surface</code>).</li>
+        </ol>
+        <p class="muted">
+          Secrets live only in that config file — they are never stored in a note,
+          logged, or returned by this surface.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
