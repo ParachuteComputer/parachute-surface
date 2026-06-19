@@ -87,6 +87,21 @@
         "vite": "^6.0.0",
       },
     },
+    "packages/meeting-mcp": {
+      "name": "@openparachute/meeting-mcp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openparachute/surface": "^0.3.1",
+        "@openparachute/surface-client": "^0.3.0",
+        "@openparachute/surface-server": "^0.1.1",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^1.9.4",
+        "@types/bun": "latest",
+        "typescript": "^5",
+        "vite": "^6.0.0",
+      },
+    },
     "packages/notes-ui": {
       "name": "@openparachute/notes-ui",
       "version": "0.1.6",
@@ -650,6 +665,8 @@
     "@openparachute/docs-editor": ["@openparachute/docs-editor@workspace:packages/docs-editor"],
 
     "@openparachute/meeting-ingest": ["@openparachute/meeting-ingest@workspace:packages/meeting-ingest"],
+
+    "@openparachute/meeting-mcp": ["@openparachute/meeting-mcp@workspace:packages/meeting-mcp"],
 
     "@openparachute/notes-ui": ["@openparachute/notes-ui@workspace:packages/notes-ui"],
 

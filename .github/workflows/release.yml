@@ -12,6 +12,9 @@
 #   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
 #   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (from packages/docs-editor;
 #                                     attaches docs-editor-surface-<v>.tgz to a GitHub Release)
+#   - meeting-ingest release tarball ← tag prefix `meeting-ingest-v...` (from packages/meeting-ingest)
+#   - meeting-mcp release tarball   ← tag prefix `meeting-mcp-v...` (from packages/meeting-mcp;
+#                                     attaches meeting-mcp-surface-<v>.tgz to a GitHub Release)
 #
 # All npm packages have npm Trusted Publisher rules pointing at this workflow
 # file. Jobs gate on the tag prefix so only one package publishes per tag
@@ -91,6 +94,9 @@ on:
       # Meeting-ingest release tags (GitHub release tarball, not npm)
       - 'meeting-ingest-v[0-9]+.[0-9]+.[0-9]+'
       - 'meeting-ingest-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # Meeting-mcp release tags (GitHub release tarball, not npm)
+      - 'meeting-mcp-v[0-9]+.[0-9]+.[0-9]+'
+      - 'meeting-mcp-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 concurrency:
   # Don't let two releases race on the same tag.
@@ -124,12 +130,14 @@ jobs:
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client-, render-, notes-ui-, doc-schema-, server-, and
-    # docs-editor- tags. (The bare `v...` namespace is the catch-all: every NEW
-    # tag prefix MUST be excluded here, or its tag would fire this job too.
-    # `docs-editor-` needs its own exclusion — it does NOT share the
-    # `doc-schema-` prefix.)
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') }}
+    # App-only: skip on client-, render-, notes-ui-, doc-schema-, server-,
+    # docs-editor-, meeting-ingest-, and meeting-mcp- tags. (The bare `v...`
+    # namespace is the catch-all: every NEW tag prefix MUST be excluded here,
+    # or its tag would fire this job too. `docs-editor-` needs its own
+    # exclusion — it does NOT share the `doc-schema-` prefix. Likewise
+    # `meeting-mcp-` and `meeting-ingest-` are DISTINCT prefixes — neither
+    # `startsWith` the other, so each needs its own exclusion.)
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -655,6 +663,107 @@ jobs:
               --verify-tag $PRERELEASE_FLAG \
               --title "meeting-ingest ${GITHUB_REF_NAME#meeting-ingest-v}" \
               --notes "Installable tarball for the Meeting Ingest surface (Fireflies.ai webhook → #meeting note). Install via Surface admin → Add surface → paste: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME — requires hub ≥ the surface audience tier. See packages/meeting-ingest/README.md."
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            "${{ steps.pack.outputs.tarball }}" --clobber
+
+  release-meeting-mcp-tarball:
+    name: attach meeting-mcp installable tarball to a GitHub Release
+    needs: test
+    # meeting-mcp-only: gate on the `meeting-mcp-v...` tag prefix.
+    #
+    # meeting-mcp is private:true (never npm) — its DISTRIBUTION is this
+    # release asset, the same self-contained layout docs-editor / meeting-ingest
+    # use: a single `package/` root holding meta.json, dist/ (the landing page),
+    # and server/index.bundle.js (the SELF-CONTAINED server bundle).
+    if: ${{ startsWith(github.ref_name, 'meeting-mcp-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      # gh release create + upload.
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3
+      - name: install deps
+        # Workspace install at root — meeting-mcp's deps resolve to the
+        # workspace copies (the monorepo precedent for private packages).
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        # Same tag-drift defense as the npm jobs; tag prefix is
+        # `meeting-mcp-v...`. meta.json's version is REWRITTEN from the tag
+        # at assemble time below, so package.json is the single thing to pin.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/meeting-mcp/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#meeting-mcp-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/meeting-mcp/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: build (web dist + self-contained server bundle)
+        # `bun run build` = `vite build && bun run build:server` — emits
+        # dist/ (the landing page) and server/index.bundle.js (the artifact
+        # meta.json's server.entry names; both are gitignored).
+        working-directory: packages/meeting-mcp
+        run: bun run build
+      - name: assemble package
+        # Exactly the installer's layout — meta.json + dist/ + the bundled
+        # entry, nothing else. Only meta.json's `version` is stamped from the
+        # tag; the jq filter PRESERVES server.capabilities.
+        working-directory: packages/meeting-mcp
+        run: |
+          rm -rf .pack  # idempotent: a stale .pack would ship stale files on re-run
+          mkdir -p .pack/package/server
+          cp -R dist .pack/package/dist
+          cp server/index.bundle.js .pack/package/server/index.bundle.js
+          VERSION="${GITHUB_REF_NAME#meeting-mcp-v}"
+          jq --arg v "$VERSION" '.version = $v' meta.json > .pack/package/meta.json
+      - name: pack tarball
+        id: pack
+        working-directory: packages/meeting-mcp
+        run: |
+          VERSION="${GITHUB_REF_NAME#meeting-mcp-v}"
+          TARBALL="meeting-mcp-surface-${VERSION}.tgz"
+          tar -czf "$TARBALL" -C .pack package
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+      - name: validate tarball layout (the installer's expectations)
+        # The tar listing carries every path the install flow requires, and
+        # the bundled entry loads as a standalone module exporting the P1
+        # default-export factory.
+        working-directory: packages/meeting-mcp
+        run: |
+          LISTING="$(tar -tzf "${{ steps.pack.outputs.tarball }}")"
+          for required in package/meta.json package/dist/index.html package/server/index.bundle.js; do
+            echo "$LISTING" | grep -qx "$required" || { echo "::error::tarball is missing $required"; exit 1; }
+          done
+          # meta.json must name the entry the tarball actually carries.
+          ENTRY=$(jq -r '.server.entry' .pack/package/meta.json)
+          if [ "$ENTRY" != "server/index.bundle.js" ]; then
+            echo "::error::meta.json server.entry is $ENTRY, expected server/index.bundle.js"
+            exit 1
+          fi
+          bun -e 'const m = await import(process.cwd() + "/.pack/package/server/index.bundle.js");
+                  if (typeof m.default !== "function") { console.error("no default-export factory"); process.exit(1); }
+                  console.log("server entry OK: default-export factory present");'
+          echo "tarball layout OK"
+      - name: create the GitHub Release if none exists, attach the tarball
+        # Tag-triggered (no `release: published` event in this repo), so the
+        # Release object may not exist yet — create it for the pushed tag,
+        # marked prerelease on rc tags. --clobber makes re-runs idempotent.
+        working-directory: packages/meeting-mcp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            PRERELEASE_FLAG=""
+            if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
+              PRERELEASE_FLAG="--prerelease"
+            fi
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag $PRERELEASE_FLAG \
+              --title "meeting-mcp ${GITHUB_REF_NAME#meeting-mcp-v}" \
+              --notes "Installable tarball for the Meeting MCP surface (READ-only custom MCP + REST over a vault's #capture/meeting notes). Install via Surface admin → Add surface → paste: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME — requires hub ≥ the surface audience tier. See packages/meeting-mcp/README.md."
           fi
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             "${{ steps.pack.outputs.tarball }}" --clobber
