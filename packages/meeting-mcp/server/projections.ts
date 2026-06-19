@@ -130,7 +130,10 @@ export function buildProjections(tag: string = DEFAULT_TAG): ProjectionDefinitio
         return {
           tag,
           expand: "exact",
-          orderBy: "created_at",
+          // `sort: "desc"` is created_at-descending (the built-in default sort
+          // field). Do NOT pass `orderBy: "created_at"` — vault's `order_by` is
+          // for INDEXED METADATA fields only and 400s (FIELD_NOT_INDEXED) on the
+          // built-in created_at column. (Caught on the live vault; mocks missed it.)
           sort: "desc",
           limit,
           // Body is needed for the summary fallback; the SHAPE is what keeps
