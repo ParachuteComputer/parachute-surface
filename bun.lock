@@ -72,6 +72,21 @@
         "y-protocols": "^1.0.6",
       },
     },
+    "packages/meeting-ingest": {
+      "name": "@openparachute/meeting-ingest",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openparachute/surface": "^0.3.1",
+        "@openparachute/surface-client": "^0.3.0",
+        "@openparachute/surface-server": "^0.1.1",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "^1.9.4",
+        "@types/bun": "latest",
+        "typescript": "^5",
+        "vite": "^6.0.0",
+      },
+    },
     "packages/notes-ui": {
       "name": "@openparachute/notes-ui",
       "version": "0.1.6",
@@ -633,6 +648,8 @@
     "@openparachute/doc-schema": ["@openparachute/doc-schema@workspace:packages/doc-schema"],
 
     "@openparachute/docs-editor": ["@openparachute/docs-editor@workspace:packages/docs-editor"],
+
+    "@openparachute/meeting-ingest": ["@openparachute/meeting-ingest@workspace:packages/meeting-ingest"],
 
     "@openparachute/notes-ui": ["@openparachute/notes-ui@workspace:packages/notes-ui"],
 

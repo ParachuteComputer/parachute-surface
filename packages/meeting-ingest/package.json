@@ -1,0 +1,33 @@
+{
+  "name": "@openparachute/meeting-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Meeting Ingest — a backed Parachute surface that receives a meeting provider's \"Transcription complete\" webhook (Fireflies.ai), verifies its HMAC signature, fetches the transcript, and writes it into the vault as a #meeting note. Read.ai-ready (one webhook route per provider).",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/meeting-ingest"
+  },
+  "files": ["dist", "server", "meta.json", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "vite build && bun run build:server",
+    "build:server": "bun build server/index.ts --target=bun --outfile=server/index.bundle.js",
+    "dev": "vite",
+    "test": "bun test server/",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@openparachute/surface": "^0.3.1",
+    "@openparachute/surface-client": "^0.3.0",
+    "@openparachute/surface-server": "^0.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5",
+    "vite": "^6.0.0"
+  }
+}
