@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meeting MCP</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Meeting MCP</h1>
+      <p class="lead">
+        A read-only window onto this vault's meetings. Point an MCP or REST client at
+        the endpoint below to query curated meeting data — recent meetings, full-text
+        search, and a single meeting — without ever touching the raw notes.
+      </p>
+
+      <section class="card">
+        <h2>MCP endpoint</h2>
+        <p>Stateless Streamable HTTP (POST):</p>
+        <pre><code id="mcp-url">&lt;your-hub-origin&gt;/surface/meeting-mcp/api/mcp</code></pre>
+        <p class="muted">
+          Three tools: <code>recent-meetings</code>, <code>search-meetings</code>,
+          <code>meeting</code>. Each returns curated JSON — domain vocabulary, not raw
+          vault notes.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>REST</h2>
+        <p>The same projections are also plain HTTP GETs:</p>
+        <pre><code id="rest-urls">&lt;your-hub-origin&gt;/surface/meeting-mcp/api/recent-meetings?limit=20
+&lt;your-hub-origin&gt;/surface/meeting-mcp/api/search-meetings?query=budget
+&lt;your-hub-origin&gt;/surface/meeting-mcp/api/meeting?id=&lt;meeting-id&gt;</code></pre>
+      </section>
+
+      <section class="card">
+        <h2>The shape is the boundary</h2>
+        <p class="muted">
+          Every response is the projection's <code>shape</code> of each note — id,
+          title, date, and a summary / snippet / body subset. The raw note (its full
+          transcript, other tags, path, untouched metadata) never leaves this surface.
+          See the package README for how to point this template at a different
+          vault / tag and the public-vs-gated access knob.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

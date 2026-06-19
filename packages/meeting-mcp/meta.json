@@ -1,0 +1,23 @@
+{
+  "name": "meeting-mcp",
+  "displayName": "Meeting MCP",
+  "tagline": "A READ-only surface over your #capture/meeting notes — exposes them as an end-user-friendly MCP tool set + REST, surfacing domain vocabulary (recent meetings, search, one meeting) rather than raw vault notes.",
+  "path": "/surface/meeting-mcp",
+  "version": "0.1.0",
+  "audience": "surface",
+  "vault_default": "default",
+  "scopes_required": ["vault:default:read"],
+  "server": {
+    "entry": "server/index.bundle.js",
+    "format": "markdown",
+    "capabilities": []
+  },
+  "required_schema": {
+    "tags": [
+      {
+        "name": "capture/meeting",
+        "description": "Meeting captures — one note per meeting. This surface READS them and projects a curated, end-user-facing shape (id, title, date, summary/snippet/attendees/body) over MCP + REST; it never returns the raw note. Written upstream by an ingest surface (e.g. meeting-ingest) or by hand."
+      }
+    ]
+  }
+}
