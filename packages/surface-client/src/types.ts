@@ -98,5 +98,16 @@ export interface PendingOAuthState {
   state: string;
   redirectUri: string;
   scope: TokenScope;
+  /**
+   * sessionStorage key this pending state is parked under — recorded for
+   * diagnostics / self-description. The callback-routing logic addresses the
+   * record by its key directly (it reads `sessionStorage[flowKey]`), so this
+   * field is informational, NOT the routing input. Lets a surface run more
+   * than one OAuth flow concurrently (e.g. vault + `agent:read`) without the
+   * two clobbering each other — each callback routes to its own pending state
+   * by key. Optional for backward-compat with records written before
+   * multi-flow support (they used the single fixed key).
+   */
+  flowKey?: string;
   startedAt: string;
 }

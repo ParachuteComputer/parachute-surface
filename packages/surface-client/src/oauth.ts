@@ -162,6 +162,23 @@ export type BeginFlowOpts = {
    */
   scope?: string;
   /**
+   * sessionStorage key the pending-flow state is parked under, so a
+   * surface can run MORE THAN ONE OAuth flow without the two clobbering
+   * each other. Defaults to the legacy fixed key
+   * ({@link DEFAULT_PENDING_KEY}) — the vault flow, unchanged.
+   *
+   * A surface that also wants, say, an `agent:read` token (a SECOND
+   * audience — the hub derives `aud` from scope, and a named vault scope
+   * wins, so `agent:read` must come from its OWN authorize request scoped
+   * to `agent:read` alone) passes a distinct `flowKey` here. `beginFlow`
+   * parks the pending state under that key; the matching
+   * `handleCallback({ flowKey })` reads it back. Two in-flight flows on
+   * the same page (vault + agent) then never cross-wire: each callback
+   * routes to its own pending state by key, and a state-mismatch surfaces
+   * an explicit error rather than silently completing the wrong flow.
+   */
+  flowKey?: string;
+  /**
    * Concrete vault name (e.g. `"gitcoin"`) to narrow a wildcard
    * `vault:*:read` declaration down to. The result is the scope string
    * sent on `/oauth/authorize`. Caller-set, NOT derived from meta —
@@ -183,7 +200,15 @@ export type BeginFlowResult = {
   pending: PendingOAuthState;
 };
 
-const PENDING_KEY = "parachute_app_oauth_pending";
+/**
+ * Default sessionStorage key for the single (vault) pending OAuth flow.
+ * A surface running a SECOND concurrent flow (e.g. `agent:read`) passes a
+ * distinct `flowKey` to `beginFlow`/`handleCallback` so the two never
+ * clobber each other's pending state — see {@link BeginFlowOpts.flowKey}.
+ * Kept at the historical literal so existing vault tokens + in-flight
+ * flows are byte-for-byte unchanged.
+ */
+export const DEFAULT_PENDING_KEY = "parachute_app_oauth_pending";
 const DEFAULT_SCOPE = "vault:read vault:write";
 
 /**
@@ -332,6 +357,7 @@ export class ParachuteOAuth {
 
     const redirectUri = opts.redirectUri ?? this.defaultRedirectUri();
     const scope = opts.scope ?? DEFAULT_SCOPE;
+    const flowKey = opts.flowKey ?? DEFAULT_PENDING_KEY;
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await deriveCodeChallenge(codeVerifier);
     const state = generateState();
@@ -345,9 +371,10 @@ export class ParachuteOAuth {
       state,
       redirectUri,
       scope,
+      flowKey,
       startedAt: new Date().toISOString(),
     };
-    this.savePending(pending);
+    this.savePending(flowKey, pending);
 
     const authorizeUrl = new URL(metadata.authorization_endpoint);
     authorizeUrl.searchParams.set("response_type", "code");
@@ -385,13 +412,14 @@ export class ParachuteOAuth {
     code: string,
     state: string,
     vaultScope: string,
+    flowKey: string = DEFAULT_PENDING_KEY,
   ): Promise<{ pending: PendingOAuthState; token: TokenResponse; stored: StoredToken }> {
-    const pending = this.loadPending();
+    const pending = this.loadPending(flowKey);
     if (!pending) {
       throw new Error("No pending OAuth flow. Start the connect flow from the app first.");
     }
     if (pending.state !== state) {
-      this.clearPending();
+      this.clearPending(flowKey);
       throw new Error("OAuth state mismatch. The flow was likely interrupted; please try again.");
     }
 
@@ -414,7 +442,7 @@ export class ParachuteOAuth {
 
     if (!res.ok) {
       const text = await res.text();
-      this.clearPending();
+      this.clearPending(flowKey);
       const pendingApproval = parsePendingApproval(text);
       if (pendingApproval) {
         throw new PendingApprovalError(pendingApproval.approveUrl);
@@ -424,13 +452,13 @@ export class ParachuteOAuth {
 
     const token = (await res.json()) as TokenResponse;
     if (!token.access_token) {
-      this.clearPending();
+      this.clearPending(flowKey);
       throw new Error("Token response missing access_token");
     }
 
     const stored = storedFromTokenResponse(token, this.now());
     this.persistToken(vaultScope, stored);
-    this.clearPending();
+    this.clearPending(flowKey);
     return { pending, token, stored };
   }
 
@@ -528,6 +556,18 @@ export class ParachuteOAuth {
     return { token, stored };
   }
 
+  /**
+   * Peek at the pending OAuth flow parked under `flowKey` WITHOUT consuming
+   * it. Lets a caller route a returning callback to the right in-flight flow
+   * by comparing the URL's `state` against each flow's pending `state` —
+   * essential when a surface runs more than one flow (vault + `agent:read`)
+   * over a shared redirect URI. Returns `null` when no pending state exists
+   * under the key (or it's unparseable). Defaults to the vault flow's key.
+   */
+  peekPending(flowKey: string = DEFAULT_PENDING_KEY): PendingOAuthState | null {
+    return this.loadPending(flowKey);
+  }
+
   /** Discover (or return cached) AS metadata for the hub. */
   async getMetadata(): Promise<AuthorizationServerMetadata> {
     if (this.metadataCache) return this.metadataCache;
@@ -552,17 +592,17 @@ export class ParachuteOAuth {
     return `${origin}/surface/${encodeURIComponent(this.appName)}/oauth/callback`;
   }
 
-  private savePending(state: PendingOAuthState): void {
+  private savePending(flowKey: string, state: PendingOAuthState): void {
     try {
-      this.sessionStorage.setItem(PENDING_KEY, JSON.stringify(state));
+      this.sessionStorage.setItem(flowKey, JSON.stringify(state));
     } catch {
       // best-effort
     }
   }
 
-  private loadPending(): PendingOAuthState | null {
+  private loadPending(flowKey: string): PendingOAuthState | null {
     try {
-      const raw = this.sessionStorage.getItem(PENDING_KEY);
+      const raw = this.sessionStorage.getItem(flowKey);
       if (!raw) return null;
       return JSON.parse(raw) as PendingOAuthState;
     } catch {
@@ -570,9 +610,9 @@ export class ParachuteOAuth {
     }
   }
 
-  private clearPending(): void {
+  private clearPending(flowKey: string): void {
     try {
-      this.sessionStorage.removeItem(PENDING_KEY);
+      this.sessionStorage.removeItem(flowKey);
     } catch {
       // best-effort
     }

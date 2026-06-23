@@ -42,7 +42,7 @@
 
 import { registerClient } from "./discovery.js";
 import { getHubOrigin, getMountBase, getTenantId } from "./mount.js";
-import { type OAuthClientInfo, ParachuteOAuth } from "./oauth.js";
+import { DEFAULT_PENDING_KEY, type OAuthClientInfo, ParachuteOAuth } from "./oauth.js";
 import type { TokenStorageLike } from "./oauth.js";
 import { VaultClient } from "./vault-client.js";
 
@@ -175,7 +175,109 @@ export interface VaultSurface {
    * DCR cache storage.
    */
   logout(): void;
+  /**
+   * Obtain a handle on a SECOND-audience OAuth flow — e.g. an `agent:read`
+   * token to open the agent daemon's turn-events SSE — held ALONGSIDE the
+   * vault token, isolated from it.
+   *
+   * Why a separate flow (not just a wider vault token): the hub derives a
+   * token's `aud` from its scopes, and a NAMED-vault scope WINS. A single
+   * token carrying both `vault:<name>:…` and `agent:read` resolves to
+   * `aud: vault.<name>`, which the agent daemon REJECTS (it validates
+   * `aud: agent`). And refresh cannot re-narrow scope/aud. So the
+   * `agent:read` token must come from its OWN authorize request scoped to
+   * `agent:read` ALONE (no vault scope → `aud: agent`). That's exactly the
+   * flow a Claude Code session uses to connect to `/agent/mcp/<channel>`.
+   *
+   * The returned {@link ModuleAuth} reuses this surface's `ParachuteOAuth`
+   * driver (so the SAME DCR-registered client_id is shared — DCR clients are
+   * scope-agnostic; the scope is chosen at authorize-time) but isolates its
+   * pending-flow state (a distinct sessionStorage `flowKey`) and its stored
+   * token (a distinct storage `vaultScope` segment) from the vault flow. The
+   * vault flow is left 100% untouched.
+   *
+   * The first `login()` triggers a SECOND authorize redirect (inherent to
+   * browser OAuth); the token is then cached + auto-refreshed like the vault
+   * token. Call this once and retain the handle (do NOT call per-render).
+   */
+  moduleAuth(opts: ModuleAuthOpts): ModuleAuth;
 }
+
+/** Options for {@link VaultSurface.moduleAuth}. */
+export interface ModuleAuthOpts {
+  /**
+   * The scope to request — and the SOLE scope, so `inferAudience` stamps a
+   * non-vault `aud`. For the agent turn-events SSE: `"agent:read"`
+   * (→ `aud: agent`). Pass a single `<service>:<verb>` (or space-separated
+   * verbs of ONE service). Do NOT mix in a `vault:<name>:…` scope — a named
+   * vault scope wins and the token would resolve to `aud: vault.<name>`,
+   * which the module daemon rejects.
+   */
+  scope: string;
+  /**
+   * Isolation segment for BOTH the token-storage key
+   * (`parachute_token:<appName>:<storageScope>`) and the pending-flow
+   * sessionStorage key (`<DEFAULT_PENDING_KEY>:<storageScope>`), keeping
+   * this flow's token + in-flight state distinct from the vault flow's
+   * (which uses `vaultName` / the default pending key). Defaults to the
+   * service prefix of `scope` (e.g. `"agent"` for `"agent:read"`).
+   */
+  storageScope?: string;
+  /**
+   * Redirect URI the AS bounces back to after consent. Defaults to the same
+   * `redirectUri` the vault flow uses — the surface routes the callback by
+   * which flow's pending state matches the returned `state`, so a shared
+   * callback path is fine. Override only if this flow must land on a
+   * different path.
+   */
+  redirectUri?: string;
+}
+
+/**
+ * A second-audience OAuth flow handle, held alongside the vault token.
+ * Mirrors the vault flow's lifecycle (login → callback → cached + auto-
+ * refreshed token → logout) but isolated by `flowKey` + storage scope.
+ * See {@link VaultSurface.moduleAuth}.
+ */
+export interface ModuleAuth {
+  /** The scope (and audience-determining sole scope) this flow requests. */
+  readonly scope: string;
+  /** The storage/pending-state isolation segment for this flow. */
+  readonly storageScope: string;
+  /**
+   * Ensure a client_id is available (shared with the vault flow), begin the
+   * OAuth dance scoped to {@link ModuleAuthOpts.scope} alone, and navigate
+   * the browser to the authorize URL. In a non-DOM context it resolves the
+   * URL but does not navigate — use `oauth.beginFlow({ scope, flowKey, ... })`
+   * directly if you need the URL.
+   */
+  login(): Promise<void>;
+  /**
+   * Complete THIS flow from the current `window.location` IF the returned
+   * `state` matches this flow's pending state. Returns `true` when it
+   * handled the callback (token exchanged + persisted, URL params stripped),
+   * `false` when the callback belongs to another flow (e.g. the vault flow)
+   * — so a single callback handler can try each flow in turn without one
+   * stealing the other's code. Throws only on a genuine error (e.g. the
+   * exchange failed); a `state` that matches no flow returns `false`.
+   */
+  handleCallback(): Promise<boolean>;
+  /**
+   * The current cached access token for this flow, auto-refreshing when it's
+   * near/at expiry, or `null` when not signed in (or refresh isn't
+   * possible). Re-reads stored state each call. The consumer attaches this
+   * as `Authorization: Bearer <token>` (or `?token=` for the SSE query
+   * param) when opening the module endpoint.
+   */
+  getAccessToken(): Promise<string | null>;
+  /** The raw stored token record for this flow, or `null`. */
+  getToken(): StoredTokenLike | null;
+  /** Clear this flow's stored token (local sign-out for this audience only). */
+  logout(): void;
+}
+
+/** The stored-token shape `getToken` returns (re-exported from token-storage). */
+export type StoredTokenLike = ReturnType<ParachuteOAuth["getToken"]>;
 
 const DEFAULT_SCOPE = "vault:read vault:write";
 const DEFAULT_VAULT = "default";
@@ -387,7 +489,114 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
     logout(): void {
       oauth.clearToken(vaultName);
     },
+
+    moduleAuth(moduleOpts: ModuleAuthOpts): ModuleAuth {
+      if (!moduleOpts.scope) {
+        throw new Error("moduleAuth requires a non-empty scope");
+      }
+      const moduleScope = moduleOpts.scope;
+      const storageScope = moduleOpts.storageScope ?? serviceOf(moduleScope);
+      // Guard against aliasing the vault token. Both flows store under
+      // `parachute_token:<appName>:<segment>`; if this flow's segment equaled
+      // `vaultName`, the two tokens would collide and `moduleAuth.logout()`
+      // would clear the VAULT token. Fail loud rather than silently corrupt.
+      if (storageScope === vaultName) {
+        throw new Error(
+          `moduleAuth storageScope (${storageScope}) must not equal the vault name — it would alias the vault token's storage key. Pass a distinct \`storageScope\`.`,
+        );
+      }
+      // Both keys hang off `storageScope` so the flow's token + in-flight
+      // pending state are isolated from the vault flow (and from any other
+      // module flow with a distinct storageScope). The vault flow keeps the
+      // default pending key + `vaultName` storage segment — untouched.
+      const moduleFlowKey = `${DEFAULT_PENDING_KEY}:${storageScope}`;
+      const moduleRedirectUri = moduleOpts.redirectUri ?? redirectUri;
+
+      return {
+        scope: moduleScope,
+        storageScope,
+
+        async login(): Promise<void> {
+          // Reuse the vault flow's client_id (DCR clients are scope-agnostic;
+          // scope is requested at authorize-time). For the hosted path this is
+          // a no-op; for DCR it cache-seeds / registers exactly as the vault
+          // flow does, sharing the one registration.
+          await ensureClientId();
+          const { authorizeUrl } = await oauth.beginFlow({
+            scope: moduleScope,
+            redirectUri: moduleRedirectUri,
+            flowKey: moduleFlowKey,
+            // Deliberately NO vaultName — a `vault` query param + this scope
+            // would not change `inferAudience` (no vault scope is present),
+            // but omitting it keeps the request unambiguous.
+          });
+          if (typeof window !== "undefined" && typeof window.location?.assign === "function") {
+            window.location.assign(authorizeUrl);
+          }
+        },
+
+        async handleCallback(): Promise<boolean> {
+          const loc = typeof window !== "undefined" ? window.location : undefined;
+          if (!loc) throw new Error("handleCallback requires a browser window.location");
+          const url = new URL(loc.href);
+          const code = url.searchParams.get("code");
+          const state = url.searchParams.get("state");
+          if (!code || !state) return false;
+          // Route by pending state: only handle this callback if the returned
+          // `state` matches THIS flow's pending record. A vault callback (or
+          // another module flow's) leaves a non-matching / absent pending
+          // record under our key → we decline (return false) so the right
+          // handler can claim it. No cross-wiring.
+          const pending = oauth.peekPending(moduleFlowKey);
+          if (!pending || pending.state !== state) return false;
+          await ensureClientId();
+          await oauth.handleCallback(code, state, storageScope, moduleFlowKey);
+          if (typeof window !== "undefined" && window.history?.replaceState) {
+            window.history.replaceState({}, "", url.origin + url.pathname);
+          }
+          return true;
+        },
+
+        async getAccessToken(): Promise<string | null> {
+          const stored = oauth.getToken(storageScope);
+          if (!stored) return null;
+          const now = opts.now ? opts.now() : Date.now();
+          // Fresh enough? Hand back the cached access token directly. A 60s
+          // skew avoids handing out a token that expires mid-flight.
+          if (typeof stored.expiresAt !== "number" || stored.expiresAt - now > 60_000) {
+            return stored.accessToken;
+          }
+          // Near/at expiry → refresh if we can. Mirrors the vault flow's
+          // cold-load seam: re-seed the shared DCR client_id before exchange.
+          const refreshToken = stored.refreshToken;
+          if (!refreshToken) {
+            // Expired with no refresh path → caller must re-login.
+            return stored.expiresAt > now ? stored.accessToken : null;
+          }
+          if (!(await seedClientIdFromCache())) {
+            return stored.expiresAt > now ? stored.accessToken : null;
+          }
+          const { token } = await oauth.refreshAccessToken(refreshToken, storageScope);
+          return token.access_token;
+        },
+
+        getToken(): StoredTokenLike {
+          return oauth.getToken(storageScope);
+        },
+
+        logout(): void {
+          oauth.clearToken(storageScope);
+        },
+      };
+    },
   };
+}
+
+/** The `<service>` prefix of a scope string — `"agent:read"` → `"agent"`. */
+function serviceOf(scope: string): string {
+  const first = scope.trim().split(/\s+/)[0] ?? scope;
+  const colon = first.indexOf(":");
+  return colon > 0 ? first.slice(0, colon) : first;
 }
 
 // --- helpers ----------------------------------------------------------------
