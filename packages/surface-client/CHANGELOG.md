@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.2-rc.1] - 2026-06-23
+
+### Fixed
+
+- **Refresh-on-401 now RECOVERS from a terminal `invalid_grant` instead of
+  looping.** The single-flight + cold-load refresh logic was correct, but the
+  recovery path had a gap: when the hub returned `400 invalid_grant` for a
+  **dead** refresh token (revoked, expired, or rotation-conflict / replay-
+  detected), `refreshAccessToken` threw `RefreshHttpError` UNCAUGHT through
+  `onAuthError`. The revoked token was left in storage, so every retry re-read
+  and re-submitted the same dead token → an infinite "Token refresh failed
+  (400) … try again" loop (observed in a real surface's session).
+
+  Both the vault `onAuthError` seam (`getClient()`) and the `moduleAuth`
+  `getAccessToken()` seam now wrap the refresh exchange: on a **terminal**
+  failure (`400` + `invalid_grant` / revoked / expired / rotation-conflict)
+  they **evict the dead token** (`oauth.clearToken(...)`) and return `null`.
+  Returning null is already handled cleanly downstream — the `VaultClient` raises
+  a `VaultAuthError` (no retry), and `getClient()` then returns `null`, so the
+  surface falls to a fresh `login()` instead of spinning. **Non-terminal**
+  failures (transient 5xx, network blips) still propagate unchanged, so a
+  recoverable token is never thrown away.
+
+  The single-flight guard and rotated-refresh persistence are unchanged. Purely
+  additive to the public API — no signature changes.
+
 ## [0.3.1] - 2026-06-23
 
 ### Added
