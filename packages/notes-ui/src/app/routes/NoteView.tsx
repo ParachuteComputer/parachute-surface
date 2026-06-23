@@ -4,6 +4,9 @@ import { NeighborhoodGraph } from "@/components/NeighborhoodGraph";
 import { NoteRenderer } from "@/components/NoteRenderer";
 import { PinArchiveButtons } from "@/components/PinArchiveButtons";
 import { TranscriptionStatus } from "@/components/TranscriptionStatus";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { pushRecent } from "@/lib/quick-switch/recents";
 import { relativeTime } from "@/lib/time";
 import { useActiveVaultClient, useNote, useVaultStore } from "@/lib/vault";
@@ -25,7 +28,7 @@ export function NoteView() {
   if (!activeVault) return <Navigate to="/" replace />;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
+    <div className="page">
       <nav className="mb-6 text-sm text-fg-dim">
         <Link to="/" className="hover:text-accent">
           ← All notes
@@ -35,7 +38,7 @@ export function NoteView() {
       {note.isPending ? (
         <NoteSkeleton />
       ) : note.isError ? (
-        <ErrorBlock error={note.error} />
+        <NoteErrorBlock error={note.error} retry={() => note.refetch()} />
       ) : !note.data ? (
         <NotFoundBlock id={decodedId ?? ""} />
       ) : (
@@ -77,12 +80,12 @@ function NoteBody({ note }: { note: Note }) {
             {note.path ? pathTitle(note.path) : note.id}
           </h1>
           {note.tags && note.tags.length > 0 ? <HeaderTags tags={note.tags} /> : null}
-          <p className="mt-2 font-mono text-xs text-fg-dim break-all">{label}</p>
+          <p className="note-id mt-2">{label}</p>
           {summary ? <p className="mt-3 text-fg-muted">{summary}</p> : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Link
               to={`/n/${encodeURIComponent(note.id)}/edit`}
-              className="min-h-11 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg-muted hover:text-accent"
+              className="btn btn-secondary btn-touch"
             >
               Edit
             </Link>
@@ -131,8 +134,8 @@ function MetadataPanel({ note }: { note: Note }) {
   const metaEntries = Object.entries(note.metadata ?? {}).filter(([key]) => key !== "summary");
 
   return (
-    <section className="rounded-md border border-border bg-card p-4">
-      <h2 className="mb-2 text-xs uppercase tracking-wider text-fg-dim">Metadata</h2>
+    <section className="card p-4">
+      <h2 className="eyebrow mb-2">Metadata</h2>
       <dl className="space-y-1.5 text-sm">
         {note.path ? (
           <Row
@@ -160,7 +163,7 @@ function MetadataPanel({ note }: { note: Note }) {
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-xs uppercase tracking-wider text-fg-dim">{label}</dt>
+      <dt className="eyebrow">{label}</dt>
       <dd>{value}</dd>
     </div>
   );
@@ -173,7 +176,7 @@ function HeaderTags({ tags }: { tags: string[] }) {
         <Link
           key={t}
           to={`/?tag=${encodeURIComponent(t)}`}
-          className="max-w-full break-all rounded-full border border-accent/40 bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent hover:border-accent hover:bg-accent/20"
+          className="chip chip-tag focus-ring max-w-full break-all font-medium"
         >
           #{t}
         </Link>
@@ -192,8 +195,8 @@ function LinksPanel({
   peer: "source" | "target";
 }) {
   return (
-    <section className="rounded-md border border-border bg-card p-4">
-      <h2 className="mb-2 text-xs uppercase tracking-wider text-fg-dim">
+    <section className="card p-4">
+      <h2 className="eyebrow mb-2">
         {title} ({links.length})
       </h2>
       <ul className="space-y-1.5">
@@ -229,7 +232,7 @@ function AttachmentView({ attachment }: { attachment: NoteAttachment }) {
   const filename = attachment.filename ?? attachment.id;
 
   return (
-    <figure className="rounded-md border border-border bg-card p-3">
+    <figure className="card p-3">
       <figcaption className="mb-2 flex items-baseline justify-between gap-3">
         <span className="truncate font-mono text-xs text-fg-muted">{filename}</span>
         {typeof attachment.size === "number" ? (
@@ -284,10 +287,10 @@ function AttachmentBody({
     return <p className="text-sm text-fg-dim">(no URL)</p>;
   }
   if (error) {
-    return <p className="text-sm text-red-400">{error}</p>;
+    return <p className="text-sm text-[--color-danger]">{error}</p>;
   }
   if (needsBlob && !blobUrl) {
-    return <div className="h-32 animate-pulse rounded bg-border/40" aria-busy="true" />;
+    return <Skeleton className="h-32 w-full" />;
   }
 
   const displayUrl = blobUrl ?? src;
@@ -354,22 +357,18 @@ function NoteSkeleton() {
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem]" aria-busy="true">
       <div className="min-w-0 space-y-3">
-        <div className="h-3 w-32 animate-pulse rounded bg-border/40" />
-        <div className="h-8 w-2/3 animate-pulse rounded bg-border/60" />
-        <div className="h-4 w-full animate-pulse rounded bg-border/30" />
+        <Skeleton className="h-3 w-32" />
+        <Skeleton className="h-8 w-2/3" />
+        <Skeleton className="h-4 w-full" />
         <div className="mt-6 space-y-2">
           {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              className="h-3 animate-pulse rounded bg-border/30"
-              style={{ width: `${70 + ((i * 13) % 25)}%` }}
-            />
+            <Skeleton key={i} className="h-3" width={`${70 + ((i * 13) % 25)}%`} />
           ))}
         </div>
       </div>
       <div className="space-y-4">
-        <div className="h-32 animate-pulse rounded bg-border/30" />
-        <div className="h-24 animate-pulse rounded bg-border/30" />
+        <Skeleton className="h-32" />
+        <Skeleton className="h-24" />
       </div>
     </div>
   );
@@ -377,34 +376,36 @@ function NoteSkeleton() {
 
 function NotFoundBlock({ id }: { id: string }) {
   return (
-    <div className="rounded-md border border-border bg-card p-10 text-center">
-      <p className="mb-2 font-serif text-xl">Note not found</p>
-      <p className="mb-4 text-sm text-fg-muted">
-        No note with id <span className="font-mono">{id}</span> in this vault.
-      </p>
-      <Link to="/" className="text-sm text-accent hover:underline">
-        Back to all notes
-      </Link>
-    </div>
+    <EmptyState
+      title={<span className="font-serif text-xl text-fg">Note not found</span>}
+      description={
+        <>
+          No note with id <span className="font-mono">{id}</span> in this vault.
+        </>
+      }
+      action={
+        <Link to="/" className="text-sm text-accent hover:underline">
+          Back to all notes
+        </Link>
+      }
+    />
   );
 }
 
-function ErrorBlock({ error }: { error: Error }) {
+function NoteErrorBlock({ error, retry }: { error: Error; retry: () => void }) {
   const isAuth = error instanceof VaultAuthError;
   return (
-    <div className="rounded-md border border-red-500/30 bg-red-500/5 p-6">
-      <p className="mb-2 font-medium text-red-400">
-        {isAuth ? "Session expired" : "Could not load note"}
-      </p>
-      <p className="mb-4 text-sm text-fg-muted">{error.message}</p>
-      {isAuth ? (
-        <Link
-          to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-        >
-          Reconnect vault
-        </Link>
-      ) : null}
-    </div>
+    <ErrorState
+      title={isAuth ? "Session expired" : "Could not load note"}
+      message={error.message}
+      retry={isAuth ? undefined : retry}
+      action={
+        isAuth ? (
+          <Link to="/add" className="btn btn-primary">
+            Reconnect vault
+          </Link>
+        ) : undefined
+      }
+    />
   );
 }

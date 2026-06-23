@@ -70,7 +70,7 @@ export function InstallPrompt() {
             <button
               type="button"
               onClick={() => setIosHintOpen(false)}
-              className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
+              className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
             >
               Got it
             </button>

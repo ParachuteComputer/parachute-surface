@@ -38,7 +38,7 @@ export function BottomTabBar() {
       className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg/95 backdrop-blur lg:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <ul className="mx-auto flex max-w-5xl items-stretch justify-around">
+      <ul className="mx-auto flex max-w-[--w-page] items-stretch justify-around">
         <Tab to="/" label="Home" active={isHome} icon={<IconHome />} />
         <Tab to="/tags" label="Tags" active={isTags} icon={<IconTag />} />
         <Tab to="/new" label="New" active={isNew} icon={<IconPlus />} />
@@ -66,7 +66,7 @@ function Tab({
         to={to}
         aria-label={label}
         aria-current={active ? "page" : undefined}
-        className={`flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] ${
+        className={`focus-ring flex h-14 flex-col items-center justify-center gap-0.5 text-2xs ${
           active ? "text-accent" : "text-fg-muted hover:text-accent"
         }`}
       >
@@ -92,7 +92,7 @@ function TabButton({
         type="button"
         onClick={onClick}
         aria-label={label}
-        className="flex h-14 w-full flex-col items-center justify-center gap-0.5 text-[11px] text-fg-muted hover:text-accent"
+        className="focus-ring flex h-14 w-full flex-col items-center justify-center gap-0.5 text-2xs text-fg-muted hover:text-accent"
       >
         <span aria-hidden="true">{icon}</span>
         <span>{label}</span>

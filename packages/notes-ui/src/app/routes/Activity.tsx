@@ -135,7 +135,7 @@ function EmptyBlock() {
       <p className="mb-4 text-fg-muted">No activity in the last 30 days.</p>
       <Link
         to="/new"
-        className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+        className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
       >
         New note
       </Link>
@@ -164,7 +164,7 @@ function ErrorBlock({ error }: { error: Error }) {
       {isAuth ? (
         <Link
           to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reconnect vault
         </Link>

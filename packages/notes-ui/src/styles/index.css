@@ -2,24 +2,125 @@
 @import "tailwindcss";
 @import "highlight.js/styles/github.css";
 
+/* ===========================================================================
+   Parachute Notes — design system / token contract
+   ---------------------------------------------------------------------------
+   This stylesheet is the CANONICAL starting point other Parachute surface
+   authors copy. It codifies the warm-paper / forest-green / serif identity
+   into a token + component-class system so a generic notes surface stays
+   Linear/Things-tier consistent without re-deriving the look per file.
+
+   Layers (in cascade order):
+     1. @theme            — design tokens (colors, type scale, radii, shadows,
+                            widths). Light values live here; the dark theme is
+                            ONE override block (see "Dark theme" below) covering
+                            both the explicit [data-theme='dark'] selector and
+                            the prefers-color-scheme system case.
+     2. base element CSS  — html/body, .prose-note, render-class reconciliation.
+     3. @layer components — reusable classes (.btn, .input, .card, .chip,
+                            .dialog-*, .page*, .skeleton, .focus-ring, …).
+                            Build new surfaces from these; don't re-hand-roll
+                            button/input strings.
+
+   Token contract (semantic — use these, not raw palette hexes / Tailwind
+   color literals like red-500 / text-white):
+     --color-bg / -soft           page + recessed surfaces
+     --color-fg / -muted / -dim   primary / secondary / tertiary text
+     --color-accent / -hover      forest-green brand action color
+     --color-on-accent            text that sits ON an accent surface.
+                                  WHITE in light, DARK in dark — this is the
+                                  load-bearing WCAG-AA fix (see note below).
+     --color-danger / -hover / -soft / -border    destructive / error
+     --color-warning / -soft                       caution
+     --color-positive             success (== accent)
+     --color-border / -light      hairlines
+     --color-card / -hover        raised surface
+     --text-2xs … --text-3xl      ONE type ramp shared by chrome + prose
+     --radius-xs … --radius-full  radii
+     --shadow-sm / -md / -lg      warm-tinted elevation
+     --w-prose / -page / -narrow  container widths
+
+   WCAG-AA note (the dark-accent fix): the dark-mode accent is a LIGHT green
+   (#7ab087); white text on it is ~2.5:1 and FAILS AA. `--color-on-accent`
+   flips to a dark ink (#15211a) in dark mode → ~6.6:1, passes AA. Every
+   accent-surfaced label uses `.btn-primary` or `text-[--color-on-accent]`,
+   never a hardcoded `text-white`.
+   =========================================================================== */
+
 @theme {
   --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-serif: "Instrument Serif", Georgia, serif;
   --font-mono: "JetBrains Mono", "SF Mono", Monaco, monospace;
 
+  /* --- Surfaces + text (light) --- */
   --color-bg: #faf8f4;
   --color-bg-soft: #f3f0ea;
   --color-fg: #2c2a26;
   --color-fg-muted: #6b6860;
   --color-fg-dim: #9a9690;
+
+  /* --- Brand accent (light) --- */
   --color-accent: #4a7c59;
   --color-accent-hover: #3d6849;
   --color-accent-light: #6a9b77;
   --color-sky: #5b8fa8;
+
+  /* --- Hairlines + raised surfaces (light) --- */
   --color-border: #e4e0d8;
   --color-border-light: #ece9e2;
   --color-card: #ffffff;
   --color-card-hover: #fefdfb;
+
+  /* --- Semantic state tokens (light) ---
+     Warm-leaning danger (brick) + amber warning so the state colors read as
+     part of the paper palette rather than generic Tailwind red/amber. The
+     -soft / -border variants are color-mixes so they track the base hue and
+     theme automatically. on-accent: see WCAG note above. */
+  --color-on-accent: #ffffff;
+  --color-danger: #c0492f;
+  --color-danger-hover: #a23b25;
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 30%, transparent);
+  --color-warning: #b45309;
+  --color-warning-soft: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  --color-positive: var(--color-accent);
+  --color-positive-soft: color-mix(in srgb, var(--color-accent) 12%, transparent);
+
+  /* --- Type scale (ONE ramp for chrome + prose) ---
+     ~1.2 ratio anchored at the existing chrome base (16px = 1rem root) and the
+     18px reading size used by .prose-note. Expressed in rem so the text-size
+     knob (which scales the html root font) scales the whole ramp uniformly.
+     .prose-note h1–h4 consume these instead of carrying a parallel raw-rem
+     scale, so prose headings and chrome headings share one ladder. */
+  --text-2xs: 0.6875rem; /* 11px — micro labels, eyebrows */
+  --text-xs: 0.75rem; /*  12px — meta, captions */
+  --text-sm: 0.875rem; /* 14px — controls, list rows */
+  --text-base: 1rem; /*    16px — body chrome */
+  --text-lg: 1.125rem; /*  18px — h4 / reading size */
+  --text-xl: 1.375rem; /*  22px — h3 / section title */
+  --text-2xl: 1.625rem; /* 26px — h2 / page title (mobile) */
+  --text-3xl: 1.9375rem; /* 31px — h1 / page title (desktop) */
+
+  /* --- Radii (consolidated from 5 ad-hoc values) --- */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* --- Elevation (warm-tinted, not cool-gray default) ---
+     Tints the shadow toward the ink color so cards lift off paper warmly. */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2c2a26 6%, transparent);
+  --shadow-md: 0 2px 8px color-mix(in srgb, #2c2a26 8%, transparent), 0 1px 2px
+    color-mix(in srgb, #2c2a26 5%, transparent);
+  --shadow-lg: 0 8px 24px color-mix(in srgb, #2c2a26 12%, transparent), 0 2px 6px
+    color-mix(in srgb, #2c2a26 6%, transparent);
+
+  /* --- Container widths (consolidated; Header/footer/content now agree) --- */
+  --w-prose: 42rem;
+  --w-page: 72rem;
+  --w-narrow: 32rem;
 
   /* View-level text-size knob (lib/text-size.ts). Defaults below; the
      `:root[data-text-size="…"]` blocks override for the two larger
@@ -62,40 +163,103 @@
   --font-size-editor: 22px;
 }
 
+/* ===========================================================================
+   Dark theme — ONE source of truth.
+   Previously the dark palette was duplicated across two full declaration
+   blocks (the `prefers-color-scheme` system case and the explicit
+   `[data-theme='dark']` case) — two copies that would drift. The dark deltas
+   now live in a single `--_dark-*` private custom-property block applied by
+   BOTH selectors via one shared `--dark-tokens` mixin-style assignment list.
+
+   The two selectors still need different gates — the system case must NOT
+   apply when the user explicitly picked light (`:not([data-theme='light'])`),
+   while the explicit `[data-theme='dark']` case is unconditional and must win
+   over the system default. They share the SAME value list (`@apply`-like) by
+   pointing every token at a `--_d-*` private var defined once below; editing a
+   dark value is a one-line change in the `:root` private-token block. */
+
+/* Private dark-token palette — the single source. Defined unconditionally on
+   :root (they don't take effect until a theme selector assigns them to the
+   public tokens, so light mode is unaffected). */
+:root {
+  --_d-bg: #1a1917;
+  --_d-bg-soft: #23221f;
+  --_d-fg: #e8e5de;
+  --_d-fg-muted: #a8a49b;
+  --_d-fg-dim: #706c64;
+  --_d-accent: #7ab087;
+  --_d-accent-hover: #8bc098;
+  --_d-accent-light: #5b8c6a;
+  --_d-sky: #7fb3cc;
+  --_d-border: #33312d;
+  --_d-border-light: #2a2926;
+  --_d-card: #23221f;
+  --_d-card-hover: #2a2926;
+  /* The WCAG-AA fix lives here: dark accent is light, so on-accent is a dark ink. */
+  --_d-on-accent: #15211a;
+  --_d-danger: #e8836b;
+  --_d-danger-hover: #ef9982;
+  --_d-warning: #fcd34d;
+  --_d-shadow-sm: 0 1px 2px color-mix(in srgb, #000 30%, transparent);
+  --_d-shadow-md: 0 2px 8px color-mix(in srgb, #000 40%, transparent), 0 1px 2px
+    color-mix(in srgb, #000 25%, transparent);
+  --_d-shadow-lg: 0 8px 24px color-mix(in srgb, #000 50%, transparent), 0 2px 6px
+    color-mix(in srgb, #000 30%, transparent);
+}
+
+/* The shared assignment list — referenced (not duplicated) by both gates.
+   Tailwind/Lightning CSS doesn't have a mixin, so this comment marks the
+   contract; the two blocks below each point public tokens at the `--_d-*`
+   privates, so the actual hex values exist in exactly one place (above). */
+
 /* System dark — only when the user hasn't picked explicitly. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-bg: #1a1917;
-    --color-bg-soft: #23221f;
-    --color-fg: #e8e5de;
-    --color-fg-muted: #a8a49b;
-    --color-fg-dim: #706c64;
-    --color-accent: #7ab087;
-    --color-accent-hover: #8bc098;
-    --color-accent-light: #5b8c6a;
-    --color-sky: #7fb3cc;
-    --color-border: #33312d;
-    --color-border-light: #2a2926;
-    --color-card: #23221f;
-    --color-card-hover: #2a2926;
+    --color-bg: var(--_d-bg);
+    --color-bg-soft: var(--_d-bg-soft);
+    --color-fg: var(--_d-fg);
+    --color-fg-muted: var(--_d-fg-muted);
+    --color-fg-dim: var(--_d-fg-dim);
+    --color-accent: var(--_d-accent);
+    --color-accent-hover: var(--_d-accent-hover);
+    --color-accent-light: var(--_d-accent-light);
+    --color-sky: var(--_d-sky);
+    --color-border: var(--_d-border);
+    --color-border-light: var(--_d-border-light);
+    --color-card: var(--_d-card);
+    --color-card-hover: var(--_d-card-hover);
+    --color-on-accent: var(--_d-on-accent);
+    --color-danger: var(--_d-danger);
+    --color-danger-hover: var(--_d-danger-hover);
+    --color-warning: var(--_d-warning);
+    --shadow-sm: var(--_d-shadow-sm);
+    --shadow-md: var(--_d-shadow-md);
+    --shadow-lg: var(--_d-shadow-lg);
   }
 }
 
-/* Explicit dark — wins over system. */
+/* Explicit dark — wins over system. Same private-token references. */
 :root[data-theme="dark"] {
-  --color-bg: #1a1917;
-  --color-bg-soft: #23221f;
-  --color-fg: #e8e5de;
-  --color-fg-muted: #a8a49b;
-  --color-fg-dim: #706c64;
-  --color-accent: #7ab087;
-  --color-accent-hover: #8bc098;
-  --color-accent-light: #5b8c6a;
-  --color-sky: #7fb3cc;
-  --color-border: #33312d;
-  --color-border-light: #2a2926;
-  --color-card: #23221f;
-  --color-card-hover: #2a2926;
+  --color-bg: var(--_d-bg);
+  --color-bg-soft: var(--_d-bg-soft);
+  --color-fg: var(--_d-fg);
+  --color-fg-muted: var(--_d-fg-muted);
+  --color-fg-dim: var(--_d-fg-dim);
+  --color-accent: var(--_d-accent);
+  --color-accent-hover: var(--_d-accent-hover);
+  --color-accent-light: var(--_d-accent-light);
+  --color-sky: var(--_d-sky);
+  --color-border: var(--_d-border);
+  --color-border-light: var(--_d-border-light);
+  --color-card: var(--_d-card);
+  --color-card-hover: var(--_d-card-hover);
+  --color-on-accent: var(--_d-on-accent);
+  --color-danger: var(--_d-danger);
+  --color-danger-hover: var(--_d-danger-hover);
+  --color-warning: var(--_d-warning);
+  --shadow-sm: var(--_d-shadow-sm);
+  --shadow-md: var(--_d-shadow-md);
+  --shadow-lg: var(--_d-shadow-lg);
 }
 
 html,
@@ -131,17 +295,20 @@ body {
   margin-bottom: 0.5em;
   line-height: 1.25;
 }
+/* Prose headings consume the shared type ramp (was raw rem, parallel scale).
+   Anchored one step above prior values where it tightened the ladder; h1/h2/h3
+   land on the canonical 3xl/2xl/xl steps so a prose H1 matches a page-title H1. */
 .prose-note h1 {
-  font-size: 1.875rem;
+  font-size: var(--text-3xl);
 }
 .prose-note h2 {
-  font-size: 1.5rem;
+  font-size: var(--text-2xl);
 }
 .prose-note h3 {
-  font-size: 1.25rem;
+  font-size: var(--text-xl);
 }
 .prose-note h4 {
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
 }
 .prose-note p {
   margin: 0.75em 0;
@@ -175,12 +342,12 @@ body {
   font-size: 0.875em;
   background: var(--color-bg-soft);
   padding: 0.1em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 .prose-note pre {
   background: var(--color-bg-soft);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.9rem 1rem;
   margin: 1em 0;
   overflow-x: auto;
@@ -217,7 +384,7 @@ body {
 .prose-note img {
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 .prose-note input[type="checkbox"] {
   margin-right: 0.4em;
@@ -226,8 +393,9 @@ body {
 /* --- @openparachute/surface-render class-contract reconciliation ---
    The shared render primitives emit plain semantic class names (no Tailwind);
    these rules reproduce the visual treatment the local renderers carried as
-   inline Tailwind utilities before the Phase 4 migration. Match the prior
-   look so styling doesn't regress. */
+   inline Tailwind utilities before the Phase 4 migration. Now driven by the
+   semantic --color-warning / --color-danger tokens so they track the theme
+   from one source (previously raw amber/red hexes duplicated per theme). */
 
 /* <CsvRenderer>: was `overflow-x-auto` (table scroll) + an amber warning box. */
 .csv-scroll {
@@ -235,42 +403,26 @@ body {
 }
 .csv-warning {
   margin-bottom: 0.5rem;
-  border: 1px solid rgb(245 158 11 / 0.3);
-  background: rgb(245 158 11 / 0.1);
-  border-radius: 4px;
+  border: 1px solid var(--color-warning);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  color: #b45309;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .csv-warning {
-    color: #fcd34d;
-  }
-}
-:root[data-theme="dark"] .csv-warning {
-  color: #fcd34d;
+  font-size: var(--text-sm);
+  color: var(--color-warning);
 }
 
 /* <VaultImage>: was a red error span + a pulsing skeleton placeholder. */
 .vault-media-error {
-  font-size: 0.75rem;
-  color: #f87171;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
 }
 .vault-media-loading {
   display: inline-block;
   height: 6rem;
   width: 10rem;
-  border-radius: 6px;
-  background: rgb(228 224 216 / 0.4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-border) 40%, transparent);
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .vault-media-loading {
-    background: rgb(51 49 45 / 0.4);
-  }
-}
-:root[data-theme="dark"] .vault-media-loading {
-  background: rgb(51 49 45 / 0.4);
 }
 @keyframes pulse {
   0%,
@@ -279,6 +431,12 @@ body {
   }
   50% {
     opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-media-loading,
+  .skeleton {
+    animation: none;
   }
 }
 
@@ -302,4 +460,288 @@ body {
 :root[data-theme="dark"] .prose-note .hljs {
   background: #1f1e1b !important;
   color: var(--color-fg);
+}
+
+/* ===========================================================================
+   Component classes — build surfaces from these.
+   Each class encodes ONE canonical version of a pattern that was previously
+   copy-pasted as ad-hoc Tailwind strings (buttons ~20×, inputs, cards,
+   chips, dialogs). Mirroring the prior strings means adopting a class is a
+   no-visual-change refactor. Compose with utilities for one-off tweaks.
+   =========================================================================== */
+@layer components {
+  /* ONE focus standard. focus-visible (keyboard / programmatic) only, so
+     mouse clicks don't ring. Uses box-shadow ring so it works on bordered AND
+     unbordered elements without shifting layout. Honors offset for inset feel.
+     Apply `.focus-ring` to any interactive element that lacks one. */
+  .focus-ring {
+    outline: none;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px
+      color-mix(in srgb, var(--color-accent) 70%, transparent);
+    border-radius: var(--radius-sm);
+  }
+
+  /* --- Buttons --- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.25rem; /* min-h-9 — comfortable tap target on desktop */
+    padding: 0.375rem 0.875rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow
+      0.12s ease;
+  }
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px
+      color-mix(in srgb, var(--color-accent) 70%, transparent);
+  }
+
+  /* Primary — accent fill. text uses --color-on-accent (the WCAG-AA fix):
+     white in light, dark ink in dark. Never `text-white` here. */
+  .btn-primary {
+    background-color: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  .btn-primary:not(:disabled):hover {
+    background-color: var(--color-accent-hover);
+  }
+
+  /* Secondary — bordered card surface. */
+  .btn-secondary {
+    background-color: var(--color-card);
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border);
+  }
+  .btn-secondary:not(:disabled):hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  /* Ghost — text-only, no chrome until hover. */
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--color-fg-muted);
+    min-height: 0;
+    padding: 0.25rem 0.5rem;
+  }
+  .btn-ghost:not(:disabled):hover {
+    color: var(--color-accent);
+  }
+
+  /* Danger — soft destructive (bordered) for confirm rows / delete actions. */
+  .btn-danger {
+    background-color: var(--color-danger-soft);
+    color: var(--color-danger);
+    border: 1px solid var(--color-danger-border);
+  }
+  .btn-danger:not(:disabled):hover {
+    background-color: color-mix(in srgb, var(--color-danger) 18%, transparent);
+    border-color: var(--color-danger);
+  }
+
+  /* Accent-soft — accent-tinted ghost, the "in-context accent action" (e.g.
+     Save view) that should read as accent without the weight of a primary fill. */
+  .btn-accent-soft {
+    background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+  .btn-accent-soft:not(:disabled):hover {
+    background-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+
+  /* Danger (solid) — filled destructive for the confirm-in-a-dialog action.
+     Ink is --color-on-accent: white in light (≈5:1 on the brick fill) and dark
+     in dark (≈6:1 on the lighter dark-danger) — passes AA in both, unlike the
+     prior `bg-red-500 text-white` which used an unthemed Tailwind red. */
+  .btn-danger-solid {
+    background-color: var(--color-danger);
+    color: var(--color-on-accent);
+  }
+  .btn-danger-solid:not(:disabled):hover {
+    background-color: var(--color-danger-hover);
+  }
+
+  /* Size modifiers. Default is "md" (the base). */
+  .btn-sm {
+    min-height: 0;
+    padding: 0.25rem 0.625rem;
+    font-size: var(--text-xs);
+  }
+  .btn-lg {
+    min-height: 2.75rem; /* min-h-11 — primary touch target */
+    padding: 0.5rem 1rem;
+    font-size: var(--text-base);
+  }
+  /* min-h-11 touch sizing without changing horizontal padding — the common
+     "list/header button must be tappable on mobile" case. */
+  .btn-touch {
+    min-height: 2.75rem;
+  }
+
+  /* --- Form controls --- */
+  .input,
+  .textarea,
+  .select {
+    width: 100%;
+    background-color: var(--color-card);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .textarea {
+    resize: vertical;
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: var(--color-fg-dim);
+  }
+  .input:focus-visible,
+  .textarea:focus-visible,
+  .select:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
+  }
+  .input:disabled,
+  .textarea:disabled,
+  .select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  /* On a recessed/dialog surface, the input should read against bg, not card. */
+  .input-on-bg {
+    background-color: var(--color-bg);
+  }
+
+  /* --- Surfaces --- */
+  .card {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* --- Chips --- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: var(--radius-full);
+    padding: 0.125rem 0.625rem;
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-soft);
+    color: var(--color-fg-muted);
+  }
+  /* Tag chip — accent-tinted, the #tag pill used throughout. */
+  .chip-tag {
+    border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+  }
+  .chip-tag:hover {
+    border-color: var(--color-accent);
+    background-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+  /* Active/selected tag chip — solid accent fill (uses the on-accent fix). */
+  .chip-tag-active {
+    border-color: var(--color-accent);
+    background-color: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+
+  /* --- Dialogs --- */
+  .dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background-color: color-mix(in srgb, #000 60%, transparent);
+  }
+  .dialog-panel {
+    width: 100%;
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* --- Micro typography helpers --- */
+  /* The uppercase micro-label used as section eyebrows everywhere. */
+  .eyebrow {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-fg-dim);
+  }
+  /* Mono path / id label. */
+  .note-id {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-fg-dim);
+    word-break: break-all;
+  }
+
+  /* --- Page wrappers (canonical gutters + widths) ---
+     One source of truth for "the page is centered, this wide, with these
+     gutters". Header/footer/content all use --w-page so they align. */
+  .page {
+    margin-inline: auto;
+    max-width: var(--w-page);
+    padding-inline: 1rem;
+    padding-block: 1.5rem;
+  }
+  @media (min-width: 768px) {
+    .page {
+      padding-inline: 1.5rem;
+      padding-block: 2.5rem;
+    }
+  }
+  /* Reading-width variant for single-column reading/settings flows. */
+  .page-prose {
+    margin-inline: auto;
+    max-width: var(--w-prose);
+    padding-inline: 1rem;
+    padding-block: 1.75rem;
+  }
+  @media (min-width: 768px) {
+    .page-prose {
+      padding-inline: 1.5rem;
+      padding-block: 3rem;
+    }
+  }
+
+  /* --- Skeleton --- */
+  .skeleton {
+    background-color: color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-radius: var(--radius-sm);
+    animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
 }

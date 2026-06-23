@@ -139,7 +139,7 @@ function ConfirmRemoveDialog({
             type="button"
             onClick={handleConfirm}
             disabled={!armed || mutation.isPending}
-            className="min-h-11 rounded-md bg-red-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-40"
+            className="btn btn-danger-solid btn-touch"
           >
             {mutation.isPending ? "Removing…" : "Remove"}
           </button>

@@ -33,7 +33,7 @@ export function Settings() {
   if (!activeVault) return <Navigate to="/" replace />;
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-7 md:px-6 md:py-12">
+    <div className="page-prose">
       <header className="mb-8">
         <nav className="mb-3 text-sm text-fg-dim">
           <Link to="/" className="hover:text-accent">
@@ -62,17 +62,14 @@ export function Settings() {
 // with this vault?" affordances belong).
 function ImportSection() {
   return (
-    <section className="mb-8 rounded-md border border-border bg-card p-4">
+    <section className="card mb-8 p-4">
       <h2 className="font-serif text-lg">Import notes</h2>
       <p className="mt-1 text-sm text-fg-muted">
         Bring in an Obsidian vault zip or a folder of markdown files. Parsed in your browser;
         previewed before any note lands in the vault.
       </p>
       <div className="mt-3">
-        <Link
-          to="/import"
-          className="inline-block min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
-        >
+        <Link to="/import" className="btn btn-primary btn-touch">
           Open importer
         </Link>
       </div>
@@ -133,7 +130,7 @@ function VaultSchemaSection({ vaultId }: { vaultId: string }) {
   const error = audit?.error ?? null;
 
   return (
-    <section className="mt-6 space-y-4 rounded-xl border border-border bg-card p-6">
+    <section className="card mt-6 space-y-4 rounded-xl p-6">
       <div className="flex items-baseline justify-between gap-3">
         <div>
           <h2 className="font-serif text-xl text-fg">Vault schema</h2>
@@ -148,14 +145,14 @@ function VaultSchemaSection({ vaultId }: { vaultId: string }) {
           type="button"
           onClick={() => void onRefresh()}
           disabled={isLoading || !client}
-          className="shrink-0 text-xs text-fg-dim hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+          className="focus-ring shrink-0 text-xs text-fg-dim hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isLoading ? "Checking…" : "Refresh"}
         </button>
       </div>
 
       {error ? (
-        <p className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-md border border-[--color-danger-border] bg-[--color-danger-soft] px-3 py-2 text-xs text-[--color-danger]">
           Audit failed: {error}
         </p>
       ) : null}
@@ -175,7 +172,7 @@ function VaultSchemaSection({ vaultId }: { vaultId: string }) {
               type="button"
               onClick={() => void onFix()}
               disabled={fixing || !client}
-              className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="btn btn-primary btn-sm btn-touch"
             >
               {fixing ? "Setting up…" : "Set up missing tags"}
             </button>
@@ -190,12 +187,14 @@ function SchemaStatusPill({ ok }: { ok: boolean }) {
   return (
     <p
       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ${
-        ok ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"
+        ok
+          ? "bg-[--color-positive-soft] text-[--color-positive]"
+          : "bg-[--color-warning-soft] text-[--color-warning]"
       }`}
     >
       <span
         aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`}
+        className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-[--color-positive]" : "bg-[--color-warning]"}`}
       />
       {ok ? "Matches Notes' schema" : "Needs setup"}
     </p>
@@ -204,7 +203,7 @@ function SchemaStatusPill({ ok }: { ok: boolean }) {
 
 function SchemaRow({ row }: { row: TagAuditRow }) {
   const label = row.status === "ok" ? "ok" : row.status === "missing" ? "missing" : "misaligned";
-  const labelClass = row.status === "ok" ? "text-emerald-300" : "text-amber-300";
+  const labelClass = row.status === "ok" ? "text-[--color-positive]" : "text-[--color-warning]";
   return (
     <li className="rounded-md border border-border bg-bg/40 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
@@ -242,7 +241,7 @@ function TextSizeSection() {
   };
 
   return (
-    <section className="mt-6 space-y-4 rounded-xl border border-border bg-card p-6">
+    <section className="card mt-6 space-y-4 rounded-xl p-6">
       <div>
         <h2 className="font-serif text-xl text-fg">Text size</h2>
         <p className="mt-1 text-xs text-fg-dim">
@@ -278,9 +277,9 @@ function InstallStateSection() {
   }, []);
   if (!installed) return null;
   return (
-    <section className="mt-6 rounded-md border border-border bg-card p-4 text-sm">
+    <section className="card mt-6 p-4 text-sm">
       <p className="text-fg-muted">
-        <span className="mr-2 inline-block rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-medium text-emerald-300">
+        <span className="mr-2 inline-block rounded-full bg-[--color-positive-soft] px-2 py-0.5 text-xs font-medium text-[--color-positive]">
           Installed
         </span>
         Parachute Notes is running as an installed app on this device.
@@ -307,7 +306,7 @@ const PATH_TREE_MODE_LABELS: Record<PathTreeMode, { title: string; help: string 
 function PathTreeSection({ vaultId }: { vaultId: string }) {
   const { mode, setMode } = usePathTreeMode(vaultId);
   return (
-    <section className="mt-6 space-y-4 rounded-xl border border-border bg-card p-6">
+    <section className="card mt-6 space-y-4 rounded-xl p-6">
       <div>
         <h2 className="font-serif text-xl text-fg">Folder tree (Notes sidebar)</h2>
         <p className="mt-1 text-xs text-fg-dim">
@@ -389,7 +388,7 @@ function TagRolesSection({ vaultId }: { vaultId: string }) {
   };
 
   return (
-    <section className="mt-6 space-y-4 rounded-xl border border-border bg-card p-6">
+    <section className="card mt-6 space-y-4 rounded-xl p-6">
       <div>
         <h2 className="font-serif text-xl text-fg">Tag roles</h2>
         <p className="mt-1 text-xs text-fg-dim">
@@ -421,7 +420,7 @@ function TagRolesSection({ vaultId }: { vaultId: string }) {
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
-              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-dim focus:border-accent focus:outline-none"
+              className="input input-on-bg"
             />
             <span className="mt-1 block text-xs text-fg-dim">{ROLE_LABELS[key].help}</span>
           </label>
@@ -429,18 +428,13 @@ function TagRolesSection({ vaultId }: { vaultId: string }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 pt-2">
-        <button
-          type="button"
-          onClick={save}
-          disabled={!isDirty}
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
-        >
+        <button type="button" onClick={save} disabled={!isDirty} className="btn btn-primary btn-lg">
           Save
         </button>
         <button
           type="button"
           onClick={resetDefaults}
-          className="text-sm text-fg-muted hover:text-accent"
+          className="focus-ring text-sm text-fg-muted hover:text-accent"
         >
           Reset to defaults
         </button>

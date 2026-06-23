@@ -39,10 +39,10 @@ export function Header() {
       className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
-      <nav className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 lg:px-6 lg:py-5">
+      <nav className="mx-auto flex max-w-[--w-page] items-center justify-between gap-3 px-4 py-3 lg:px-6 lg:py-5">
         <Link
           to="/"
-          className="min-w-0 shrink truncate font-serif text-lg tracking-tight text-fg hover:text-accent lg:text-xl"
+          className="focus-ring min-w-0 shrink truncate font-serif text-lg tracking-tight text-fg hover:text-accent lg:text-xl"
         >
           Parachute Notes
         </Link>
@@ -96,7 +96,7 @@ export function Header() {
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
             aria-controls="mobile-menu"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card text-fg-muted hover:text-accent"
+            className="focus-ring flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card text-fg-muted hover:text-accent"
           >
             <span aria-hidden="true" className="font-mono text-base leading-none">
               {menuOpen ? "✕" : "☰"}
@@ -119,9 +119,7 @@ export function Header() {
                 Import
               </Link>
               <div className="mt-1">
-                <span className="mb-1 block text-xs uppercase tracking-wider text-fg-dim">
-                  Active vault
-                </span>
+                <span className="eyebrow mb-1 block">Active vault</span>
                 <VaultPopover variant="inline" />
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-3">

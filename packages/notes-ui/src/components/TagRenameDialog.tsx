@@ -203,7 +203,7 @@ export function TagRenameDialog({
               type="button"
               onClick={() => void handleMergeInstead()}
               disabled={mergingCollision}
-              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
             >
               {mergingCollision ? "Merging…" : `Merge into #${collidingTarget}`}
             </button>
@@ -226,7 +226,7 @@ export function TagRenameDialog({
             type="button"
             onClick={() => void handleConfirm()}
             disabled={!canConfirm}
-            className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
           >
             {pending
               ? mode === "rename"

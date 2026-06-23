@@ -1,5 +1,42 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.7-rc.1] - 2026-06-23
+
+First rc under the resumed per-PR rc-bump convention (every code-touching
+PR bumps `rc.N` + publishes to `@rc` so every box can soak it). Re-baselines
+the `@rc` channel from the stale `0.1.6-rc.2` up to `0.1.7-rc.1`, above the
+`0.1.6` stable.
+
+### Added — design-system layer
+- **Design tokens** (Tailwind v4 `@theme`): semantic state tokens
+  (`--color-danger`/`-hover`/`-soft`/`-border`, `--color-warning`/`-soft`,
+  `--color-positive`/`-soft`, and the load-bearing `--color-on-accent`); one
+  shared type ramp (`--text-2xs … --text-3xl`) used by chrome **and**
+  `.prose-note h1–h4`; consolidated radii, warm-tinted shadows, and container
+  widths (`--w-prose`/`-page`/`-narrow`). The dark palette is de-duplicated to
+  a single source (`--_d-*`) referenced by both the system `prefers-color-scheme`
+  case and the explicit `[data-theme="dark"]` gate — no drift between them.
+- **Component classes** (`@layer components`): `.btn` (+ `-primary`/`-secondary`/
+  `-ghost`/`-accent-soft`/`-danger`/`-danger-solid` + size mods), `.input`/
+  `.textarea`/`.select`, `.card`, `.chip` (+ `-tag`/`-tag-active`),
+  `.dialog-overlay`/`.dialog-panel`, `.eyebrow`, `.note-id`, `.page`/
+  `.page-prose`, `.skeleton`, one accessible `.focus-ring` — all
+  reduced-motion-safe.
+- **Shared UI primitives** (`src/components/ui/`): `<Skeleton>`, `<EmptyState>`,
+  `<ErrorState>`.
+- `STYLE.md` documenting the token contract.
+
+### Fixed
+- **WCAG-AA contrast**: dark-mode accent `#7ab087` with white ink was 2.50:1
+  (fail); ink is now `--color-on-accent` (`#15211a`) → 6.63:1 (pass). Swept
+  every `text-white`-on-accent across `src` to `text-[--color-on-accent]`
+  (zero `text-white` remain in non-test source) and moved the two solid
+  destructive buttons off raw `bg-red-500` onto `.btn-danger-solid`.
+
+### Changed
+- 6 surfaces refactored onto the new system (Header, BottomTabBar, Toaster,
+  Notes, NoteView, Settings); ~14 other files carry the mechanical AA swap.
+
 ## [0.1.3] - 2026-05-23
 
 ### Changed

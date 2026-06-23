@@ -86,7 +86,7 @@ export function Today() {
           </Link>
           <Link
             to="/new"
-            className="rounded-md bg-accent px-3 py-1.5 font-medium text-white hover:bg-accent-hover"
+            className="rounded-md bg-accent px-3 py-1.5 font-medium text-[--color-on-accent] hover:bg-accent-hover"
           >
             + New note
           </Link>
@@ -165,7 +165,7 @@ function EmptyBlock({ isToday, targetKey }: { isToday: boolean; targetKey: strin
       {isToday ? (
         <Link
           to="/new"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           New note
         </Link>
@@ -195,7 +195,7 @@ function ErrorBlock({ error }: { error: Error }) {
       {isAuth ? (
         <Link
           to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reconnect vault
         </Link>

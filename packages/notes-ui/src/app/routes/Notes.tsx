@@ -1,6 +1,9 @@
 import { PathTree } from "@/components/PathTree";
 import { TagBrowser } from "@/components/TagBrowser";
 import { normalizeTag } from "@/components/TagEditor";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { meetsAutoThreshold, usePathTreeMode } from "@/lib/path-tree";
 import {
@@ -263,10 +266,10 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
   const filteringActive = isFiltersNonEmpty(currentFilters);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
+    <div className="page">
       <header className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-3 md:mb-6">
         <div>
-          <p className="text-xs uppercase tracking-wider text-fg-dim">{activeVault.name}</p>
+          <p className="eyebrow">{activeVault.name}</p>
           <h1 className="font-serif text-2xl tracking-tight md:text-3xl">{title}</h1>
           {subtitle ? <p className="mt-1 text-sm text-fg-muted">{subtitle}</p> : null}
         </div>
@@ -284,15 +287,12 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
           <button
             type="button"
             onClick={() => setSort((s) => (s === "desc" ? "asc" : "desc"))}
-            className="text-sm text-fg-muted hover:text-accent"
+            className="focus-ring text-sm text-fg-muted hover:text-accent"
             aria-label="Toggle sort direction"
           >
             Sort: {sort === "desc" ? "newest" : "oldest"} first
           </button>
-          <Link
-            to="/new"
-            className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
-          >
+          <Link to="/new" className="btn btn-primary btn-touch">
             New note
           </Link>
         </div>
@@ -357,7 +357,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                   open={foldersOpen}
                   onToggle={(e) => setFoldersOpen(e.currentTarget.open)}
                 >
-                  <summary className="flex cursor-pointer list-none items-center justify-between rounded-md px-1 py-1 text-xs uppercase tracking-wider text-fg-dim hover:text-accent">
+                  <summary className="eyebrow flex cursor-pointer list-none items-center justify-between rounded-md px-1 py-1 hover:text-accent">
                     <span>Folders</span>
                     <span
                       aria-hidden="true"
@@ -395,7 +395,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
               placeholder="Search…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+              className="input"
               aria-label="Search notes"
             />
             <div className="flex flex-wrap items-start gap-3">
@@ -404,7 +404,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 placeholder="Title starts with…"
                 value={pathPrefix}
                 onChange={(e) => setPathPrefix(e.target.value)}
-                className="flex-1 min-w-48 rounded-md border border-border bg-card px-3 py-2 font-mono text-sm text-fg focus:border-accent focus:outline-none"
+                className="input flex-1 min-w-48 font-mono"
                 aria-label="Filter by path prefix"
               />
               {preset !== "untagged" ? (
@@ -425,7 +425,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 <button
                   type="button"
                   onClick={() => setShowSaveDialog(true)}
-                  className="rounded-md border border-accent/60 bg-accent/10 px-3 py-2 text-sm text-accent hover:bg-accent/20"
+                  className="btn btn-accent-soft"
                 >
                   Save view…
                 </button>
@@ -436,7 +436,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
           {notes.isPending ? (
             <SkeletonRows />
           ) : notes.isError ? (
-            <ErrorBlock error={notes.error} />
+            <NotesErrorBlock error={notes.error} retry={() => notes.refetch()} />
           ) : displayNotes && displayNotes.length > 0 ? (
             <ol
               aria-label="Notes"
@@ -453,7 +453,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
               ))}
             </ol>
           ) : (
-            <EmptyBlock filtering={isFilteringActive(queryState) || !!preset} />
+            <NotesEmptyBlock filtering={isFilteringActive(queryState) || !!preset} />
           )}
 
           <div className="mt-6 flex items-center justify-between text-sm text-fg-dim">
@@ -469,7 +469,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 type="button"
                 disabled={!hasPrev}
                 onClick={() => setOffset((o) => Math.max(0, o - DEFAULT_PAGE_SIZE))}
-                className="min-h-11 rounded-md border border-border px-3 py-1.5 text-sm text-fg-muted enabled:hover:text-accent disabled:opacity-40"
+                className="btn btn-secondary btn-touch"
               >
                 Previous
               </button>
@@ -477,7 +477,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 type="button"
                 disabled={!hasNext}
                 onClick={() => setOffset((o) => o + DEFAULT_PAGE_SIZE)}
-                className="min-h-11 rounded-md border border-border px-3 py-1.5 text-sm text-fg-muted enabled:hover:text-accent disabled:opacity-40"
+                className="btn btn-secondary btn-touch"
               >
                 Next
               </button>
@@ -549,11 +549,11 @@ function SavedViewsSidebar({
 
   return (
     <aside>
-      <h2 className="mb-2 text-xs uppercase tracking-wider text-fg-dim">Saved views</h2>
+      <h2 className="eyebrow mb-2">Saved views</h2>
       {isPending ? (
         <p className="text-xs text-fg-dim">Loading…</p>
       ) : error ? (
-        <p className="text-xs text-red-400">Could not load views.</p>
+        <p className="text-xs text-[--color-danger]">Could not load views.</p>
       ) : !views || views.length === 0 ? (
         <p className="text-xs text-fg-dim">
           None yet. Apply a filter and click “Save view” to add one.
@@ -624,7 +624,7 @@ function SavedViewsSidebar({
                         setOpenMenuId(null);
                         onDelete(v);
                       }}
-                      className="block w-full border-t border-border px-3 py-2 text-left text-sm text-red-400 hover:bg-bg"
+                      className="block w-full border-t border-border px-3 py-2 text-left text-sm text-[--color-danger] hover:bg-bg"
                     >
                       Delete
                     </button>
@@ -665,13 +665,13 @@ function RenameViewDialog({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      className="dialog-overlay"
       // biome-ignore lint/a11y/useSemanticElements: native <dialog> requires imperative showModal()/close(); we want declarative open=!!renaming
       role="dialog"
       aria-modal="true"
       aria-label="Rename view"
     >
-      <div className="w-full max-w-sm rounded-md border border-border bg-card p-5">
+      <div className="dialog-panel max-w-[--w-narrow]">
         <h3 className="mb-3 font-serif text-lg text-fg">Rename view</h3>
         <label className="block text-sm">
           <span className="mb-1 block text-fg-muted">Name</span>
@@ -686,25 +686,23 @@ function RenameViewDialog({
               if (e.key === "Escape") onCancel();
             }}
             aria-label="View name"
-            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+            className="input input-on-bg"
           />
         </label>
         {collides ? (
-          <p className="mt-2 text-xs text-red-400">A view with that name already exists.</p>
+          <p className="mt-2 text-xs text-[--color-danger]">
+            A view with that name already exists.
+          </p>
         ) : null}
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="min-h-11 rounded-md border border-border px-3 py-1.5 text-sm text-fg-muted hover:text-accent"
-          >
+          <button type="button" onClick={onCancel} className="btn btn-secondary btn-touch">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => canSave && onSave(trimmed)}
             disabled={!canSave}
-            className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            className="btn btn-primary btn-touch"
           >
             {isSaving ? "Saving…" : "Save"}
           </button>
@@ -732,13 +730,13 @@ function SaveViewDialog({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      className="dialog-overlay"
       // biome-ignore lint/a11y/useSemanticElements: native <dialog> requires imperative showModal()/close(); we want declarative open=showSaveDialog
       role="dialog"
       aria-modal="true"
       aria-label="Save view"
     >
-      <div className="w-full max-w-sm rounded-md border border-border bg-card p-5">
+      <div className="dialog-panel max-w-[--w-narrow]">
         <h3 className="mb-3 font-serif text-lg text-fg">Save view</h3>
         <label className="block text-sm">
           <span className="mb-1 block text-fg-muted">Name</span>
@@ -754,25 +752,23 @@ function SaveViewDialog({
             }}
             placeholder="e.g. Daily journal"
             aria-label="View name"
-            className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg focus:border-accent focus:outline-none"
+            className="input input-on-bg"
           />
         </label>
         {collides ? (
-          <p className="mt-2 text-xs text-red-400">A view with that name already exists.</p>
+          <p className="mt-2 text-xs text-[--color-danger]">
+            A view with that name already exists.
+          </p>
         ) : null}
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="min-h-11 rounded-md border border-border px-3 py-1.5 text-sm text-fg-muted hover:text-accent"
-          >
+          <button type="button" onClick={onCancel} className="btn btn-secondary btn-touch">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => canSave && onSave(trimmed)}
             disabled={!canSave}
-            className="min-h-11 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            className="btn btn-primary btn-touch"
           >
             {isSaving ? "Saving…" : "Save"}
           </button>
@@ -802,7 +798,7 @@ function NoteRow({
       <div className="flex items-stretch">
         <Link
           to={`/n/${encodeURIComponent(note.id)}`}
-          className="block flex-1 min-w-0 min-h-11 px-3 py-2.5 hover:bg-bg/60 focus:bg-bg/60 focus:outline-none md:min-h-0 md:px-4 md:py-3"
+          className="focus-ring block flex-1 min-w-0 min-h-11 px-3 py-2.5 hover:bg-bg/60 md:min-h-0 md:px-4 md:py-3"
         >
           <div className="flex items-baseline justify-between gap-4">
             <span className="flex min-w-0 items-baseline gap-1.5">
@@ -818,10 +814,7 @@ function NoteRow({
           {note.tags && note.tags.length > 0 ? (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {note.tags.map((t) => (
-                <span
-                  key={t}
-                  className="max-w-full break-all rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent"
-                >
+                <span key={t} className="chip chip-tag max-w-full break-all">
                   #{t}
                 </span>
               ))}
@@ -908,7 +901,7 @@ function QuickTagControl({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md border border-border bg-bg/60 px-2 py-1 text-xs text-fg-muted hover:border-accent hover:text-accent"
+        className="btn btn-sm border border-border bg-bg/60 text-fg-muted hover:border-accent hover:text-accent"
         aria-label="Add tag"
       >
         + tag
@@ -932,7 +925,7 @@ function QuickTagControl({
         placeholder="tag…"
         aria-label="Tag name"
         disabled={update.isPending}
-        className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs text-fg focus:border-accent focus:outline-none disabled:opacity-50"
+        className="input w-32 px-2 py-1 text-xs"
       />
       {filtered.length > 0 ? (
         <ul
@@ -976,7 +969,7 @@ function PinnedTagsStrip({
   if (pinnedTags.length === 0) {
     return (
       <nav aria-label="Pinned tags" className="mb-6 flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wider text-fg-dim">Pinned tags</span>
+        <span className="eyebrow">Pinned tags</span>
         <span className="text-xs text-fg-dim">
           Pin tags here for quick access —{" "}
           <Link to="/tags" className="text-accent hover:underline">
@@ -989,7 +982,7 @@ function PinnedTagsStrip({
   }
   return (
     <nav aria-label="Pinned tags" className="mb-6 flex flex-wrap items-center gap-2">
-      <span className="text-xs uppercase tracking-wider text-fg-dim">Pinned tags</span>
+      <span className="eyebrow">Pinned tags</span>
       {pinnedTags.map((name) => {
         const active = selected.length === 1 && selected[0] === name;
         const count = countFor(name);
@@ -998,16 +991,16 @@ function PinnedTagsStrip({
             key={name}
             type="button"
             onClick={() => onPick(name)}
-            className={
-              active
-                ? "inline-flex max-w-full items-center gap-1 rounded-full border border-accent bg-accent px-2.5 py-1 text-xs font-medium text-white"
-                : "inline-flex max-w-full items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs text-accent hover:border-accent hover:bg-accent/20"
-            }
+            className={`chip focus-ring max-w-full ${
+              active ? "chip-tag-active font-medium" : "chip-tag"
+            }`}
             aria-pressed={active}
           >
             <span className="min-w-0 break-all">#{name}</span>
             {count !== undefined ? (
-              <span className={active ? "text-white/80" : "text-accent/70"}>{count}</span>
+              <span className={active ? "text-[--color-on-accent]/80" : "text-accent/70"}>
+                {count}
+              </span>
             ) : null}
           </button>
         );
@@ -1025,7 +1018,7 @@ function BuiltInViewsSidebar() {
   ];
   return (
     <aside>
-      <h2 className="mb-2 text-xs uppercase tracking-wider text-fg-dim">Views</h2>
+      <h2 className="eyebrow mb-2">Views</h2>
       <ul className="space-y-1">
         {items.map((it) => (
           <li key={it.to}>
@@ -1129,50 +1122,44 @@ function SkeletonRows() {
     <ol className="divide-y divide-border rounded-md border border-border bg-card" aria-busy="true">
       {[0, 1, 2, 3, 4].map((i) => (
         <li key={i} className="px-4 py-3">
-          <div className="h-4 w-1/3 animate-pulse rounded bg-border/60" />
-          <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-border/40" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="mt-2 h-3 w-2/3" />
         </li>
       ))}
     </ol>
   );
 }
 
-function ErrorBlock({ error }: { error: Error }) {
+function NotesErrorBlock({ error, retry }: { error: Error; retry: () => void }) {
   const isAuth = error instanceof VaultAuthError;
   return (
-    <div className="rounded-md border border-red-500/30 bg-red-500/5 p-6">
-      <p className="mb-2 font-medium text-red-400">
-        {isAuth ? "Session expired" : "Could not load notes"}
-      </p>
-      <p className="mb-4 text-sm text-fg-muted">{error.message}</p>
-      {isAuth ? (
-        <Link
-          to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-        >
-          Reconnect vault
-        </Link>
-      ) : null}
-    </div>
+    <ErrorState
+      title={isAuth ? "Session expired" : "Could not load notes"}
+      message={error.message}
+      retry={isAuth ? undefined : retry}
+      action={
+        isAuth ? (
+          <Link to="/add" className="btn btn-primary">
+            Reconnect vault
+          </Link>
+        ) : undefined
+      }
+    />
   );
 }
 
-function EmptyBlock({ filtering }: { filtering: boolean }) {
+function NotesEmptyBlock({ filtering }: { filtering: boolean }) {
+  if (filtering) {
+    return <EmptyState title="No notes match these filters." />;
+  }
   return (
-    <div className="rounded-md border border-border bg-card p-10 text-center">
-      {filtering ? (
-        <p className="text-fg-muted">No notes match these filters.</p>
-      ) : (
-        <>
-          <p className="mb-3 text-fg-muted">This vault has no notes yet.</p>
-          <Link
-            to="/new"
-            className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
-          >
-            Create one
-          </Link>
-        </>
-      )}
-    </div>
+    <EmptyState
+      title="This vault has no notes yet."
+      action={
+        <Link to="/new" className="btn btn-primary">
+          Create one
+        </Link>
+      }
+    />
   );
 }
