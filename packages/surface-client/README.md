@@ -71,7 +71,20 @@ const surface = createVaultSurface({
 });
 ```
 
-The returned `VaultSurface` is `{ oauth, bootstrap, hubUrl, vaultName, login(), handleCallback(), getClient(), logout() }`. `oauth` is the underlying `ParachuteOAuth` if you need to drop down to the low-level dance. Everything below this section is that low-level layer — reach for it when the factory's defaults don't fit.
+The returned `VaultSurface` is `{ oauth, bootstrap, hubUrl, vaultName, login(), handleCallback(), getClient(), moduleAuth(), logout() }`. `oauth` is the underlying `ParachuteOAuth` if you need to drop down to the low-level dance. Everything below this section is that low-level layer — reach for it when the factory's defaults don't fit.
+
+### Second-audience tokens — `moduleAuth()` (0.3.1+)
+
+A surface sometimes needs to call a **different** Parachute module's resource server — e.g. subscribe to the agent daemon's live turn-events SSE, which requires an `agent:read` token with `aud: agent`. That has to be a **separate token** from your vault token: the hub derives a token's audience from its scopes and a *named-vault* scope wins, so a token carrying both `vault:…` and `agent:read` resolves to `aud: vault.<name>` (the agent rejects it), and the hub's refresh can't re-narrow. So `moduleAuth` runs its own authorize scoped to the module scope **alone**.
+
+```ts
+const agent = surface.moduleAuth({ scope: "agent:read" });   // → aud: agent
+if (!agent.getToken()) await agent.login();                  // one-time consent (its own redirect)
+const token = await agent.getAccessToken();                  // cached + auto-refreshed
+new EventSource(`${issuerOrigin}/agent/api/channels/${name}/turn-events?token=${token}`);
+```
+
+`moduleAuth(opts)` → `ModuleAuth`: `{ scope, storageScope, login(), handleCallback(): Promise<boolean>, getAccessToken(), getToken(), logout() }`. It **reuses** the surface's DCR client + discovery/refresh caches, and is **isolated** from the vault flow — its token lives under a separate storage key (`storageScope`, default `"agent"`; a guard throws if it would alias the vault token), and the pending-flow `state` is namespaced so a single shared `/oauth/callback` routes correctly: `handleCallback()` returns `false` (declines without consuming) when the callback `state` belongs to another flow. The vault flow is 100% unchanged.
 
 **Session resilience (return visits just work).** Hub access tokens live ~15 minutes, so *every* return visit starts with an expired-but-refreshable token. Two behaviors make that path safe without app-side workarounds:
 
