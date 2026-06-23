@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.0] - 2026-06-23
+
+### Added
+
+- **Multi-audience OAuth — `VaultSurface.moduleAuth(opts)` (#133).** A surface can
+  now hold a second, audience-scoped token (e.g. `agent:read` → `aud: agent`)
+  alongside its vault token, so it can call another Parachute module's
+  resource-server endpoints (the motivating case: subscribing to the agent
+  daemon's live turn-events SSE). It must be a separate token because the hub's
+  `inferAudience` lets a named-vault scope win — a token mixing `vault:…` +
+  `agent:read` resolves to `aud: vault.<name>` (rejected by the agent), and the
+  hub's refresh can't re-narrow — so `moduleAuth` runs its own authorize scoped
+  to the module scope **alone**.
+
+  `surface.moduleAuth({ scope: "agent:read" })` returns a `ModuleAuth` with
+  `login()` / `handleCallback()` / `getAccessToken()` / `getToken()` / `logout()`
+  — mirroring the vault token's lifecycle (cache + refresh-near-expiry). It
+  **reuses** the surface's DCR client_id + discovery/refresh caches, and is
+  **isolated** from the vault flow: the token is stored under a separate key
+  (`storageScope`, default `"agent"`; a guard throws if it would alias the vault
+  token), and the pending-flow `state` is namespaced by `flowKey` so a single
+  shared OAuth callback routes correctly — `handleCallback()` returns `false`
+  (declines without consuming) when the URL `state` belongs to another flow.
+
+  Fully additive — the existing vault flow + `createVaultSurface` API are
+  unchanged.
+
 ## [0.2.0] - 2026-06-02
 
 ### Added
