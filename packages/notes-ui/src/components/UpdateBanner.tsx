@@ -55,7 +55,7 @@ function UpdateBannerInner() {
         <button
           type="button"
           onClick={onReload}
-          className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-white hover:bg-accent-hover"
+          className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reload
         </button>

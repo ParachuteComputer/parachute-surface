@@ -330,7 +330,7 @@ export function NoteNew() {
                 type="button"
                 onClick={handleSave}
                 disabled={!isValid || pending}
-                className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+                className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
                 title="Create (⌘S)"
               >
                 {pending ? "Creating…" : "Create"}

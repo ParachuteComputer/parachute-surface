@@ -118,7 +118,7 @@ export function SyncStatusPanel({ onDismiss }: { onDismiss?: () => void }) {
           <Link
             to="/add"
             onClick={onDismiss}
-            className="inline-block rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+            className="inline-block rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-[--color-on-accent] hover:bg-accent-hover"
           >
             Reconnect to resume sync
           </Link>

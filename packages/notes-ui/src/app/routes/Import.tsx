@@ -210,7 +210,7 @@ function PickStage({ parsing, onFiles, inputRef }: PickProps) {
             Accepts an Obsidian vault `.zip`, or one or more `.md` / `.markdown` files.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <label className="inline-flex min-h-11 cursor-pointer items-center rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">
+            <label className="inline-flex min-h-11 cursor-pointer items-center rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover">
               {parsing ? "Reading…" : "Choose files"}
               <input
                 ref={inputRef}
@@ -359,7 +359,7 @@ function ReviewStage({ parsed, onConfirm, onBack }: ReviewProps) {
           type="button"
           onClick={onConfirm}
           disabled={!canImport}
-          className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+          className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
         >
           Run import ({noteCount} {noteCount === 1 ? "note" : "notes"}
           {attachmentCount > 0
@@ -539,7 +539,7 @@ function DoneStage({
         <button
           type="button"
           onClick={onHome}
-          className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
+          className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Back to vault
         </button>

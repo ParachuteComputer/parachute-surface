@@ -29,7 +29,7 @@ export function Home() {
           </p>
           <Link
             to={`/add?url=${encodeURIComponent(foundOrigin)}`}
-            className="inline-block rounded-md bg-accent px-6 py-3 text-sm font-medium text-white hover:bg-accent-hover"
+            className="inline-block rounded-md bg-accent px-6 py-3 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
           >
             Connect
           </Link>
@@ -46,7 +46,7 @@ export function Home() {
           </p>
           <Link
             to="/add"
-            className="inline-block rounded-md bg-accent px-6 py-3 text-sm font-medium text-white hover:bg-accent-hover"
+            className="inline-block rounded-md bg-accent px-6 py-3 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
           >
             Connect a vault
           </Link>

@@ -223,7 +223,7 @@ function EditorSurface({ note }: { note: Note }) {
               type="button"
               onClick={handleSave}
               disabled={!isDirty || mutation.isPending}
-              className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+              className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
               title="Save (⌘S)"
             >
               {mutation.isPending ? "Saving…" : "Save"}
@@ -284,7 +284,9 @@ function EditorSurface({ note }: { note: Note }) {
             aria-selected={mobilePane === p}
             onClick={() => setMobilePane(p)}
             className={`rounded px-3 py-1.5 capitalize ${
-              mobilePane === p ? "bg-accent text-white" : "text-fg-muted hover:text-accent"
+              mobilePane === p
+                ? "bg-accent text-[--color-on-accent]"
+                : "text-fg-muted hover:text-accent"
             }`}
           >
             {p}
@@ -416,7 +418,7 @@ function ConflictBanner({
         <button
           type="button"
           onClick={onReload}
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reload latest (discard my edits)
         </button>
@@ -466,7 +468,7 @@ function ErrorBlock({ error }: { error: Error }) {
       {isAuth ? (
         <Link
           to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reconnect vault
         </Link>
