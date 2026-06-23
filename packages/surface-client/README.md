@@ -84,7 +84,7 @@ const token = await agent.getAccessToken();                  // cached + auto-re
 new EventSource(`${issuerOrigin}/agent/api/channels/${name}/turn-events?token=${token}`);
 ```
 
-`moduleAuth(opts)` → `ModuleAuth`: `{ scope, storageScope, login(), handleCallback(): Promise<boolean>, getAccessToken(), getToken(), logout() }`. It **reuses** the surface's DCR client + discovery/refresh caches, and is **isolated** from the vault flow — its token lives under a separate storage key (`storageScope`, default `"agent"`; a guard throws if it would alias the vault token), and the pending-flow `state` is namespaced so a single shared `/oauth/callback` routes correctly: `handleCallback()` returns `false` (declines without consuming) when the callback `state` belongs to another flow. The vault flow is 100% unchanged.
+`moduleAuth(opts)` → `ModuleAuth`: `{ scope, storageScope, login(), handleCallback(): Promise<boolean>, getAccessToken(), getToken(), logout() }`. It **reuses** the surface's DCR client + discovery/refresh caches, and is **isolated** from the vault flow — its token lives under a separate storage key (`storageScope`, default: the service prefix of `scope` — e.g. `"agent"` for `"agent:read"`, `"scribe"` for `"scribe:read"`; a guard throws if it would alias the vault token), and the pending-flow `state` is namespaced so a single shared `/oauth/callback` routes correctly: `handleCallback()` returns `false` (declines without consuming) when the callback `state` belongs to another flow. The vault flow is 100% unchanged.
 
 **Session resilience (return visits just work).** Hub access tokens live ~15 minutes, so *every* return visit starts with an expired-but-refreshable token. Two behaviors make that path safe without app-side workarounds:
 
