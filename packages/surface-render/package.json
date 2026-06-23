@@ -50,7 +50,7 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@openparachute/surface-client": "^0.2.0"
+    "@openparachute/surface-client": "^0.3.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
