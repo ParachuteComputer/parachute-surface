@@ -112,7 +112,7 @@
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.41.1",
         "@lezer/highlight": "^1.2.3",
-        "@openparachute/surface-client": "^0.2.0",
+        "@openparachute/surface-client": "^0.3.0",
         "@openparachute/surface-render": "^0.2.0",
         "@tanstack/react-query": "^5",
         "highlight.js": "^11.11.1",
@@ -156,7 +156,7 @@
       "name": "@openparachute/pebble-config",
       "version": "0.1.0",
       "dependencies": {
-        "@openparachute/surface-client": "^0.2.0",
+        "@openparachute/surface-client": "^0.3.0",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -198,7 +198,7 @@
       "name": "@openparachute/surface-render",
       "version": "0.2.0",
       "dependencies": {
-        "@openparachute/surface-client": "^0.2.0",
+        "@openparachute/surface-client": "^0.3.0",
       },
       "devDependencies": {
         "@testing-library/dom": "^10.4.0",
@@ -2062,13 +2062,7 @@
 
     "@asamuzakjp/css-color/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
-    "@openparachute/notes-ui/@openparachute/surface-client": ["@openparachute/surface-client@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-SC2czbj+wiArCTm0//P7vDJDte92EEkqZjRI5jzKJ2i7T86CjWMW33kJH3wH6HO9CwoCtyeZELpgXm9WWV5bFA=="],
-
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
-
-    "@openparachute/pebble-config/@openparachute/surface-client": ["@openparachute/surface-client@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-SC2czbj+wiArCTm0//P7vDJDte92EEkqZjRI5jzKJ2i7T86CjWMW33kJH3wH6HO9CwoCtyeZELpgXm9WWV5bFA=="],
-
-    "@openparachute/surface-render/@openparachute/surface-client": ["@openparachute/surface-client@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-SC2czbj+wiArCTm0//P7vDJDte92EEkqZjRI5jzKJ2i7T86CjWMW33kJH3wH6HO9CwoCtyeZELpgXm9WWV5bFA=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 
