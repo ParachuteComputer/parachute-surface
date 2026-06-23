@@ -15,7 +15,7 @@ export function Vaults() {
         <h1 className="font-serif text-4xl tracking-tight">Vaults</h1>
         <Link
           to="/add"
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Add vault
         </Link>

@@ -93,7 +93,7 @@ export function Tags() {
             type="button"
             onClick={() => setMergeOpen(true)}
             disabled={selectedCount < 2 || offline}
-            className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
           >
             Merge into…
           </button>
@@ -319,7 +319,7 @@ function ErrorBlock({ error }: { error: Error }) {
       {isAuth ? (
         <Link
           to="/add"
-          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
         >
           Reconnect vault
         </Link>
@@ -341,7 +341,7 @@ function EmptyBlock({ filtering, hasAny }: { filtering: boolean; hasAny: boolean
       <p className="mb-3 text-fg-muted">No tags in this vault yet.</p>
       <Link
         to="/new"
-        className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+        className="inline-block rounded-md bg-accent px-4 py-2 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover"
       >
         Create a note
       </Link>

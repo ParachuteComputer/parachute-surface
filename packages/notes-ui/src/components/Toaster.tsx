@@ -25,9 +25,9 @@ export function Toaster() {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`pointer-events-auto flex max-w-md items-center gap-3 rounded-md border px-4 py-2 text-sm shadow-lg backdrop-blur ${
+          className={`pointer-events-auto flex max-w-md items-center gap-3 rounded-md border px-4 py-2 text-sm shadow-[--shadow-lg] backdrop-blur ${
             t.tone === "error"
-              ? "border-red-500/40 bg-red-500/10 text-red-400"
+              ? "border-[--color-danger-border] bg-[--color-danger-soft] text-[--color-danger]"
               : t.tone === "success"
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-border bg-card text-fg-muted"
