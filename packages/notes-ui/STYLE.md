@@ -42,8 +42,9 @@ token is also a utility (`bg-accent`, `text-fg-muted`, `text-2xs`,
 Build surfaces from these instead of re-hand-rolling strings:
 
 - **Buttons** — `.btn` base + `.btn-primary` / `.btn-secondary` / `.btn-ghost` /
-  `.btn-danger` (soft) / `.btn-danger-solid` (filled). Sizes: `.btn-sm`,
-  `.btn-lg`, `.btn-touch` (min-h-11 mobile target).
+  `.btn-accent-soft` (accent-tinted in-context action) / `.btn-danger` (soft) /
+  `.btn-danger-solid` (filled). Sizes: `.btn-sm`, `.btn-lg`, `.btn-touch`
+  (min-h-11 mobile target).
 - **Form controls** — `.input` / `.textarea` / `.select` (+ `.input-on-bg` when
   the field sits on a recessed/dialog surface).
 - **Surfaces** — `.card`.

@@ -425,7 +425,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 <button
                   type="button"
                   onClick={() => setShowSaveDialog(true)}
-                  className="btn border-accent/60 bg-accent/10 text-accent hover:bg-accent/20"
+                  className="btn btn-accent-soft"
                 >
                   Save view…
                 </button>

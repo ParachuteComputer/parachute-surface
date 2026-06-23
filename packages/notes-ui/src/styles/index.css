@@ -557,6 +557,17 @@ body {
     border-color: var(--color-danger);
   }
 
+  /* Accent-soft — accent-tinted ghost, the "in-context accent action" (e.g.
+     Save view) that should read as accent without the weight of a primary fill. */
+  .btn-accent-soft {
+    background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+  .btn-accent-soft:not(:disabled):hover {
+    background-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+
   /* Danger (solid) — filled destructive for the confirm-in-a-dialog action.
      Ink is --color-on-accent: white in light (≈5:1 on the brick fill) and dark
      in dark (≈6:1 on the lighter dark-danger) — passes AA in both, unlike the
