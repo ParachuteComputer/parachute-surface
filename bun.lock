@@ -104,7 +104,7 @@
     },
     "packages/notes-ui": {
       "name": "@openparachute/notes-ui",
-      "version": "0.1.6",
+      "version": "0.1.7-rc.1",
       "dependencies": {
         "@codemirror/commands": "^6.10.3",
         "@codemirror/lang-markdown": "^6.5.0",
@@ -166,7 +166,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.1",
+      "version": "0.3.2-rc.1",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
@@ -2062,7 +2062,23 @@
 
     "@asamuzakjp/css-color/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
+    "@openparachute/docs-editor/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/meeting-ingest/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/meeting-mcp/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/notes-ui/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
+
+    "@openparachute/pebble-config/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/surface/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/surface-render/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
+
+    "@openparachute/surface-server/@openparachute/surface-client": ["@openparachute/surface-client@0.3.1", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-LHQUwgs+s4nvYu+RHGBLcU2a538cq+EdegqfLm3IjX9f6WzsnJi6BcGuzoT1SgY99Z1wGC7wnXP28mdMe6r2OA=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

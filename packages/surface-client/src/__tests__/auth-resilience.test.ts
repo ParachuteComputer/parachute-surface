@@ -23,7 +23,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 
 import { createVaultSurface } from "../create-vault-surface.ts";
 import { ParachuteOAuth } from "../oauth.ts";
-import { saveToken } from "../token-storage.ts";
+import { loadToken, saveToken } from "../token-storage.ts";
 
 // --- in-memory storage stub (token-storage's localStorage shape) -----------
 
@@ -138,6 +138,43 @@ function freshCounters(): Counters {
   return { discovery: 0, register: 0, tokenExchanges: 0, hostedClientFetches: 0, apiCalls: 0 };
 }
 
+/**
+ * A hub stub whose refresh endpoint ALWAYS returns a terminal
+ * `400 invalid_grant` ("refresh_token revoked") — the dead-token case the
+ * single-flight + cold-load fixes don't recover from. The vault API 401s every
+ * bearer (the stale token never becomes valid), so a request forces the refresh
+ * → the refresh fails terminally. Used to prove the surface EVICTS the dead
+ * token and does not re-hit the token endpoint on the next request (no loop).
+ */
+function makeRevokedRefreshFetch(counters: Counters): typeof fetch {
+  return (async (url: string) => {
+    if (url.includes("/.well-known/")) {
+      counters.discovery++;
+      return Response.json(METADATA);
+    }
+    if (url.startsWith(`${HUB}/oauth/register`)) {
+      counters.register++;
+      return Response.json({ client_id: `dcr_${counters.register}` });
+    }
+    if (url.startsWith(`${HUB}/surface/`)) {
+      counters.hostedClientFetches++;
+      return Response.json({ client_id: "hosted_client", scopes: [] });
+    }
+    if (url.startsWith(`${HUB}/oauth/token`)) {
+      counters.tokenExchanges++;
+      return Response.json(
+        { error: "invalid_grant", error_description: "refresh_token revoked" },
+        { status: 400 },
+      );
+    }
+    if (url.startsWith(`${HUB}/vault/`)) {
+      counters.apiCalls++;
+      return Response.json({ error_type: "expired" }, { status: 401 });
+    }
+    throw new Error(`unmocked URL: ${url}`);
+  }) as unknown as typeof fetch;
+}
+
 let sessionStorage: MemoryStorage;
 let tokenStorage: MemoryStorage;
 let dcrCache: MemoryStorage;
@@ -176,7 +213,10 @@ function seedReturnVisit(appName: string) {
   );
 }
 
-function makeSurface(counters: Counters, opts: { tokenDelayMs?: number } = {}) {
+function makeSurface(
+  counters: Counters,
+  opts: { tokenDelayMs?: number; fetchImpl?: typeof fetch } = {},
+) {
   return createVaultSurface({
     clientName: "Resilience Spec",
     appName: "resilience-spec",
@@ -185,7 +225,7 @@ function makeSurface(counters: Counters, opts: { tokenDelayMs?: number } = {}) {
     redirectUri: "http://app.example/oauth/callback",
     doc: null, // standalone
     bootstrap: "dcr",
-    fetchImpl: makeHubFetch(counters, opts),
+    fetchImpl: opts.fetchImpl ?? makeHubFetch(counters, opts),
     sessionStorage,
     tokenStorage,
     dcrCacheStorage: dcrCache,
@@ -329,5 +369,117 @@ describe("single-flight refresh (brain gap 2)", () => {
     expect(oauth.refreshAccessToken("rt_also_wrong", "default")).rejects.toThrow();
     await Promise.resolve();
     expect(counters.tokenExchanges).toBe(before + 1);
+  });
+});
+
+describe("terminal invalid_grant recovery (revoked refresh token → no loop)", () => {
+  test("vault flow: a 400 invalid_grant EVICTS the dead token and does not loop", async () => {
+    seedReturnVisit("resilience-spec");
+    const counters = freshCounters();
+    const surface = makeSurface(counters, { fetchImpl: makeRevokedRefreshFetch(counters) });
+
+    const client = surface.getClient();
+    expect(client).not.toBeNull();
+
+    // First request: stale bearer 401s → refresh → hub 400 invalid_grant
+    // (revoked). The seam must catch it, clear the token, and surface a clean
+    // VaultAuthError (NOT propagate RefreshHttpError, NOT loop).
+    await expect(client!.queryNotes({ tag: "#x" })).rejects.toThrow(/rejected the token/);
+
+    // (a) the stored token was CLEARED after the failed refresh.
+    expect(loadToken("resilience-spec", "default", { storage: tokenStorage })).toBeNull();
+    const exchangesAfterFirst = counters.tokenExchanges;
+    expect(exchangesAfterFirst).toBe(1); // exactly one refresh attempt
+
+    // (b) a SECOND request via getClient() does NOT re-hit the token endpoint —
+    // the token is gone, so getClient() returns null (no client, no loop).
+    expect(surface.getClient()).toBeNull();
+    expect(counters.tokenExchanges).toBe(exchangesAfterFirst); // unchanged: no re-refresh
+  });
+
+  test("module flow: a 400 invalid_grant EVICTS the module token and returns null", async () => {
+    // Seed the DCR cache so the cold-load seed succeeds, then store an EXPIRED
+    // agent-audience token with a (revoked) refresh token under the module scope.
+    dcrCache.setItem(
+      "parachute_surface_dcr:resilience-spec",
+      JSON.stringify({
+        issuer: HUB,
+        redirectUri: "http://app.example/oauth/callback",
+        clientId: "dcr_prior",
+      }),
+    );
+    saveToken(
+      "resilience-spec",
+      "agent",
+      {
+        accessToken: "agent_at_stale",
+        scope: "agent:read",
+        refreshToken: "agent_rt_revoked",
+        expiresAt: Date.now() - 60_000, // expired → forces refresh
+      },
+      { storage: tokenStorage },
+    );
+
+    const counters = freshCounters();
+    const surface = makeSurface(counters, { fetchImpl: makeRevokedRefreshFetch(counters) });
+    const agentAuth = surface.moduleAuth({ scope: "agent:read" });
+
+    // Expired → refresh → 400 invalid_grant → evict + null (no throw, no loop).
+    expect(await agentAuth.getAccessToken()).toBeNull();
+    expect(loadToken("resilience-spec", "agent", { storage: tokenStorage })).toBeNull();
+    const after = counters.tokenExchanges;
+    expect(after).toBe(1);
+
+    // Second call: token gone → null without another exchange.
+    expect(await agentAuth.getAccessToken()).toBeNull();
+    expect(counters.tokenExchanges).toBe(after);
+  });
+
+  test("concurrent 401s on a revoked token: ONE refresh, evicted once, no loop", async () => {
+    seedReturnVisit("resilience-spec");
+    const counters = freshCounters();
+    const surface = makeSurface(counters, { fetchImpl: makeRevokedRefreshFetch(counters) });
+    const client = surface.getClient()!;
+
+    // N parallel queries all 401 → all enter onAuthError → single-flight
+    // collapses them into ONE token-endpoint exchange, which 400s terminally.
+    // Each closure catches the SAME rejection and calls clearToken (idempotent
+    // — removeItem on a missing key is a no-op). All must reject cleanly; none
+    // loop.
+    const settled = await Promise.allSettled([
+      client.queryNotes({ tag: "#a" }),
+      client.queryNotes({ tag: "#b" }),
+      client.queryNotes({ tag: "#c" }),
+    ]);
+    expect(settled.every((s) => s.status === "rejected")).toBe(true);
+    expect(counters.tokenExchanges).toBe(1); // single-flight held even on terminal failure
+    expect(loadToken("resilience-spec", "default", { storage: tokenStorage })).toBeNull();
+  });
+
+  test("non-terminal refresh failure (5xx) still PROPAGATES — token preserved", async () => {
+    seedReturnVisit("resilience-spec");
+    const counters = freshCounters();
+    // Refresh endpoint returns a 503 (transient) — NOT a terminal invalid_grant.
+    const fetchImpl = (async (url: string) => {
+      if (url.includes("/.well-known/")) return Response.json(METADATA);
+      if (url.startsWith(`${HUB}/oauth/register`)) return Response.json({ client_id: "dcr_x" });
+      if (url.startsWith(`${HUB}/oauth/token`)) {
+        counters.tokenExchanges++;
+        return new Response("upstream unavailable", { status: 503 });
+      }
+      if (url.startsWith(`${HUB}/vault/`)) {
+        counters.apiCalls++;
+        return Response.json({ error_type: "expired" }, { status: 401 });
+      }
+      throw new Error(`unmocked URL: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const surface = makeSurface(counters, { fetchImpl });
+    // A transient failure must NOT silently evict the token (it may recover);
+    // it propagates as the original RefreshHttpError-derived rejection.
+    await expect(surface.getClient()!.queryNotes({ tag: "#x" })).rejects.toThrow(/503/);
+    await Promise.resolve();
+    // Token PRESERVED — not a terminal failure.
+    expect(loadToken("resilience-spec", "default", { storage: tokenStorage })).not.toBeNull();
   });
 });

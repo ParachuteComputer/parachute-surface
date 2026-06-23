@@ -42,7 +42,7 @@
 
 import { registerClient } from "./discovery.js";
 import { getHubOrigin, getMountBase, getTenantId } from "./mount.js";
-import { DEFAULT_PENDING_KEY, type OAuthClientInfo, ParachuteOAuth } from "./oauth.js";
+import { DEFAULT_PENDING_KEY, type OAuthClientInfo, ParachuteOAuth, RefreshHttpError } from "./oauth.js";
 import type { TokenStorageLike } from "./oauth.js";
 import { VaultClient } from "./vault-client.js";
 
@@ -478,8 +478,22 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
           // exchange. Cache miss = refresh not possible (a new registration
           // couldn't redeem this refresh token anyway) → null → sign-in.
           if (!(await seedClientIdFromCache())) return null;
-          const { token } = await oauth.refreshAccessToken(refreshToken, vaultName);
-          return token.access_token;
+          try {
+            const { token } = await oauth.refreshAccessToken(refreshToken, vaultName);
+            return token.access_token;
+          } catch (err) {
+            // Terminal failure (revoked / expired / rotation-conflict refresh
+            // token → hub 400 invalid_grant): EVICT the dead token and return
+            // null. Without eviction every retry re-reads + re-submits the same
+            // dead token → infinite "Token refresh failed (400)" loop. Returning
+            // null is already handled at the VaultClient call site (→ a clean
+            // VaultAuthError) and at getClient() (→ null → fresh login UX).
+            if (isTerminalRefreshFailure(err)) {
+              oauth.clearToken(vaultName);
+              return null;
+            }
+            throw err; // non-terminal → preserve existing propagation
+          }
         },
       };
       if (opts.fetchImpl !== undefined) clientOpts.fetchImpl = opts.fetchImpl;
@@ -576,8 +590,20 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
           if (!(await seedClientIdFromCache())) {
             return stored.expiresAt > now ? stored.accessToken : null;
           }
-          const { token } = await oauth.refreshAccessToken(refreshToken, storageScope);
-          return token.access_token;
+          try {
+            const { token } = await oauth.refreshAccessToken(refreshToken, storageScope);
+            return token.access_token;
+          } catch (err) {
+            // Same terminal-failure recovery as the vault flow, scoped to THIS
+            // module flow's storage segment: a revoked/expired module refresh
+            // token would otherwise loop. Evict + return null → caller re-logins
+            // this audience.
+            if (isTerminalRefreshFailure(err)) {
+              oauth.clearToken(storageScope);
+              return null;
+            }
+            throw err; // non-terminal → preserve existing propagation
+          }
         },
 
         getToken(): StoredTokenLike {
@@ -590,6 +616,34 @@ export function createVaultSurface(opts: CreateVaultSurfaceOpts): VaultSurface {
       };
     },
   };
+}
+
+/**
+ * Is this refresh failure TERMINAL — i.e. the refresh token is dead and no
+ * retry can revive it (revoked, expired, rotation-conflict / replay-detected)?
+ *
+ * The hub returns OAuth `400 invalid_grant` for a refresh token that's been
+ * revoked, has expired, or lost a rotation race (its family was revoked by
+ * replay detection). Re-reading + re-submitting the SAME dead token only loops
+ * — so on a terminal failure the surface must EVICT the token and fall to a
+ * fresh `login()` rather than retry. A non-terminal failure (a transient 5xx,
+ * a network blip surfaced as a non-400) is left to propagate so existing
+ * behavior is preserved.
+ *
+ * The primary signal is the parsed OAuth `error: "invalid_grant"` — every hub
+ * terminal-refresh case sets it. The body-string scan is a belt-and-suspenders
+ * fallback for hub builds that 400 with a terminal message but no JSON `error`
+ * field; it deliberately matches `invalid_grant` and explicit *refresh-token*
+ * terminal phrasings ("…revoked/expired/rotation conflict") rather than the
+ * bare words, so a non-terminal 400 whose description merely contains "expired"
+ * (e.g. a different field) isn't misclassified into a token eviction.
+ */
+function isTerminalRefreshFailure(err: unknown): err is RefreshHttpError {
+  if (!(err instanceof RefreshHttpError) || err.status !== 400) return false;
+  if (err.oauthError === "invalid_grant") return true;
+  return /invalid_grant|refresh[_\s-]?token (?:revoked|expired|rotation conflict)/i.test(
+    err.body ?? "",
+  );
 }
 
 /** The `<service>` prefix of a scope string — `"agent:read"` → `"agent"`. */
