@@ -495,6 +495,155 @@ describe("refreshAccessToken", () => {
   });
 });
 
+describe("flowKey — multi-flow isolation (vault + agent:read)", () => {
+  // The hub derives `aud` from scope and a named-vault scope wins, so an
+  // `agent:read` token (`aud: agent`) must come from its OWN authorize
+  // request scoped to `agent:read` alone, held alongside the vault token.
+  // Two concurrent flows must not clobber each other's pending state, and a
+  // returning callback must route to the right flow by its namespaced key.
+
+  const ROUTES = {
+    "http://hub.test/surface/notes/oauth-client": () =>
+      new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+    "http://hub.test/.well-known/oauth-authorization-server": () =>
+      new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+  };
+
+  test("beginFlow parks pending state under the given flowKey (default key untouched)", async () => {
+    const oauth = makeOAuth(ROUTES);
+    await oauth.beginFlow({
+      scope: "agent:read",
+      flowKey: "parachute_app_oauth_pending:agent",
+      redirectUri: "http://x/cb",
+    });
+    // Parked under the namespaced key...
+    expect(sessionStorage.getItem("parachute_app_oauth_pending:agent")).not.toBeNull();
+    // ...and the default (vault) key is NOT written.
+    expect(sessionStorage.getItem("parachute_app_oauth_pending")).toBeNull();
+  });
+
+  test("requests `scope=agent:read` with no vault scope (so inferAudience → agent)", async () => {
+    const oauth = makeOAuth(ROUTES);
+    const { authorizeUrl } = await oauth.beginFlow({
+      scope: "agent:read",
+      flowKey: "parachute_app_oauth_pending:agent",
+      redirectUri: "http://x/cb",
+    });
+    const u = new URL(authorizeUrl);
+    expect(u.searchParams.get("scope")).toBe("agent:read");
+    expect(u.searchParams.get("scope")).not.toContain("vault");
+    // No `vault` narrowing param either.
+    expect(u.searchParams.get("vault")).toBeNull();
+  });
+
+  test("two concurrent flows do not clobber each other's pending state", async () => {
+    const oauth = makeOAuth(ROUTES);
+    const vault = await oauth.beginFlow({
+      scope: "vault:read vault:write",
+      redirectUri: "http://x/cb",
+    });
+    const agent = await oauth.beginFlow({
+      scope: "agent:read",
+      flowKey: "parachute_app_oauth_pending:agent",
+      redirectUri: "http://x/cb",
+    });
+    // Distinct random `state` per flow, both still readable independently.
+    expect(vault.pending.state).not.toBe(agent.pending.state);
+    expect(oauth.peekPending()!.state).toBe(vault.pending.state);
+    expect(oauth.peekPending("parachute_app_oauth_pending:agent")!.state).toBe(agent.pending.state);
+  });
+
+  test("handleCallback(flowKey) consumes only its own flow's pending state", async () => {
+    const oauth = makeOAuth({
+      ...ROUTES,
+      "http://hub.test/oauth/token": () =>
+        new Response(
+          JSON.stringify({
+            access_token: "agent_at",
+            token_type: "bearer",
+            scope: "agent:read",
+            refresh_token: "agent_rt",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+    });
+    // Both flows in flight.
+    const vault = await oauth.beginFlow({ redirectUri: "http://x/cb" });
+    const agent = await oauth.beginFlow({
+      scope: "agent:read",
+      flowKey: "parachute_app_oauth_pending:agent",
+      redirectUri: "http://x/cb",
+    });
+    // Complete the AGENT flow only.
+    const result = await oauth.handleCallback(
+      "agent_code",
+      agent.pending.state,
+      "agent",
+      "parachute_app_oauth_pending:agent",
+    );
+    expect(result.token.access_token).toBe("agent_at");
+    // Agent token stored under its own isolated key; vault key absent.
+    expect(tokenStorage.getItem("parachute_token:notes:agent")).not.toBeNull();
+    expect(tokenStorage.getItem("parachute_token:notes:default")).toBeNull();
+    // Agent pending cleared; the VAULT pending survives untouched.
+    expect(sessionStorage.getItem("parachute_app_oauth_pending:agent")).toBeNull();
+    expect(oauth.peekPending()!.state).toBe(vault.pending.state);
+  });
+
+  test("a vault-flow callback does NOT satisfy the agent flow's state check", async () => {
+    const oauth = makeOAuth(ROUTES);
+    const vault = await oauth.beginFlow({ redirectUri: "http://x/cb" });
+    await oauth.beginFlow({
+      scope: "agent:read",
+      flowKey: "parachute_app_oauth_pending:agent",
+      redirectUri: "http://x/cb",
+    });
+    // Feeding the vault's `state` to the AGENT flow's handleCallback must
+    // reject — the agent pending record carries a different state.
+    await expect(
+      oauth.handleCallback(
+        "code",
+        vault.pending.state,
+        "agent",
+        "parachute_app_oauth_pending:agent",
+      ),
+    ).rejects.toThrow(/state mismatch/);
+  });
+
+  test("agent token refresh persists under the isolated key", async () => {
+    const oauth = makeOAuth({
+      ...ROUTES,
+      "http://hub.test/oauth/token": (_url, init) => {
+        expect((init?.body as string).includes("refresh_token=agent_rt_old")).toBe(true);
+        return new Response(
+          JSON.stringify({
+            access_token: "agent_at_new",
+            token_type: "bearer",
+            scope: "agent:read",
+            refresh_token: "agent_rt_new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    const result = await oauth.refreshAccessToken("agent_rt_old", "agent");
+    expect(result.token.access_token).toBe("agent_at_new");
+    expect(oauth.getToken("agent")?.accessToken).toBe("agent_at_new");
+    // Refresh keyed by storage scope — the vault key is unaffected.
+    expect(oauth.getToken("default")).toBeNull();
+  });
+
+  test("peekPending does not consume the pending state", async () => {
+    const oauth = makeOAuth(ROUTES);
+    const { pending } = await oauth.beginFlow({ redirectUri: "http://x/cb" });
+    expect(oauth.peekPending()!.state).toBe(pending.state);
+    // Still there on a second peek.
+    expect(oauth.peekPending()!.state).toBe(pending.state);
+  });
+});
+
 describe("resetCaches", () => {
   test("re-fetches client_id + metadata on next call", async () => {
     let clientCount = 0;

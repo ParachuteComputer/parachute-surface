@@ -37,6 +37,9 @@ export {
   type VaultSurface,
   type SurfaceBootstrap,
   type SimpleStorageLike,
+  type ModuleAuth,
+  type ModuleAuthOpts,
+  type StoredTokenLike,
 } from "./create-vault-surface.js";
 
 // OAuth driver — public class, errors, helper types.
@@ -45,6 +48,7 @@ export {
   PendingApprovalError,
   RefreshHttpError,
   InsecureContextError,
+  DEFAULT_PENDING_KEY,
   type ParachuteOAuthOpts,
   type BeginFlowOpts,
   type BeginFlowResult,
