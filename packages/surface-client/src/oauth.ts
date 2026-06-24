@@ -61,6 +61,7 @@ import {
   loadToken,
   saveToken,
   storedFromTokenResponse,
+  tokenResponseFromStored,
 } from "./token-storage.js";
 import type {
   AuthorizationServerMetadata,
@@ -238,13 +239,19 @@ export class ParachuteOAuth {
   /** In-memory cache of `AS metadata` so discovery runs at most once per page. */
   private metadataCache: AuthorizationServerMetadata | null = null;
   /**
-   * Single-flight refresh guard, per vaultScope. With the hub's
-   * refresh-token ROTATION + replay detection, two concurrent refresh
-   * calls with the same refresh token are not a race — they're a
-   * security event: the second exchange looks like a stolen-token
+   * Single-flight refresh guard, per vaultScope — the **same-tab** fast
+   * path. With the hub's refresh-token ROTATION + replay detection, two
+   * concurrent refresh calls with the same refresh token are not a race —
+   * they're a security event: the second exchange looks like a stolen-token
    * replay and **revokes the whole token family**, killing the session
-   * (RFC 6819 posture). N concurrent 401s must therefore share ONE
-   * token-endpoint exchange.
+   * (RFC 6819 posture). N concurrent 401s in ONE tab must therefore share
+   * ONE token-endpoint exchange.
+   *
+   * This collapses concurrent callers WITHIN a single tab without even
+   * taking the cross-tab Web Lock. The cross-tab dimension (two browser
+   * tabs of the same surface racing on the SAME stored refresh token) is
+   * handled separately in {@link refreshAccessTokenInner} via
+   * `navigator.locks` — see that method.
    */
   private readonly refreshInFlight = new Map<
     string,
@@ -498,15 +505,30 @@ export class ParachuteOAuth {
    * each successful call returns a new `refresh_token` that supersedes
    * the prior one.
    *
-   * **Single-flight per vaultScope**: concurrent calls (e.g. N parallel
-   * requests all hitting 401 when a ~15-min access token expires) share
-   * one in-flight token-endpoint exchange and all resolve to the same
-   * fresh token. Without this, the hub's rotation replay-detection
-   * treats the second concurrent exchange as token theft and revokes
-   * the whole token family — a session-killer, not an optimization
-   * (observed in parachute-brain before this fix). Late callers join
-   * the in-flight exchange even if they hold the now-superseded refresh
-   * token; the shared result is the rotated, valid pair.
+   * **Single-flight, two dimensions:**
+   *
+   *   - **Same-tab** (in-memory): concurrent calls (e.g. N parallel
+   *     requests all hitting 401 when a ~15-min access token expires) share
+   *     one in-flight token-endpoint exchange and all resolve to the same
+   *     fresh token. Without this, the hub's rotation replay-detection
+   *     treats the second concurrent exchange as token theft and revokes
+   *     the whole token family — a session-killer, not an optimization
+   *     (observed in parachute-brain before this fix). Late callers join
+   *     the in-flight exchange even if they hold the now-superseded refresh
+   *     token; the shared result is the rotated, valid pair.
+   *
+   *   - **Cross-tab** (Web Locks): two browser tabs of the SAME surface
+   *     each have their own in-memory guard, so the same-tab path alone
+   *     does NOT stop tab A and tab B from both POSTing the SAME stored
+   *     refresh token. The hub rotates it for the winner; the loser replays
+   *     the now-revoked token → the hub revokes the family → forced
+   *     re-login across all tabs. {@link refreshAccessTokenInner} serializes
+   *     the exchange across tabs with `navigator.locks` and, once it holds
+   *     the lock, RE-READS storage: if the winner already rotated the token,
+   *     it adopts that freshly-stored pair instead of replaying the stale
+   *     one. Falls back to in-memory-only single-flight where
+   *     `navigator.locks` is unavailable (older browser / non-secure
+   *     context / SSR).
    */
   async refreshAccessToken(
     refreshToken: string,
@@ -523,8 +545,73 @@ export class ParachuteOAuth {
     }
   }
 
-  /** The actual refresh_token exchange — see `refreshAccessToken`. */
+  /**
+   * Cross-tab single-flight wrapper around the token-endpoint exchange.
+   *
+   * Serializes the refresh across browser tabs of the same surface via the
+   * Web Locks API (lock name `parachute-refresh:<appName>:<vaultScope>` —
+   * scoped per surface AND per vault so unrelated refreshes never block each
+   * other). Once we hold the lock we re-read storage and only POST if it
+   * still shows the stale token; otherwise we adopt the winner's rotated
+   * token. Where `navigator.locks` is absent, we degrade gracefully to the
+   * bare exchange (the same-tab in-memory guard still applies).
+   */
   private async refreshAccessTokenInner(
+    refreshToken: string,
+    vaultScope: string,
+  ): Promise<{ token: TokenResponse; stored: StoredToken }> {
+    const locks = getWebLocks();
+    if (!locks) {
+      // No Web Locks (older browser / non-secure context / SSR): in-memory
+      // single-flight only — the pre-existing behavior.
+      return this.refreshExchange(refreshToken, vaultScope);
+    }
+    const lockName = `parachute-refresh:${this.appName}:${vaultScope}`;
+    return locks.request(lockName, async () => this.refreshUnderLock(refreshToken, vaultScope));
+  }
+
+  /**
+   * The lock-held refresh body. RE-READS the persisted token first: if a
+   * sibling tab already rotated while we waited for the lock — i.e. the
+   * stored refresh token differs from the one we were about to send, or the
+   * stored access token is now valid (unexpired) — we ADOPT the winner's
+   * freshly-stored token and skip the network exchange entirely. Only when
+   * storage still shows the stale token do we actually hit the token
+   * endpoint.
+   */
+  private async refreshUnderLock(
+    refreshToken: string,
+    vaultScope: string,
+  ): Promise<{ token: TokenResponse; stored: StoredToken }> {
+    const persisted = this.getToken(vaultScope);
+    if (persisted && this.isWinnersToken(persisted, refreshToken)) {
+      // Another tab won the race and rotated the token. Adopt it rather than
+      // replaying our (now-superseded) refresh token, which the hub would
+      // treat as a stolen-token replay and revoke the family.
+      return { token: tokenResponseFromStored(persisted, this.now()), stored: persisted };
+    }
+    return this.refreshExchange(refreshToken, vaultScope);
+  }
+
+  /**
+   * Decide whether `persisted` is a token a SIBLING tab rotated to (so we
+   * should adopt it) rather than the very token we were about to refresh.
+   * True when either:
+   *   - the stored refresh token differs from the one we hold (it rotated), OR
+   *   - the stored access token is still valid (unexpired) — its expiry moved
+   *     forward, so a fresh exchange already landed.
+   * A stored record carrying our exact stale refresh token with an expired
+   * (or unknown-expiry) access token is NOT a winner — we must do the
+   * exchange ourselves.
+   */
+  private isWinnersToken(persisted: StoredToken, ourRefreshToken: string): boolean {
+    if (persisted.refreshToken && persisted.refreshToken !== ourRefreshToken) return true;
+    if (typeof persisted.expiresAt === "number" && persisted.expiresAt > this.now()) return true;
+    return false;
+  }
+
+  /** The actual refresh_token exchange — see `refreshAccessToken`. */
+  private async refreshExchange(
     refreshToken: string,
     vaultScope: string,
   ): Promise<{ token: TokenResponse; stored: StoredToken }> {
@@ -653,6 +740,35 @@ function safeApproveUrl(raw: unknown): string | undefined {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
   return raw;
+}
+
+/**
+ * Minimal structural type for the slice of the Web Locks API we use
+ * (`navigator.locks.request(name, cb)`). We declare it locally rather than
+ * relying on the DOM lib's `LockManager` so the package typechecks the same
+ * whether or not the toolchain's `lib.dom` includes Web Locks, and so the
+ * SSR/no-locks fallback stays purely runtime-detected.
+ */
+interface WebLockManagerLike {
+  request<T>(name: string, callback: () => Promise<T> | T): Promise<T>;
+}
+
+/**
+ * Return `navigator.locks` when the Web Locks API is available, else null.
+ * Unavailable on older browsers, in non-secure (non-HTTPS, non-localhost)
+ * contexts, and under SSR — every such case degrades to the in-memory-only
+ * single-flight (see {@link ParachuteOAuth.refreshAccessTokenInner}).
+ */
+function getWebLocks(): WebLockManagerLike | null {
+  try {
+    if (typeof navigator !== "undefined") {
+      const locks = (navigator as unknown as { locks?: WebLockManagerLike }).locks;
+      if (locks && typeof locks.request === "function") return locks;
+    }
+  } catch {
+    // Accessing navigator.locks can throw in some sandboxed contexts.
+  }
+  return null;
 }
 
 function resolveSessionStorage(): SessionStorageLike {

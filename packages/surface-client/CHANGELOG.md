@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.3-rc.1] - 2026-06-24
+
+### Fixed
+
+- **Token refresh is now single-flight ACROSS tabs (not just within one tab).**
+  `refreshAccessToken`'s single-flight guard was per-tab only (an in-memory
+  `refreshInFlight` map). Two browser tabs of the same surface each had their
+  own guard, so both could POST the **same** stored refresh token: the hub
+  rotates it for the winner, the loser replays the now-revoked token, the hub
+  treats it as a stolen-token replay and **revokes the whole token family** →
+  `invalid_grant` and a forced re-login across every tab.
+
+  `refreshAccessToken` now serializes the exchange across tabs via the **Web
+  Locks API** (lock name `parachute-refresh:<appName>:<vaultScope>`, scoped per
+  surface AND per vault so unrelated refreshes never block each other). Once a
+  tab holds the lock it **re-reads the persisted token**: if a sibling tab
+  already rotated it (the stored refresh token differs, or the stored access
+  token is now unexpired), the late tab **adopts the winner's freshly-stored
+  token** and skips the network exchange entirely — no stale-token replay. Only
+  when storage still shows the stale token does the actual token-endpoint
+  exchange run.
+
+  Where `navigator.locks` is unavailable (older browser, non-secure context,
+  SSR) it **degrades gracefully** to the prior in-memory-only single-flight.
+  The same-tab in-memory guard is retained as the fast path. Purely additive —
+  no public-API changes; the `#139` terminal-`invalid_grant` recovery
+  (clearToken + re-auth) is unchanged as the backstop.
+
 ## [0.3.2-rc.1] - 2026-06-23
 
 ### Fixed
