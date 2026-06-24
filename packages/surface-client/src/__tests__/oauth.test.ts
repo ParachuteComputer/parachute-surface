@@ -7,10 +7,11 @@
  * runs cleanly under Bun's test runner.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { ParachuteOAuth, PendingApprovalError } from "../oauth.ts";
 import type { ParachuteOAuthOpts } from "../oauth.ts";
+import { saveToken } from "../token-storage.ts";
 
 // --- in-memory storage stubs ---
 
@@ -492,6 +493,273 @@ describe("refreshAccessToken", () => {
     expect(result.token.access_token).toBe("at_new");
     expect(result.stored.accessToken).toBe("at_new");
     expect(oauth.getToken("default")?.accessToken).toBe("at_new");
+  });
+});
+
+describe("refreshAccessToken — cross-tab single-flight (Web Locks)", () => {
+  // A serializing mock of `navigator.locks.request`: callbacks for the SAME
+  // lock name run one-at-a-time (FIFO), mirroring the real Web Locks API.
+  // Different lock names proceed concurrently.
+  function installLockManager(): { calls: string[]; uninstall: () => void } {
+    const calls: string[] = [];
+    const queues = new Map<string, Promise<unknown>>();
+    const locks = {
+      request<T>(name: string, callback: () => Promise<T> | T): Promise<T> {
+        calls.push(name);
+        const prior = queues.get(name) ?? Promise.resolve();
+        const run = prior.then(() => callback());
+        // Keep the chain alive even if a callback rejects, so the next waiter
+        // still acquires the lock (real Web Locks release on rejection too).
+        queues.set(
+          name,
+          run.then(
+            () => undefined,
+            () => undefined,
+          ),
+        );
+        return run;
+      },
+    };
+    const prevNavigator = (globalThis as { navigator?: unknown }).navigator;
+    (globalThis as { navigator?: unknown }).navigator = { locks };
+    return {
+      calls,
+      uninstall: () => {
+        (globalThis as { navigator?: unknown }).navigator = prevNavigator;
+      },
+    };
+  }
+
+  let lockMgr: { calls: string[]; uninstall: () => void } | null = null;
+
+  afterEach(() => {
+    lockMgr?.uninstall();
+    lockMgr = null;
+  });
+
+  test("two concurrent cross-tab refreshes collapse to ONE exchange; the loser adopts the rotated token", async () => {
+    lockMgr = installLockManager();
+    let exchanges = 0;
+    // Token endpoint rotates rt_old → rt_new exactly once. A SECOND POST of
+    // rt_old (the loser replaying the stale token) would be a replay; assert
+    // it never happens by counting exchanges.
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": (_url, init) => {
+        exchanges++;
+        const body = init?.body as string;
+        // The single real exchange must carry the stale token we hold.
+        expect(body.includes("refresh_token=rt_old")).toBe(true);
+        return new Response(
+          JSON.stringify({
+            access_token: "at_new",
+            token_type: "bearer",
+            scope: "vault:read vault:write",
+            refresh_token: "rt_new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    // Two SEPARATE driver instances = two tabs (each with its own in-memory
+    // single-flight). They share storage (same MemoryStorage) + the global
+    // lock manager — exactly the cross-tab topology.
+    const tabA = oauth;
+    const tabB = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": () => {
+        // tabB must NEVER reach the network — it should adopt the winner.
+        exchanges++;
+        throw new Error("tabB performed a network exchange — replay risk");
+      },
+    });
+
+    const [a, b] = await Promise.all([
+      tabA.refreshAccessToken("rt_old", "default"),
+      tabB.refreshAccessToken("rt_old", "default"),
+    ]);
+
+    expect(exchanges).toBe(1); // exactly one network refresh across both tabs
+    // The winner's rotated pair, adopted by the loser.
+    expect(a.token.access_token).toBe("at_new");
+    expect(b.token.access_token).toBe("at_new");
+    expect(b.token.refresh_token).toBe("rt_new");
+    expect(b.stored.accessToken).toBe("at_new");
+    // Both serialized on the same per-(app,scope) lock name.
+    expect(lockMgr.calls).toEqual([
+      "parachute-refresh:notes:default",
+      "parachute-refresh:notes:default",
+    ]);
+    // Storage holds the rotated token.
+    expect(oauth.getToken("default")?.refreshToken).toBe("rt_new");
+  });
+
+  test("under the lock, a tab adopts a token a sibling already rotated (no exchange)", async () => {
+    lockMgr = installLockManager();
+    let exchanges = 0;
+    const oauth = makeOAuth({
+      "http://hub.test/oauth/token": () => {
+        exchanges++;
+        throw new Error("must not exchange — a winner already rotated the token");
+      },
+    });
+    // Storage already shows the WINNER's rotated token (different refresh
+    // token + far-future expiry) before we even call refresh.
+    saveToken(
+      "notes",
+      "default",
+      {
+        accessToken: "at_winner",
+        scope: "vault:read vault:write",
+        refreshToken: "rt_winner",
+        expiresAt: 1_000_000 + 3600 * 1000,
+      },
+      { storage: tokenStorage, now: () => 1_000_000 },
+    );
+
+    // We still hold the STALE refresh token (rt_old). The re-read inside the
+    // lock must detect the rotation and adopt rt_winner without a POST.
+    const result = await oauth.refreshAccessToken("rt_old", "default");
+    expect(exchanges).toBe(0);
+    expect(result.token.access_token).toBe("at_winner");
+    expect(result.token.refresh_token).toBe("rt_winner");
+    expect(result.stored.refreshToken).toBe("rt_winner");
+  });
+
+  test("stale-storage (still our token, expired) → the exchange DOES run under the lock", async () => {
+    lockMgr = installLockManager();
+    let exchanges = 0;
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": (_url, init) => {
+        exchanges++;
+        expect((init?.body as string).includes("refresh_token=rt_old")).toBe(true);
+        return new Response(
+          JSON.stringify({
+            access_token: "at_new",
+            token_type: "bearer",
+            scope: "vault:read vault:write",
+            refresh_token: "rt_new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    // Storage shows OUR refresh token, already expired — not a winner.
+    saveToken(
+      "notes",
+      "default",
+      {
+        accessToken: "at_old",
+        scope: "vault:read vault:write",
+        refreshToken: "rt_old",
+        expiresAt: 1_000_000 - 60_000, // expired
+      },
+      { storage: tokenStorage, now: () => 1_000_000 },
+    );
+
+    const result = await oauth.refreshAccessToken("rt_old", "default");
+    expect(exchanges).toBe(1);
+    expect(result.token.access_token).toBe("at_new");
+  });
+
+  test("uses a per-(app,scope) lock name", async () => {
+    lockMgr = installLockManager();
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": () =>
+        new Response(
+          JSON.stringify({
+            access_token: "agent_at",
+            token_type: "bearer",
+            scope: "agent:read",
+            refresh_token: "agent_rt",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+    });
+    await oauth.refreshAccessToken("agent_rt_old", "agent");
+    expect(lockMgr.calls).toEqual(["parachute-refresh:notes:agent"]);
+  });
+});
+
+describe("refreshAccessToken — no-locks fallback (in-memory single-flight)", () => {
+  // Bun's default global has `navigator` but no `navigator.locks`, so these
+  // run on the fallback path with no extra setup.
+  test("navigator.locks absent → still refreshes via the bare exchange", async () => {
+    expect((navigator as { locks?: unknown }).locks).toBeUndefined();
+    let exchanges = 0;
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": () => {
+        exchanges++;
+        return new Response(
+          JSON.stringify({
+            access_token: "at_new",
+            token_type: "bearer",
+            scope: "vault:read vault:write",
+            refresh_token: "rt_new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    const result = await oauth.refreshAccessToken("rt_old", "default");
+    expect(exchanges).toBe(1);
+    expect(result.token.access_token).toBe("at_new");
+  });
+
+  test("concurrent same-tab callers still collapse to one exchange without locks", async () => {
+    let exchanges = 0;
+    const oauth = makeOAuth({
+      "http://hub.test/surface/notes/oauth-client": () =>
+        new Response(JSON.stringify(HAPPY_CLIENT_INFO), { status: 200 }),
+      "http://hub.test/.well-known/oauth-authorization-server": () =>
+        new Response(JSON.stringify(HAPPY_METADATA), { status: 200 }),
+      "http://hub.test/oauth/token": async () => {
+        exchanges++;
+        await new Promise((r) => setTimeout(r, 10));
+        return new Response(
+          JSON.stringify({
+            access_token: "at_new",
+            token_type: "bearer",
+            scope: "vault:read vault:write",
+            refresh_token: "rt_new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    const [a, b, c] = await Promise.all([
+      oauth.refreshAccessToken("rt_old", "default"),
+      oauth.refreshAccessToken("rt_old", "default"),
+      oauth.refreshAccessToken("rt_old", "default"),
+    ]);
+    expect(exchanges).toBe(1); // in-memory single-flight held
+    expect(a.token.access_token).toBe("at_new");
+    expect(b.token.access_token).toBe("at_new");
+    expect(c.token.access_token).toBe("at_new");
   });
 });
 

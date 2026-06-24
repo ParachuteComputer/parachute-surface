@@ -27,7 +27,7 @@
  * path returning `null`.
  */
 
-import type { StoredToken } from "./types.js";
+import type { StoredToken, TokenResponse } from "./types.js";
 
 /** Key prefix for app-client tokens. Stable; do not change without a migration. */
 export const TOKEN_KEY_PREFIX = "parachute_token";
@@ -214,4 +214,35 @@ export function storedFromTokenResponse(
     stored.expiresAt = now + token.expires_in * 1000;
   }
   return stored;
+}
+
+/**
+ * Reconstruct a token-endpoint–shaped `TokenResponse` from a persisted
+ * `StoredToken`. The inverse of {@link storedFromTokenResponse}, used by the
+ * cross-tab refresh single-flight (`oauth.ts`): when another tab has already
+ * rotated the token while we waited for the Web Lock, we adopt the winner's
+ * freshly-stored token and must hand callers the same `{ token, stored }`
+ * shape the network exchange would have produced — WITHOUT replaying the now-
+ * stale refresh token over the wire.
+ *
+ * `expires_in` is derived back from the absolute `expiresAt` against `now`,
+ * floored at 0 (a just-expired adopted token still beats re-POSTing a revoked
+ * refresh token). `token_type` is always `"bearer"` (the only type the hub
+ * issues). Fields the stored envelope never carries (`services`) are omitted.
+ */
+export function tokenResponseFromStored(
+  stored: StoredToken,
+  now: number = Date.now(),
+): TokenResponse {
+  const token: TokenResponse = {
+    access_token: stored.accessToken,
+    token_type: "bearer",
+    scope: stored.scope,
+  };
+  if (stored.vault !== undefined) token.vault = stored.vault;
+  if (stored.refreshToken !== undefined) token.refresh_token = stored.refreshToken;
+  if (typeof stored.expiresAt === "number") {
+    token.expires_in = Math.max(0, Math.round((stored.expiresAt - now) / 1000));
+  }
+  return token;
 }
