@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-client",
-  "version": "0.3.3-rc.1",
+  "version": "0.3.3-rc.2",
   "description": "Shared browser-side library for Parachute apps \u2014 OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id + runtime tenancy helpers.",
   "license": "AGPL-3.0",
   "type": "module",
@@ -23,6 +23,10 @@
     "./vault-client": {
       "types": "./dist/vault-client.d.ts",
       "import": "./dist/vault-client.js"
+    },
+    "./live-list": {
+      "types": "./dist/live-list.d.ts",
+      "import": "./dist/live-list.js"
     },
     "./token-storage": {
       "types": "./dist/token-storage.d.ts",

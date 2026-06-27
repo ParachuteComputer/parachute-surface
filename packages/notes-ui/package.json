@@ -31,7 +31,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.41.1",
     "@lezer/highlight": "^1.2.3",
-    "@openparachute/surface-client": "^0.3.0",
+    "@openparachute/surface-client": "workspace:*",
     "@openparachute/surface-render": "^0.2.0",
     "@tanstack/react-query": "^5",
     "highlight.js": "^11.11.1",
