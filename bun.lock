@@ -234,7 +234,7 @@
     },
     "packages/surface-server": {
       "name": "@openparachute/surface-server",
-      "version": "0.1.2",
+      "version": "0.1.3-rc.2",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@openparachute/scope-guard": "^0.4.0-rc.1",
@@ -2064,9 +2064,15 @@
 
     "@openparachute/docs-editor/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
+    "@openparachute/docs-editor/@openparachute/surface-server": ["@openparachute/surface-server@0.1.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface": "^0.3.1", "@openparachute/surface-client": "^0.3.0", "yjs": "^13.6.27" }, "peerDependencies": { "typescript": "^5" } }, "sha512-uY8v4hozFYkvuWTmlgOA5C09mMwo+dYyz7R3Nlqt7scxUiFsmv+CayS9DmDV7j56LWs77+LOLG9zhyugFVDYkw=="],
+
     "@openparachute/meeting-ingest/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
+    "@openparachute/meeting-ingest/@openparachute/surface-server": ["@openparachute/surface-server@0.1.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface": "^0.3.1", "@openparachute/surface-client": "^0.3.0", "yjs": "^13.6.27" }, "peerDependencies": { "typescript": "^5" } }, "sha512-uY8v4hozFYkvuWTmlgOA5C09mMwo+dYyz7R3Nlqt7scxUiFsmv+CayS9DmDV7j56LWs77+LOLG9zhyugFVDYkw=="],
+
     "@openparachute/meeting-mcp/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
+
+    "@openparachute/meeting-mcp/@openparachute/surface-server": ["@openparachute/surface-server@0.1.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface": "^0.3.1", "@openparachute/surface-client": "^0.3.0", "yjs": "^13.6.27" }, "peerDependencies": { "typescript": "^5" } }, "sha512-uY8v4hozFYkvuWTmlgOA5C09mMwo+dYyz7R3Nlqt7scxUiFsmv+CayS9DmDV7j56LWs77+LOLG9zhyugFVDYkw=="],
 
     "@openparachute/notes-ui/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
