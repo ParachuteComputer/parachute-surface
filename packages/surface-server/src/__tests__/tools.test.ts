@@ -367,6 +367,26 @@ describe("read + write coexist on ONE /api/mcp", () => {
     expect(vault.createdNotes.at(-1)?.content).toBe("loved it");
   });
 
+  test("mixed access: anon sees the public projection but the operator tool stays hidden (no oracle across the merged map)", async () => {
+    const { router } = await wiring({
+      projections: [upcomingMeetings()], // public READ
+      tools: [purgeFeedback()], // operator-only WRITE
+    });
+    // Anon: the public projection lists; the operator tool is invisible. The
+    // two-pass merge filters projections AND tools through the SAME predicate,
+    // so a steeper-access tool can't leak into a list that shows public reads.
+    const anon = await listTools(router);
+    expect(anon.map((t) => t.name)).toEqual(["upcoming-meetings"]);
+    // Calling the hidden operator tool as anon is indistinguishable from a tool
+    // that doesn't exist — no existence oracle across the projection+tool map.
+    const deniedTool = await callTool(router, "purge-feedback", { id: "n-1" });
+    const missing = await callTool(router, "no-such-thing", {});
+    expect(deniedTool.isError).toBe(true);
+    expect(deniedTool.content[0]?.text.replace("purge-feedback", "X")).toBe(
+      missing.content[0]?.text.replace("no-such-thing", "X"),
+    );
+  });
+
   test("createSurfaceTools co-hosts projections + tools the same way", async () => {
     const { router, vault } = await wiring({
       via: "tools",

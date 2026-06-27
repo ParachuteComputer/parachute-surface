@@ -156,6 +156,11 @@ export function createSurfaceProjections(
     method: "POST",
     path: "/api/mcp",
     access: { kind: "public" },
+    // originCheck left ON (router default): a cookie-authed `tools/call` IS a
+    // mutation, so same-origin is required. Do NOT add `originCheck: false`
+    // here — it would open same-site CSRF on every write tool. `public` only
+    // admits anon to the endpoint; per-actor access is enforced INSIDE the
+    // handler via the unified projection+tool visibility map.
     handler: mcpHandler,
   });
 
