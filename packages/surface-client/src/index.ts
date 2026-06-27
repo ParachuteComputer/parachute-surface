@@ -112,6 +112,24 @@ export {
   type SubscribeTransport,
 } from "./subscribe.js";
 
+// Live-list — framework-light reconciler over `VaultClient.subscribe()`.
+// `createLiveList` maintains an ordered note list from the snapshot + delta
+// stream and exposes a `useSyncExternalStore`-compatible store (list, status,
+// thinking indicator). No React / react-query — any surface can consume it.
+// The pure reconcilers + the subscribable-query guard are exported for reuse.
+export {
+  createLiveList,
+  reconcileUpsert,
+  reconcileRemove,
+  isSubscribableParams,
+  toLiveListStatus,
+  type LiveList,
+  type LiveListClient,
+  type LiveListState,
+  type LiveListStatus,
+  type CreateLiveListOptions,
+} from "./live-list.js";
+
 // Vault REST resource types.
 export type {
   TagExpandMode,

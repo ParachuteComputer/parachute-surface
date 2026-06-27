@@ -341,6 +341,20 @@ jobs:
             echo "::error::packages/notes-ui/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
             exit 1
           fi
+      - name: "guard against workspace:/link: protocol in published manifest"
+        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
+        # do, on their own publish path). A leaked protocol breaks every `npm install`
+        # of the published package. notes-ui depends on @openparachute/surface-client
+        # via `workspace:*` for the live-list dogfood, so this guard is load-bearing:
+        # fail loudly before publish if any dependency block still carries one.
+        working-directory: packages/notes-ui
+        run: |
+          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
+            echo "no workspace:/link: protocols in published manifest"
+          else
+            echo "::error::packages/notes-ui/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
+            exit 1
+          fi
       - name: publish
         # notes-ui's package.json has `prepublishOnly: bun run build`, which
         # runs `tsc -b && vite build` to produce `dist/` (the published artifact).

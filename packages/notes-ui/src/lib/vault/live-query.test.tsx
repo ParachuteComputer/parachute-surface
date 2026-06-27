@@ -64,7 +64,9 @@ function setup(params: URLSearchParams, client: VaultClient | null) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  const rendered = renderHook(() => useLiveNotesQuery({ queryKey: KEY, params, client }), { wrapper });
+  const rendered = renderHook(() => useLiveNotesQuery({ queryKey: KEY, params, client }), {
+    wrapper,
+  });
   return { qc, ...rendered };
 }
 
