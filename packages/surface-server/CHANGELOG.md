@@ -1,5 +1,32 @@
 # Changelog — @openparachute/surface-server
 
+## 0.1.3-rc.1 (unreleased)
+
+- `defineTool` — the WRITE-capable sibling of `defineProjection`. A tool
+  declares a domain ACTION (`name`/`describe`/`params`/`access`/`handler`)
+  whose handler `async ({ params, actor, ctx }) => result` MAY mutate via
+  `ctx.vault.createNote/updateNote/deleteNote` — projections only ever
+  query. Both faces ride the SAME `POST ${mount}/api/mcp` endpoint:
+  `tools/list` shows projections AND tools (filtered per actor),
+  `tools/call` dispatches to whichever owns the name. Add tools via the new
+  `tools` field on `createSurfaceProjections`, or the `createSurfaceTools`
+  convenience (co-hosts projections + tools, MCP-only — no REST route).
+  - **Actor-gating + no-existence-oracle carry over exactly**: a
+    denied/anon actor never sees a tool in `tools/list`, and a denied
+    `tools/call` returns the IDENTICAL "unknown tool" error as a
+    nonexistent one — across BOTH projections and tools (one unified
+    visibility map, same `projectionAllows`/`toolAllows` predicate).
+  - **Access is REQUIRED — no default.** Unlike `defineProjection` (which
+    defaults to `audience`), `defineTool` makes `access` mandatory and
+    THROWS if omitted: a write tool with no access bar is a worse footgun
+    than a leaky read. `public` is expressible but is an explicit
+    world-writable opt-in, never implicit. Deny-by-default is enforced
+    identically to the router/projections.
+  - **Host-custodied write boundary.** Handlers write through `ctx.vault`
+    (the `ScopedVaultClient`), which already rejects `force: true`
+    host-side; the kit adds no second force path. Names share one kebab
+    space with projections (collisions throw at build).
+
 ## 0.1.2 (2026-06-12)
 
 - `GrantStore.onChange(handler)` — subscribe to grant-set changes, fired after

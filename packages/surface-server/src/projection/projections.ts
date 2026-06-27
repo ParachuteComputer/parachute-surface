@@ -50,12 +50,23 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { SurfaceHostContext } from "@openparachute/surface";
 import { surfaceNameFromMount } from "../authz/grant-store.ts";
 import type { RouteContext, SurfaceRoute } from "../authz/router.ts";
+import { type ToolDefinition, toolAllows } from "../tool/tool.ts";
 import type { Actor, Note } from "../types.ts";
 import { paramsJsonSchema, parseParams } from "./params.ts";
 import { type ProjectionDefinition, projectionAllows } from "./projection.ts";
 
 export interface SurfaceProjectionsOptions {
   projections: ProjectionDefinition[];
+  /**
+   * Write-capable tools (P9's write sibling). They ride the SAME
+   * `/api/mcp` endpoint as projections: `tools/list` shows both (filtered
+   * per actor), `tools/call` dispatches to whichever owns the name. Names
+   * share ONE kebab space with projections — a collision throws at build.
+   * Tools are MCP-only (no REST face): a write face would need its own
+   * CSRF/idempotency contract; the MCP `tools/call` carries the actor and
+   * is the canonical agent write path. Default `[]`.
+   */
+  tools?: ToolDefinition[];
   /** MCP server name. Default `surface-<name>` (from the mount). */
   serverName?: string;
   /** MCP server version. Default `"0.1.0"`. */
@@ -67,12 +78,15 @@ export interface SurfaceProjectionsOptions {
 export interface SurfaceProjections {
   /**
    * Spread these into `createSurfaceRouter({ routes: [...] })` — one GET
-   * route per projection plus the MCP endpoint. The router enforces
-   * access; nothing here bypasses it.
+   * route per projection plus the MCP endpoint (which serves both
+   * projections and any defined tools). The router enforces access;
+   * nothing here bypasses it.
    */
   routes: SurfaceRoute[];
   /** The compiled projection set (introspection / docs generation). */
   projections: readonly ProjectionDefinition[];
+  /** The compiled tool set, if any (introspection / docs generation). */
+  tools: readonly ToolDefinition[];
 }
 
 /** The envelope BOTH faces return (MCP serializes it as JSON text). */
@@ -87,21 +101,38 @@ export function createSurfaceProjections(
   opts: SurfaceProjectionsOptions,
 ): SurfaceProjections {
   const projections = [...opts.projections];
-  const seen = new Set<string>();
+  const tools = [...(opts.tools ?? [])];
+  // Projections AND tools share ONE kebab name space on `/api/mcp` —
+  // `tools/list` returns a single flat list, so a name owned by both faces
+  // would be ambiguous at dispatch. Reject at build (fail at mount, not at
+  // request), the same discipline projections already enforce among
+  // themselves.
+  const seen = new Map<string, "projection" | "tool">();
   for (const p of projections) {
     if (seen.has(p.kebabName)) {
       throw new Error(
         `createSurfaceProjections: duplicate projection name "${p.kebabName}" — names must be unique after kebab-casing`,
       );
     }
-    seen.add(p.kebabName);
+    seen.set(p.kebabName, "projection");
+  }
+  for (const t of tools) {
+    const prior = seen.get(t.kebabName);
+    if (prior !== undefined) {
+      throw new Error(
+        `createSurfaceProjections: tool name "${t.kebabName}" collides with an existing ${prior} — projections and tools share one MCP name space`,
+      );
+    }
+    seen.set(t.kebabName, "tool");
   }
 
   const serverName = opts.serverName ?? `surface-${surfaceNameFromMount(ctx.mount)}`;
   const serverVersion = opts.serverVersion ?? "0.1.0";
   const instructions =
     opts.instructions ??
-    `Domain projections over the ${surfaceNameFromMount(ctx.mount)} surface. Each tool is a read-only, parameterized query returning shaped JSON — domain vocabulary, not raw vault notes.`;
+    (tools.length > 0
+      ? `Domain tools over the ${surfaceNameFromMount(ctx.mount)} surface. Read tools are parameterized queries returning shaped JSON; write tools perform domain actions. Domain vocabulary, not raw vault notes.`
+      : `Domain projections over the ${surfaceNameFromMount(ctx.mount)} surface. Each tool is a read-only, parameterized query returning shaped JSON — domain vocabulary, not raw vault notes.`);
 
   // ---- face 1: REST -------------------------------------------------------
   const routes: SurfaceRoute[] = projections.map((p) => ({
@@ -111,9 +142,9 @@ export function createSurfaceProjections(
     handler: (req: Request, route: RouteContext) => runRestProjection(ctx, p, req, route),
   }));
 
-  // ---- face 2: MCP ---------------------------------------------------------
+  // ---- face 2: MCP (projections AND tools on ONE endpoint) ----------------
   const mcpHandler = (req: Request, route: RouteContext) =>
-    handleMcpRequest(ctx, projections, route.actor, {
+    handleMcpRequest(ctx, projections, tools, route.actor, {
       serverName,
       serverVersion,
       instructions,
@@ -128,7 +159,39 @@ export function createSurfaceProjections(
     handler: mcpHandler,
   });
 
-  return { routes, projections };
+  return { routes, projections, tools };
+}
+
+/**
+ * createSurfaceTools — the write-face convenience: stand up `/api/mcp`
+ * with tools (and optionally projections) WITHOUT any REST routes. Sugar
+ * over `createSurfaceProjections({ projections: [], tools, ... })` for the
+ * common "I only have write tools" backend. The returned `routes` are just
+ * the MCP endpoint; spread them into `createSurfaceRouter` exactly like a
+ * projection set. Read+write coexistence is the default — pass both
+ * `tools` and `projections` here, or add `tools` to your existing
+ * `createSurfaceProjections` call.
+ */
+export interface SurfaceToolsOptions {
+  tools: ToolDefinition[];
+  /** Read projections to co-host on the same `/api/mcp`. Default `[]`. */
+  projections?: ProjectionDefinition[];
+  serverName?: string;
+  serverVersion?: string;
+  instructions?: string;
+}
+
+export function createSurfaceTools(
+  ctx: SurfaceHostContext,
+  opts: SurfaceToolsOptions,
+): SurfaceProjections {
+  return createSurfaceProjections(ctx, {
+    projections: opts.projections ?? [],
+    tools: opts.tools,
+    ...(opts.serverName !== undefined ? { serverName: opts.serverName } : {}),
+    ...(opts.serverVersion !== undefined ? { serverVersion: opts.serverVersion } : {}),
+    ...(opts.instructions !== undefined ? { instructions: opts.instructions } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -187,17 +250,40 @@ function toolError(text: string): { content: [{ type: "text"; text: string }]; i
   return { content: [{ type: "text", text }], isError: true };
 }
 
+/**
+ * One dispatch entry on the shared `/api/mcp` list — a read projection or
+ * a write tool. The unified view is what makes the no-oracle invariant
+ * hold ACROSS both kinds: a denied tool, a denied projection, and a
+ * nonexistent name all resolve to the same "not in the visible map".
+ */
+type McpEntry =
+  | { kind: "projection"; def: ProjectionDefinition }
+  | { kind: "tool"; def: ToolDefinition };
+
 function handleMcpRequest(
   ctx: SurfaceHostContext,
   projections: readonly ProjectionDefinition[],
+  tools: readonly ToolDefinition[],
   actor: Actor,
   info: McpServerInfo,
 ): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     // The router resolved `actor` for THIS request — visibility is
     // computed fresh every time (stateless: no session for it to go
-    // stale on).
-    const visible = projections.filter((p) => projectionAllows(p.access, actor));
+    // stale on). Projections AND tools filter through the SAME predicate
+    // (`projectionAllows` === `toolAllows`), so the two faces can never
+    // diverge on who-sees-what.
+    const visible = new Map<string, McpEntry>();
+    for (const p of projections) {
+      if (projectionAllows(p.access, actor)) {
+        visible.set(p.kebabName, { kind: "projection", def: p });
+      }
+    }
+    for (const t of tools) {
+      if (toolAllows(t.access, actor)) {
+        visible.set(t.kebabName, { kind: "tool", def: t });
+      }
+    }
 
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -209,38 +295,46 @@ function handleMcpRequest(
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: visible.map((p) => ({
-        name: p.kebabName,
-        description: p.describe,
-        inputSchema: paramsJsonSchema(p.compiledParams),
+      tools: [...visible.values()].map((e) => ({
+        name: e.def.kebabName,
+        description: e.def.describe,
+        inputSchema: paramsJsonSchema(e.def.compiledParams),
       })),
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      // Dispatch against the FILTERED list: a denied tool and a
-      // nonexistent tool return the IDENTICAL error — no existence
+      // Dispatch against the FILTERED map: a denied entry (read OR write)
+      // and a nonexistent name return the IDENTICAL error — no existence
       // oracle via differential messages (the router's 404 unification,
       // in tool vocabulary).
-      const p = visible.find((t) => t.kebabName === name);
-      if (!p) return toolError(`unknown tool: ${name}`);
+      const entry = visible.get(name);
+      if (!entry) return toolError(`unknown tool: ${name}`);
 
-      const parsed = parseParams(p.compiledParams, (args ?? {}) as Record<string, unknown>);
+      const parsed = parseParams(entry.def.compiledParams, (args ?? {}) as Record<string, unknown>);
       if (!parsed.ok) {
         const issues = parsed.issues.map((i) => `${i.param}: ${i.message}`).join("; ");
         return toolError(`invalid params — ${issues}`);
       }
 
       try {
-        const result = await runProjection(ctx, p, parsed.params);
+        const result =
+          entry.kind === "projection"
+            ? await runProjection(ctx, entry.def, parsed.params)
+            : // The write face: the handler MAY mutate via `ctx.vault`. Its
+              // return value is serialized as the tool result. `force: true`
+              // is already rejected host-side by the ScopedVaultClient.
+              await entry.def.handler({ params: parsed.params, actor, ctx });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         };
       } catch (err) {
         // Generic outward, real error to the surface log — same no-leak
-        // posture as the router's error boundary.
-        ctx.log.error(`projection "${p.kebabName}" failed: ${(err as Error).message ?? err}`);
-        return toolError(`projection "${p.kebabName}" failed — see the surface log`);
+        // posture as the router's error boundary. (A handler that tried
+        // `force: true` surfaces here as the wrapper's rejection.)
+        const kind = entry.kind;
+        ctx.log.error(`${kind} "${entry.def.kebabName}" failed: ${(err as Error).message ?? err}`);
+        return toolError(`${kind} "${entry.def.kebabName}" failed — see the surface log`);
       }
     });
 

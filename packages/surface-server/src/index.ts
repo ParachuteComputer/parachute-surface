@@ -162,9 +162,21 @@ export {
 } from "./projection/projection.ts";
 export {
   createSurfaceProjections,
+  createSurfaceTools,
   type SurfaceProjections,
   type SurfaceProjectionsOptions,
+  type SurfaceToolsOptions,
 } from "./projection/projections.ts";
+
+// P9 (write) — defineTool: write-capable MCP tools on the same /api/mcp
+export {
+  defineTool,
+  toolAllows,
+  type DefineToolArgs,
+  type ToolAccess,
+  type ToolDefinition,
+  type ToolHandlerArgs,
+} from "./tool/tool.ts";
 
 // P10 — createVaultReconciler over the SurfaceStateStore substrate
 export {

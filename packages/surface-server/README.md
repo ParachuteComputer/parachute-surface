@@ -107,6 +107,64 @@ Param specs are `'string' | 'number' | 'boolean' | 'date'` with a `?` suffix
 for optional (`date` values stay ISO strings). Validation is strict both
 ways: unknown params refuse, dates must actually parse.
 
+#### `defineTool` — the WRITE face (same `/api/mcp`)
+
+A projection only ever queries. `defineTool` is its write-capable sibling:
+the handler receives `{ params, actor, ctx }` and MAY mutate via
+`ctx.vault.createNote/updateNote/deleteNote`. Tools ride the **same**
+`POST ${mount}/api/mcp` endpoint as projections — `tools/list` shows both
+(only those the actor may call), `tools/call` dispatches to whichever owns
+the name.
+
+```ts
+const sendFeedback = defineTool({
+  name: "sendFeedback", // MCP tool `send-feedback`
+  params: { body: "string", email: "string?" },
+  describe: "Leave feedback — writes a feedback note to the vault.",
+  access: "public", // REQUIRED — there is no default (see below)
+  handler: async ({ params, ctx }) => {
+    const note = await ctx.vault.createNote({
+      content: params.body,
+      tags: ["feedback"],
+      ...(params.email ? { metadata: { email: params.email } } : {}),
+    });
+    return { ok: true, id: note.id }; // serialized as the tool result
+  },
+});
+
+// Add to the SAME endpoint — either field on createSurfaceProjections …
+const surface = createSurfaceProjections(ctx, {
+  projections: [upcomingMeetings],
+  tools: [sendFeedback],
+});
+// … or the createSurfaceTools convenience (co-hosts projections too):
+const writes = createSurfaceTools(ctx, { tools: [sendFeedback] });
+// then spread surface.routes / writes.routes into createSurfaceRouter.
+```
+
+- **`access` is REQUIRED — no default.** Unlike `defineProjection` (which
+  defaults to `audience`), `defineTool` makes `access` mandatory and throws
+  if it's omitted. A write tool with no access bar is a worse footgun than
+  a leaky read: a read leak shows data, a write footgun lets the wrong
+  actor mutate the vault. `public` is expressible, but it's an explicit
+  world-writable opt-in (e.g. an anonymous feedback drop), never implicit.
+  Deny-by-default is enforced identically to the router/projections.
+- **Actor-gating + no-existence-oracle carry over exactly.** A denied/anon
+  actor never sees the tool in `tools/list`; a denied `tools/call` returns
+  the identical `unknown tool: <name>` error as a nonexistent one — there
+  is no differential message betraying that a tool exists. The visibility
+  map is unified across projections and tools, so neither face leaks the
+  other's hidden entries.
+- **Host-custodied write boundary.** Handlers write through `ctx.vault`
+  (the `ScopedVaultClient`), which already rejects `force: true` host-side;
+  the kit adds no second force path. A handler that throws (including the
+  wrapper's `force` rejection) is a generic in-band tool error — the real
+  error to the surface log, never out the wire.
+- Tool names share one kebab space with projections (a collision throws at
+  build). Tools are MCP-only — no REST face: a write REST endpoint would
+  need its own CSRF/idempotency contract, and `tools/call` is the
+  canonical agent write path.
+
 ### P10 — `createVaultReconciler` (+ the `SurfaceStateStore` substrate)
 
 The corrected reconciliation machine (design §9) between a surface's live
