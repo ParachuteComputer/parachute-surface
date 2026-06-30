@@ -17,8 +17,8 @@
  */
 
 import pkg from "../package.json" with { type: "json" };
-import { CliTokenError, mintCliToken } from "../src/cli-token.ts";
 import { DEFAULT_PORT, serve } from "../src/index.ts";
+import { readOperatorToken } from "../src/operator-token.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -47,12 +47,9 @@ Usage:
   parachute-surface --version, -v                Print version and exit
 
 Environment:
-  PARACHUTE_APP_URL    Override the daemon URL (default http://127.0.0.1:1946).
-  PARACHUTE_HUB_ORIGIN Hub origin used to mint the admin token (default
-                       http://127.0.0.1:1939).
-  PARACHUTE_HUB_TOKEN  Operator bearer the CLI exchanges for a short-lived
-                       surface:admin token at the hub. Falls back to
-                       ~/.parachute/operator.token.
+  PARACHUTE_APP_URL   Override the daemon URL (default http://127.0.0.1:1946).
+  PARACHUTE_HUB_TOKEN Operator bearer used for admin endpoint auth.
+                      Falls back to ~/.parachute/operator.token.
 
 \`serve\` behavior:
   Reads $PARACHUTE_HOME/surface/config.json (or built-in defaults).
@@ -84,31 +81,14 @@ function daemonUrl(): string {
   return `http://127.0.0.1:${DEFAULT_PORT}`;
 }
 
-/**
- * Surface-admin bearer for this CLI invocation, memoized.
- *
- * The daemon's admin endpoints validate a hub-issued `aud: "surface"` token, so
- * we exchange the on-disk operator credential for a short-lived `surface:admin`
- * token at the hub (see `cli-token.ts`). Cached so a command making two daemon
- * calls only mints once. `undefined` means no operator token was found — the
- * request then goes out unauthenticated and the daemon answers 401, the same
- * behavior as before this credential existed. A mint *failure* (token present
- * but rejected / hub unreachable) throws `CliTokenError`, surfaced by the
- * caller.
- */
-let cachedToken: string | undefined;
-let tokenResolved = false;
-async function authToken(): Promise<string | undefined> {
-  if (!tokenResolved) {
-    cachedToken = await mintCliToken();
-    tokenResolved = true;
-  }
-  return cachedToken;
+/** Source the same operator bearer the daemon uses for outbound DCR calls. */
+function bearerToken(): string | undefined {
+  return readOperatorToken();
 }
 
 /** Headers for an authenticated call to the daemon. */
-async function authHeaders(): Promise<Record<string, string>> {
-  const t = await authToken();
+function authHeaders(): Record<string, string> {
+  const t = bearerToken();
   return t ? { authorization: `Bearer ${t}` } : {};
 }
 
@@ -128,20 +108,13 @@ async function callDaemon(
   body?: unknown,
 ): Promise<{ status: number; body: unknown }> {
   const url = `${daemonUrl()}${path}`;
-  let headers: Record<string, string>;
-  try {
-    headers = {
+  const init: RequestInit = {
+    method,
+    headers: {
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
-      ...(await authHeaders()),
-    };
-  } catch (e) {
-    if (e instanceof CliTokenError) {
-      console.error(e.message);
-      process.exit(2);
-    }
-    throw e;
-  }
-  const init: RequestInit = { method, headers };
+      ...authHeaders(),
+    },
+  };
   if (body !== undefined) init.body = JSON.stringify(body);
 
   let res: Response;
