@@ -32,7 +32,7 @@
     "@codemirror/view": "^6.41.1",
     "@lezer/highlight": "^1.2.3",
     "@openparachute/surface-client": "workspace:*",
-    "@openparachute/surface-render": "^0.2.0",
+    "@openparachute/surface-render": "workspace:*",
     "@tanstack/react-query": "^5",
     "highlight.js": "^11.11.1",
     "idb": "^8.0.3",

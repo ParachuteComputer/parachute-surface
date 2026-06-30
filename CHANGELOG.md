@@ -9,6 +9,51 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [surface 0.3.3-rc.1] - 2026-06-30
+
+fix(surface-host): `parachute-surface add`/`list`/etc. now authenticate to a
+deployed daemon. The CLI presented the on-disk operator token
+(`aud: "operator"`) directly to the daemon's admin endpoints, which require a
+hub-issued `aud: "surface"` token — so every admin verb 401'd with
+`hub JWT audience mismatch: expected "surface", got "operator"`.
+
+### The fix
+
+The CLI now exchanges the operator credential for a short-lived `surface:admin`
+token at the hub's `POST /api/auth/mint-token` (new `src/cli-token.ts`), then
+presents that. This follows the ecosystem capability-attenuation model — the
+same path the admin SPA uses (session → mint → present): the operator token
+holds `parachute:host:auth`, which may mint any requestable scope, and
+`surface:admin` is requestable; `inferAudience` stamps the mint `aud:
+"surface"`. The daemon's admin auth is unchanged — no widened audience, no
+weakening: a caller with no operator token, or one lacking minting authority,
+still can't reach the admin API.
+
+When no operator token is present the CLI sends the request unauthenticated (the
+daemon answers 401, as before). A mint *failure* (expired token, hub
+unreachable, insufficient authority) prints an actionable message and exits
+non-zero.
+
+### Build — intra-monorepo deps pinned to `workspace:*`
+
+The first cut of this fix (#146) was reverted (#148): bumping
+`@openparachute/surface` to a prerelease (`0.3.3-rc.1`) tripped a caret-miss.
+Sibling workspaces depended on `@openparachute/surface` (and on the already-rc
+`surface-client`/`surface-server`) via caret ranges like `^0.3.1`, and a caret
+range excludes prereleases — so the workspace silently resolved those siblings
+from npm instead of the local source, producing two divergent copies and a
+`SurfaceHostContext` type mismatch in `typecheck`.
+
+Root-cause fix: every intra-monorepo dependency on a sibling workspace package
+now uses `workspace:*` (matching `notes-ui`'s existing pin), so a prerelease
+bump can never caret-miss again; bun substitutes the real version at
+pack/publish time. External `@openparachute/*` packages (e.g. `scope-guard`,
+published from another repo) keep their caret ranges. The lockfile is synced in
+the same change.
+
+Note: the npm `rc` dist-tag was stale at `0.2.2-rc.1` (behind `@latest` 0.3.2);
+this rc resumes the chain at `0.3.3-rc.1`.
+
 ## [app 0.2.0-rc.13] - 2026-05-25
 
 ### Changed

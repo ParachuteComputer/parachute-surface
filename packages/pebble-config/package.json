@@ -18,7 +18,7 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@openparachute/surface-client": "^0.3.0"
+    "@openparachute/surface-client": "workspace:*"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
