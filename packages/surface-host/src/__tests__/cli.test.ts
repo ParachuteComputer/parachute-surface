@@ -17,6 +17,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
 
 import pkg from "../../package.json" with { type: "json" };
@@ -27,18 +29,36 @@ async function runBin(
   args: string[],
   envOverrides: Record<string, string> = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  const env = { ...process.env, ...envOverrides };
-  const proc = Bun.spawn(["bun", "run", BIN, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env,
-  });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const code = await proc.exited;
-  return { stdout, stderr, code };
+  // Hermetic credential env: point PARACHUTE_HOME at an empty dir and blank
+  // PARACHUTE_HUB_TOKEN so the CLI finds NO operator token. Without this the
+  // admin verbs would try to mint a surface token from the developer's real
+  // ~/.parachute/operator.token against a live hub — making these
+  // verb-routing / connection-error assertions depend on local infra. With no
+  // operator token the CLI sends the request unauthenticated, so the
+  // unreachable-daemon path (the thing these tests assert) is exercised
+  // deterministically. Per-test overrides still win.
+  const emptyHome = mkdtempSync(path.join(tmpdir(), "parachute-surface-cli-test-"));
+  const env = {
+    ...process.env,
+    PARACHUTE_HOME: emptyHome,
+    PARACHUTE_HUB_TOKEN: "",
+    ...envOverrides,
+  };
+  try {
+    const proc = Bun.spawn(["bun", "run", BIN, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env,
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    return { stdout, stderr, code };
+  } finally {
+    rmSync(emptyHome, { recursive: true, force: true });
+  }
 }
 
 /**
