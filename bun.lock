@@ -177,7 +177,7 @@
     },
     "packages/surface-host": {
       "name": "@openparachute/surface",
-      "version": "0.3.2",
+      "version": "0.3.3-rc.1",
       "bin": {
         "parachute-surface": "bin/parachute-surface.ts",
       },
@@ -2062,13 +2062,19 @@
 
     "@asamuzakjp/css-color/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
+    "@openparachute/docs-editor/@openparachute/surface": ["@openparachute/surface@0.3.2", "", { "dependencies": { "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface-client": "^0.3.0" }, "peerDependencies": { "typescript": "^5" }, "bin": { "parachute-surface": "bin/parachute-surface.ts" } }, "sha512-F6q7bpYktCVkXR+/reX8Wlv8AFN7Fc30a8bmljPlKmzPGYFJUJLUFep5r4NO1mLd0UuLYzNxufcOPtoy43vIFg=="],
+
     "@openparachute/docs-editor/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
     "@openparachute/docs-editor/@openparachute/surface-server": ["@openparachute/surface-server@0.1.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface": "^0.3.1", "@openparachute/surface-client": "^0.3.0", "yjs": "^13.6.27" }, "peerDependencies": { "typescript": "^5" } }, "sha512-uY8v4hozFYkvuWTmlgOA5C09mMwo+dYyz7R3Nlqt7scxUiFsmv+CayS9DmDV7j56LWs77+LOLG9zhyugFVDYkw=="],
 
+    "@openparachute/meeting-ingest/@openparachute/surface": ["@openparachute/surface@0.3.2", "", { "dependencies": { "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface-client": "^0.3.0" }, "peerDependencies": { "typescript": "^5" }, "bin": { "parachute-surface": "bin/parachute-surface.ts" } }, "sha512-F6q7bpYktCVkXR+/reX8Wlv8AFN7Fc30a8bmljPlKmzPGYFJUJLUFep5r4NO1mLd0UuLYzNxufcOPtoy43vIFg=="],
+
     "@openparachute/meeting-ingest/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
     "@openparachute/meeting-ingest/@openparachute/surface-server": ["@openparachute/surface-server@0.1.2", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.29.0", "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface": "^0.3.1", "@openparachute/surface-client": "^0.3.0", "yjs": "^13.6.27" }, "peerDependencies": { "typescript": "^5" } }, "sha512-uY8v4hozFYkvuWTmlgOA5C09mMwo+dYyz7R3Nlqt7scxUiFsmv+CayS9DmDV7j56LWs77+LOLG9zhyugFVDYkw=="],
+
+    "@openparachute/meeting-mcp/@openparachute/surface": ["@openparachute/surface@0.3.2", "", { "dependencies": { "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface-client": "^0.3.0" }, "peerDependencies": { "typescript": "^5" }, "bin": { "parachute-surface": "bin/parachute-surface.ts" } }, "sha512-F6q7bpYktCVkXR+/reX8Wlv8AFN7Fc30a8bmljPlKmzPGYFJUJLUFep5r4NO1mLd0UuLYzNxufcOPtoy43vIFg=="],
 
     "@openparachute/meeting-mcp/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
@@ -2081,6 +2087,8 @@
     "@openparachute/surface/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
     "@openparachute/surface-render/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
+
+    "@openparachute/surface-server/@openparachute/surface": ["@openparachute/surface@0.3.2", "", { "dependencies": { "@openparachute/scope-guard": "^0.4.0-rc.1", "@openparachute/surface-client": "^0.3.0" }, "peerDependencies": { "typescript": "^5" }, "bin": { "parachute-surface": "bin/parachute-surface.ts" } }, "sha512-F6q7bpYktCVkXR+/reX8Wlv8AFN7Fc30a8bmljPlKmzPGYFJUJLUFep5r4NO1mLd0UuLYzNxufcOPtoy43vIFg=="],
 
     "@openparachute/surface-server/@openparachute/surface-client": ["@openparachute/surface-client@0.3.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-Gt8FXHhYkUv44Z57ro/jwcXjUKmmJ388KtR9a5NjKQgRMpYPvjLV2U2opQA5hH9NZwI2AwxaQWLAdGvB6ddEDQ=="],
 
@@ -2151,6 +2159,12 @@
     "workbox-build/pretty-bytes": ["pretty-bytes@5.6.0", "", {}, "sha512-FFw039TmrBqFK8ma/7OL3sDz/VytdtJr044/QUJtH0wK9lb9jLq9tJyIxUwtQJHwar2BqtiA4iCWSwo9JLkzFg=="],
 
     "workbox-expiration/idb": ["idb@7.1.1", "", {}, "sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ=="],
+
+    "@openparachute/docs-editor/@openparachute/surface-server/@openparachute/surface": ["@openparachute/surface@workspace:packages/surface-host"],
+
+    "@openparachute/meeting-ingest/@openparachute/surface-server/@openparachute/surface": ["@openparachute/surface@workspace:packages/surface-host"],
+
+    "@openparachute/meeting-mcp/@openparachute/surface-server/@openparachute/surface": ["@openparachute/surface@workspace:packages/surface-host"],
 
     "accepts/mime-types/mime-db": ["mime-db@1.54.0", "", {}, "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ=="],
 
