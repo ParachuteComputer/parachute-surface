@@ -34,6 +34,23 @@ daemon answers 401, as before). A mint *failure* (expired token, hub
 unreachable, insufficient authority) prints an actionable message and exits
 non-zero.
 
+### Build — intra-monorepo deps pinned to `workspace:*`
+
+The first cut of this fix (#146) was reverted (#148): bumping
+`@openparachute/surface` to a prerelease (`0.3.3-rc.1`) tripped a caret-miss.
+Sibling workspaces depended on `@openparachute/surface` (and on the already-rc
+`surface-client`/`surface-server`) via caret ranges like `^0.3.1`, and a caret
+range excludes prereleases — so the workspace silently resolved those siblings
+from npm instead of the local source, producing two divergent copies and a
+`SurfaceHostContext` type mismatch in `typecheck`.
+
+Root-cause fix: every intra-monorepo dependency on a sibling workspace package
+now uses `workspace:*` (matching `notes-ui`'s existing pin), so a prerelease
+bump can never caret-miss again; bun substitutes the real version at
+pack/publish time. External `@openparachute/*` packages (e.g. `scope-guard`,
+published from another repo) keep their caret ranges. The lockfile is synced in
+the same change.
+
 Note: the npm `rc` dist-tag was stale at `0.2.2-rc.1` (behind `@latest` 0.3.2);
 this rc resumes the chain at `0.3.3-rc.1`.
 
