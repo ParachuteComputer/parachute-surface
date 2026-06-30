@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Host module for custom Parachute UIs \u2014 drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
@@ -45,7 +45,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@openparachute/surface-client": "workspace:*",
+    "@openparachute/surface-client": "^0.3.3",
     "@openparachute/scope-guard": "^0.4.0-rc.1"
   },
   "repository": {
