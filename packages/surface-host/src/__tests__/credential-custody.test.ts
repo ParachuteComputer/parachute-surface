@@ -22,6 +22,7 @@ import {
   createCredentialTokenProvider,
   credentialPathFor,
   listCredentials,
+  markCredentialNeedsOperator,
   readCredential,
   resolveCredentialForSurface,
   resolveDiscoveryCredential,
@@ -415,6 +416,13 @@ describe("resolveDiscoveryCredential (surface discovery)", () => {
   test("ignores an expired read credential", () => {
     const dir = tmpDir("creds-");
     applyCredentialPayload(payload({ expires_at: new Date(Date.now() - 1000).toISOString() }), dir);
+    expect(resolveDiscoveryCredential("default", { dir })).toBeNull();
+  });
+
+  test("ignores a needs-operator read credential", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(payload(), dir);
+    markCredentialNeedsOperator("cred-surface-vault-default", dir);
     expect(resolveDiscoveryCredential("default", { dir })).toBeNull();
   });
 });

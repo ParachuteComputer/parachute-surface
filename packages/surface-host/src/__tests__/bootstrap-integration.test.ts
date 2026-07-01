@@ -104,6 +104,7 @@ describe("serve ↔ bootstrap integration", () => {
     // Default config is in-process — no config.json on disk means
     // loadConfig returns DEFAULTS which has bootstrap enabled.
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -144,6 +145,7 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -169,6 +171,7 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -199,6 +202,7 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -223,6 +227,7 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -241,6 +246,7 @@ describe("serve ↔ bootstrap integration", () => {
 
   test("npm-fetch failure: daemon stays up, result records failed", async () => {
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -272,6 +278,7 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,

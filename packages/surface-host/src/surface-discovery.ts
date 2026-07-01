@@ -184,6 +184,9 @@ export async function registerDeclaredSurfaces(opts: {
 
   for (const s of opts.surfaces) {
     try {
+      // Phase 1 sends only { name, mount, mode }; the declaration's `sourceRef` +
+      // `scopes` stay informational on `DeclaredSurface` (a later phase can
+      // forward them to the hub for access-gating / mirror config).
       const res = await fetchImpl(endpoint, {
         method: "POST",
         headers: {

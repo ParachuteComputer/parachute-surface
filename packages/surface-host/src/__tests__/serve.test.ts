@@ -55,6 +55,7 @@ describe("serve — live integration", () => {
   test("mounts a UI and serves index.html", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "Hello from test UI" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -91,6 +92,7 @@ describe("serve — live integration", () => {
   test("self-registers into services.json", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "x" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -130,6 +132,7 @@ describe("serve — live integration", () => {
       }),
     );
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0, // OS picks
       configPath,
       uisDir,
@@ -151,6 +154,7 @@ describe("serve — live integration", () => {
   test("skipSelfRegister leaves services.json alone", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "x" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -167,6 +171,7 @@ describe("serve — live integration", () => {
 
   test("starts even with no UIs", async () => {
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -194,6 +199,7 @@ describe("serve — live integration", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify({ disabled: true }));
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,

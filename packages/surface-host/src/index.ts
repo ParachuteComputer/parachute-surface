@@ -414,44 +414,60 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
   const surfaceDiscovery = opts.skipSurfaceDiscovery
     ? undefined
     : (() => {
-        const discoveryVault = opts.discoveryVault ?? "default";
-        const operatorToken =
-          (opts.operatorTokenOverride
-            ? opts.operatorTokenOverride()
-            : readOperatorToken({ logger })) ?? undefined;
-        // Query fn: injected (tests) or built over a custodied read credential.
-        let queryNotes = opts.discoveryQueryNotes;
-        if (!queryNotes) {
-          const cred = resolveDiscoveryCredential(discoveryVault, {
-            ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
-          });
-          if (cred) {
-            // Production uses the global fetch; tests inject `discoveryQueryNotes`
-            // directly (so the VaultClient path isn't exercised under test).
-            const client = VaultClient.fromHub({
-              hubOrigin: getHubOrigin(config.hub_url),
-              vaultName: discoveryVault,
-              tokenProvider: () => cred.token,
+        // The whole IIFE body (the synchronous credential resolution + client
+        // construction, not just the async sweep) is wrapped so NOTHING here can
+        // throw out of serve() and abort startup — discovery is strictly
+        // best-effort. The inner `.catch` handles async rejections; this outer
+        // try/catch handles a synchronous throw (a malformed cred, a bad hub_url).
+        try {
+          const discoveryVault = opts.discoveryVault ?? "default";
+          const operatorToken =
+            (opts.operatorTokenOverride
+              ? opts.operatorTokenOverride()
+              : readOperatorToken({ logger })) ?? undefined;
+          // Query fn: injected (tests) or built over a custodied read credential.
+          let queryNotes = opts.discoveryQueryNotes;
+          if (!queryNotes) {
+            const cred = resolveDiscoveryCredential(discoveryVault, {
+              ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
             });
-            queryNotes = (q) => client.queryNotes(q);
+            if (cred) {
+              // Production uses the global fetch; tests inject `discoveryQueryNotes`
+              // directly (so the VaultClient path isn't exercised under test).
+              const client = VaultClient.fromHub({
+                hubOrigin: getHubOrigin(config.hub_url),
+                vaultName: discoveryVault,
+                tokenProvider: () => cred.token,
+              });
+              queryNotes = (q) => client.queryNotes(q);
+            }
           }
-        }
-        return runSurfaceDiscovery({
-          ...(queryNotes !== undefined ? { queryNotes } : {}),
-          hubOrigin: getHubOrigin(config.hub_url),
-          ...(operatorToken !== undefined ? { operatorToken } : {}),
-          ...(opts.fetchFn !== undefined ? { fetchImpl: opts.fetchFn } : {}),
-          logger,
-        }).catch((e) => {
-          logger.warn(`[app] surface discovery sweep failed: ${(e as Error).message}`);
-          return {
+          return runSurfaceDiscovery({
+            ...(queryNotes !== undefined ? { queryNotes } : {}),
+            hubOrigin: getHubOrigin(config.hub_url),
+            ...(operatorToken !== undefined ? { operatorToken } : {}),
+            ...(opts.fetchFn !== undefined ? { fetchImpl: opts.fetchFn } : {}),
+            logger,
+          }).catch((e) => {
+            logger.warn(`[app] surface discovery sweep failed: ${(e as Error).message}`);
+            return {
+              declared: [],
+              skipped: [],
+              registered: [],
+              failed: [],
+              skipReason: "exception",
+            } satisfies SurfaceDiscoveryResult;
+          });
+        } catch (e) {
+          logger.warn(`[app] surface discovery setup failed: ${(e as Error).message}`);
+          return Promise.resolve({
             declared: [],
             skipped: [],
             registered: [],
             failed: [],
-            skipReason: "exception",
-          } satisfies SurfaceDiscoveryResult;
-        });
+            skipReason: "setup-exception",
+          } satisfies SurfaceDiscoveryResult);
+        }
       })();
 
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
