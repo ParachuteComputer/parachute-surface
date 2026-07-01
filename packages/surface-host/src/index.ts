@@ -41,6 +41,19 @@ export * from "./auth.ts";
 export * from "./operator-token.ts";
 export * from "./dcr.ts";
 export * from "./npm-fetch.ts";
+export {
+  pullSurfaceSource,
+  buildSurface,
+  constrainedSubprocessRunner,
+  GitDeployError,
+  DEFAULT_BUILD_TIMEOUT_MS,
+  type GitSpawnFn,
+  type BuildRunner,
+  type BuildRunResult,
+  type PullSourceOpts,
+  type BuildSurfaceOpts,
+  type BuildSurfaceResult,
+} from "./git-deploy.ts";
 export * from "./dev-mode.ts";
 export * from "./dev-injection.ts";
 export * from "./dev-watcher.ts";

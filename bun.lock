@@ -177,13 +177,13 @@
     },
     "packages/surface-host": {
       "name": "@openparachute/surface",
-      "version": "0.3.4",
+      "version": "0.3.5",
       "bin": {
         "parachute-surface": "bin/parachute-surface.ts",
       },
       "dependencies": {
         "@openparachute/scope-guard": "^0.4.0-rc.1",
-        "@openparachute/surface-client": "workspace:*",
+        "@openparachute/surface-client": "^0.3.3",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -238,8 +238,8 @@
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@openparachute/scope-guard": "^0.4.0-rc.1",
-        "@openparachute/surface": "workspace:*",
-        "@openparachute/surface-client": "workspace:*",
+        "@openparachute/surface": "^0.3.5-rc.1",
+        "@openparachute/surface-client": "^0.3.3",
         "yjs": "^13.6.27",
       },
       "devDependencies": {
