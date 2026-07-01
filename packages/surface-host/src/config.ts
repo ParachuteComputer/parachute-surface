@@ -94,6 +94,19 @@ export function resolveUisDir(env: Record<string, string | undefined> = process.
   return path.join(parachuteHome, "surface", "uis");
 }
 
+/**
+ * Resolve `$PARACHUTE_HOME/surface/src/` — where the Surface Git Transport
+ * clones a pushed surface's SOURCE before building it (Phase 0b). Distinct from
+ * `uis/` (the served bundles): source checkouts are throwaway build inputs, one
+ * `src/<name>/` per surface, replaced on every push.
+ */
+export function resolveSurfaceSrcDir(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
+  return path.join(parachuteHome, "surface", "src");
+}
+
 /** Defaults baked into the schema. Kept in sync with `.parachute/config/schema`. */
 export const DEFAULTS: AppConfig = {
   hub_url: "http://127.0.0.1:1939",

@@ -55,7 +55,7 @@ import * as path from "node:path";
 
 import { SCOPE_ADMIN, SCOPE_READ, enforceScope as defaultEnforceScope } from "./auth.ts";
 import type { AppConfig } from "./config.ts";
-import { resolveConfigPath, resolveUisDir } from "./config.ts";
+import { resolveConfigPath, resolveSurfaceSrcDir, resolveUisDir } from "./config.ts";
 import { DEFAULT_RENEW_WITHIN_MS } from "./credential-renewal.ts";
 import {
   CONNECTION_ID_RE,
@@ -77,6 +77,7 @@ import {
   unregisterOauthClient,
   writeOauthClientFile,
 } from "./dcr.ts";
+import { GitDeployError, buildSurface, pullSurfaceSource } from "./git-deploy.ts";
 import {
   GithubResolveError,
   type ResolvedGithubRelease,
@@ -162,6 +163,26 @@ export type AdminHandlerOpts = {
    * through so the PATCH writes the same file the daemon loaded.
    */
   configPath?: string;
+  /**
+   * Base dir for Surface Git Transport source checkouts (Phase 0b). Defaults
+   * to `resolveSurfaceSrcDir()` — `$PARACHUTE_HOME/surface/src/`. Tests inject
+   * a tmpdir.
+   */
+  srcDir?: string;
+  /**
+   * Override the git spawner used by the git-pushed pull (tests). Defaults to
+   * the real `git clone`.
+   */
+  gitSpawnFn?: import("./git-deploy.ts").GitSpawnFn;
+  /**
+   * Override the build executor — the sandbox seam (tests + the Option B
+   * hardening swap). Defaults to the constrained-subprocess runner.
+   */
+  buildRunner?: import("./git-deploy.ts").BuildRunner;
+  /** Override the build timeout (tests). */
+  buildTimeoutMs?: number;
+  /** Override the parent dir for the build-scoped HOME/TMPDIR (tests). */
+  buildHomeParent?: string;
 };
 
 type RouteOutcome = { handled: false } | { handled: true; response: Promise<Response> | Response };
@@ -202,6 +223,16 @@ export function routeAdmin(req: Request, opts: AdminHandlerOpts): RouteOutcome {
   // can never shadow a hosted surface.
   if (pathname === "/surface/api/credential" && method === "POST") {
     return { handled: true, response: handleCredentialDelivery(req, opts) };
+  }
+
+  // POST /surface/api/git-pushed — the hub's Surface Git Transport deploy
+  // hand-off (Phase 0b). AUTH: the hub authenticates with a short-lived
+  // `surface:admin` bearer (aud "surface"), same as credential delivery — so
+  // a random on-box process can't trigger a build. On notify, surface-host
+  // pulls the pushed source from the hub, builds it IN A SANDBOX, and serves
+  // it. `/surface/api` is RESERVED so no hosted surface can shadow this.
+  if (pathname === "/surface/api/git-pushed" && method === "POST") {
+    return { handled: true, response: handleGitPushed(req, opts) };
   }
 
   // GET /surface/api/credentials — the host's stored credential copies,
@@ -630,6 +661,185 @@ async function handleCredentialDelivery(req: Request, opts: AdminHandlerOpts): P
     connection_id: body.connection_id,
     ...(mounted.length > 0 ? { mounted } : {}),
   });
+}
+
+// --- POST /surface/api/git-pushed (Phase 0b — Surface Git Transport) ---------
+
+/** Surface name charset (must be servable — matches meta-schema NAME_PATTERN). */
+const GIT_PUSHED_NAME_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * The hub's deploy hand-off after a `git push` to `/git/<name>` (design doc
+ * §5 step 5). AUTH: a short-lived hub-minted `surface:admin` bearer (aud
+ * "surface"), validated by the SAME `enforceScope(SCOPE_ADMIN)` the credential
+ * delivery uses — an unauthenticated caller can never trigger a build.
+ *
+ * On notify: pull the pushed SOURCE from the hub git endpoint (authed by the
+ * `pull_token` the hub minted into the payload), BUILD it in a sandbox, and —
+ * only on success — place `dist/` + `meta.json` under `uis/<name>/`, re-scan,
+ * and serve it under `/surface/<name>`. FAIL-CLOSED: a failed pull/build never
+ * touches the currently-served bundle (the last-good keeps serving) and never
+ * crashes the daemon — it returns a 4xx/5xx with a bounded detail.
+ */
+async function handleGitPushed(req: Request, opts: AdminHandlerOpts): Promise<Response> {
+  const auth = await runEnforce(req, SCOPE_ADMIN, opts);
+  if (auth instanceof Response) return auth;
+
+  let body: { surface?: unknown; clone_url?: unknown; pull_token?: unknown };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch (e) {
+    return Response.json({ error: "invalid_json", message: (e as Error).message }, { status: 400 });
+  }
+
+  const bad = (message: string) =>
+    Response.json({ error: "invalid_payload", message }, { status: 400 });
+  const name = body.surface;
+  if (typeof name !== "string" || !GIT_PUSHED_NAME_RE.test(name)) {
+    return bad("surface must be a valid surface name (^[a-z][a-z0-9-]*$)");
+  }
+  if (typeof body.clone_url !== "string" || body.clone_url.length === 0) {
+    return bad("clone_url must be a non-empty string");
+  }
+  if (typeof body.pull_token !== "string" || body.pull_token.length === 0) {
+    return bad("pull_token must be a non-empty string");
+  }
+  const cloneUrl = body.clone_url;
+  const pullToken = body.pull_token;
+
+  const uisDir = opts.uisDir ?? resolveUisDir();
+  const srcBase = opts.srcDir ?? resolveSurfaceSrcDir();
+  const sourceDir = path.join(srcBase, name);
+
+  // ── Pull + build happen OUTSIDE uis/ — a failure here leaves the served
+  //    bundle untouched (fail-closed). Only on success do we swap it in.
+  let distDir: string;
+  let meta: UiMeta;
+  try {
+    await pullSurfaceSource({
+      cloneUrl,
+      token: pullToken,
+      destDir: sourceDir,
+      ...(opts.gitSpawnFn ? { spawnFn: opts.gitSpawnFn } : {}),
+      ...(opts.logger ? { logger: opts.logger } : {}),
+    });
+    const result = await buildSurface({
+      sourceDir,
+      name,
+      defaultScopes: opts.state.config.default_scope_required,
+      ...(opts.buildRunner ? { runner: opts.buildRunner } : {}),
+      ...(opts.buildTimeoutMs !== undefined ? { timeoutMs: opts.buildTimeoutMs } : {}),
+      ...(opts.buildHomeParent ? { buildHomeParent: opts.buildHomeParent } : {}),
+      ...(opts.logger ? { logger: opts.logger } : {}),
+    });
+    distDir = result.distDir;
+    meta = result.meta;
+  } catch (e) {
+    // Best-effort cleanup of the throwaway source checkout; keep serving last-good.
+    try {
+      rmSync(sourceDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    if (e instanceof GitDeployError) {
+      const status = e.code === "pull_failed" ? 502 : e.code === "build_timeout" ? 504 : 422;
+      opts.logger?.warn(`[app-admin] git-pushed deploy failed for "${name}": ${e.code}`);
+      return Response.json(
+        {
+          error: "deploy_failed",
+          code: e.code,
+          message: e.message,
+          ...(e.detail ? { detail: e.detail } : {}),
+        },
+        { status },
+      );
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    opts.logger?.warn(`[app-admin] git-pushed deploy errored for "${name}": ${msg}`);
+    return Response.json({ error: "deploy_error", message: msg }, { status: 500 });
+  }
+
+  // Phase-0b safety boundary: a backed surface's `server` block would run
+  // attacker-supplied code IN-PROCESS at serve-time — outside the build
+  // sandbox. Refuse to serve one via git push (static surfaces only for now);
+  // the pushed source stays cloned but is never mounted.
+  if (meta.server) {
+    return Response.json(
+      {
+        error: "unsupported",
+        message:
+          "backed surfaces (meta.json `server` block) are not yet supported via git push — static surfaces only in Phase 0b",
+      },
+      { status: 422 },
+    );
+  }
+
+  // ── Success: swap the built bundle into uis/<name>/ + serve it. Mirrors the
+  //    add/reload tail: copy dist, write meta, re-scan, swap state, refresh
+  //    services.json.
+  try {
+    const targetDir = path.join(uisDir, name);
+    mkdirSync(targetDir, { recursive: true });
+    copyDir(distDir, path.join(targetDir, "dist"));
+    writeFileSync(
+      path.join(targetDir, "meta.json"),
+      `${JSON.stringify(gitPushedMeta(meta), null, 2)}\n`,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    opts.logger?.warn(`[app-admin] git-pushed install failed for "${name}": ${msg}`);
+    return Response.json({ error: "install_failed", message: msg }, { status: 500 });
+  }
+
+  const scan = scanUis({ uisDir, logger: opts.logger });
+  opts.state.registeredUis = scan.registered;
+  opts.state.skippedUis = scan.skipped.map((s: SkippedUi) => ({
+    dirName: s.dirName,
+    status: s.status,
+    reason: s.reason,
+  }));
+
+  if (!opts.skipSelfRegisterRefresh) {
+    try {
+      selfRegister({
+        boundPort: 0, // ignored — existing entry's port preserves
+        installDir: resolveProjectRoot(),
+        manifestPath: opts.manifestPath,
+        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+        logger: opts.logger,
+      });
+    } catch (e) {
+      opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
+    }
+  }
+
+  const served = opts.state.registeredUis.find((u) => u.meta.name === name);
+  opts.logger?.log(`[app-admin] git-pushed: built + serving "${name}" at ${meta.path}`);
+  return Response.json({
+    ok: true,
+    surface: name,
+    served: served !== undefined,
+    path: meta.path,
+  });
+}
+
+/** Projection of a UiMeta written to `uis/<name>/meta.json` (git-pushed path). */
+function gitPushedMeta(meta: UiMeta): Record<string, unknown> {
+  return {
+    name: meta.name,
+    displayName: meta.displayName,
+    tagline: meta.tagline,
+    path: meta.path,
+    version: meta.version,
+    iconUrl: meta.iconUrl,
+    scopes_required: meta.scopes_required,
+    vault_default: meta.vault_default,
+    pwa: meta.pwa,
+    pwa_service_worker: meta.pwa_service_worker,
+    audience: meta.audience,
+    public: meta.public,
+    required_schema: meta.required_schema,
+  };
 }
 
 // --- POST /surface/add -------------------------------------------------------
