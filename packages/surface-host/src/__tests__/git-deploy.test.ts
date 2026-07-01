@@ -21,6 +21,7 @@ import {
   GitDeployError,
   type GitSpawnFn,
   buildSurface,
+  constrainedSubprocessRunner,
   pullSurfaceSource,
 } from "../git-deploy.ts";
 import type { AppState } from "../http-server.ts";
@@ -277,6 +278,31 @@ describe("buildSurface", () => {
       delete process.env.SUPER_SECRET;
       delete process.env.PARACHUTE_HUB_ORIGIN;
     }
+  });
+
+  test("constrainedSubprocessRunner: timeout kills the whole process GROUP (no orphaned grandchild) and never hangs", async () => {
+    // A build that backgrounds a long-lived grandchild (holds the pipe) then
+    // hangs. A single-process kill would orphan the grandchild + could hang on
+    // the still-open pipe; the process-group kill must reap both. A unique
+    // fractional sleep duration makes the grandchild individually identifiable.
+    const uniq = `98.${process.pid % 1000}${Math.floor(Math.random() * 9000 + 1000)}`;
+    const started = Date.now();
+    const res = await constrainedSubprocessRunner({
+      argv: ["bash", "-c", `sleep ${uniq} & sleep ${uniq}`],
+      cwd: os.tmpdir(),
+      env: { PATH: process.env.PATH ?? "" },
+      timeoutMs: 400,
+    });
+    // Returned promptly (didn't hang on the backgrounded child's inherited pipe).
+    expect(Date.now() - started).toBeLessThan(8000);
+    expect(res.timedOut).toBe(true);
+    expect(res.exitCode).not.toBe(0);
+    // Both sleeps (the group's members) were reaped — give SIGKILL a moment.
+    await new Promise((r) => setTimeout(r, 400));
+    const survivors = Bun.spawnSync(["pgrep", "-f", `sleep ${uniq}`])
+      .stdout.toString()
+      .trim();
+    expect(survivors).toBe("");
   });
 
   test("a failing build → build_failed, no dist required", async () => {

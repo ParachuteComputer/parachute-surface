@@ -35,11 +35,12 @@
  *   • INTEGRITY — it can likewise WRITE via absolute paths, e.g. clobber a
  *     sibling served bundle under the real `uis/` (persistence);
  *   • RESOURCES — the build tree / TMPDIR are not disk-quota'd (only the 64 KiB
- *     captured-output cap + the wall-clock timeout bound it); egress is open;
- *   • PROCESS — the timeout SIGKILLs only the DIRECT child, not the process
- *     group, so a grandchild can outlive the build (the runner still returns —
- *     see `constrainedSubprocessRunner`).
- * The hardening path closes all four: swap in a kernel sandbox runner
+ *     captured-output cap + the process-group wall-clock timeout bound it);
+ *     egress is open.
+ * (PROCESS containment IS handled in Option A: the timeout kills the whole
+ * process GROUP, so a build-spawned grandchild can't be orphaned — see
+ * `constrainedSubprocessRunner`.)
+ * The hardening path closes the rest: swap in a kernel sandbox runner
  * (Seatbelt / bubblewrap, e.g. `@anthropic-ai/sandbox-runtime`) that confines
  * the filesystem to the build dir + restricts egress + contains the process
  * tree. The `BuildRunner` seam exists precisely so that swap is a one-function
@@ -202,28 +203,45 @@ export const DEFAULT_BUILD_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Option A — constrained subprocess. Non-privileged, minimal env, cwd-pinned,
- * timeout-killed, bounded output. Does NOT provide kernel FS/network
- * confinement (see the file header). This is the Phase-0b default; the seam
- * lets a kernel-sandbox runner replace it.
+ * PROCESS-GROUP timeout-killed, bounded output. Does NOT provide kernel
+ * FS/network confinement (see the file header). This is the Phase-0b default;
+ * the seam lets a kernel-sandbox runner replace it (Phase 0c).
  *
- * Termination is bounded on `proc.exited`, NOT on stream EOF: the timeout
- * SIGKILLs the direct child (which `proc.exited` observes), then the stream
- * drains get a short grace and are abandoned. So even a surviving GRANDCHILD
- * that inherited the stdout/stderr pipe (this kills only the direct child, not
- * the process group — full process containment is Option B's job) can never
- * hang this runner past `timeoutMs + grace`.
+ * `detached: true` makes the child a new process-group leader (pgid = its pid),
+ * so the wall-clock timeout `SIGKILL`s the WHOLE group (`process.kill(-pid)`) —
+ * a grandchild the build spawned (a shell, a watcher) is killed too, not
+ * orphaned. Termination is bounded on `proc.exited`, NOT on stream EOF: after
+ * the kill the stream drains get a short grace and are abandoned, so a lingering
+ * pipe holder can never hang the runner past `timeoutMs + grace`.
  */
 const POST_KILL_DRAIN_GRACE_MS = 2000;
 export const constrainedSubprocessRunner: BuildRunner = async ({ argv, cwd, env, timeoutMs }) => {
-  const proc = Bun.spawn(argv, { cwd, env, stdout: "pipe", stderr: "pipe" });
+  // `detached` isn't in Bun's SpawnOptions type yet but is honored at runtime
+  // (new session/process group) — verified against bun 1.3.x.
+  const proc = Bun.spawn(argv, {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    ...({ detached: true } as object),
+  });
+  const killGroup = () => {
+    try {
+      // Negative pid → the whole process group (child is the leader).
+      process.kill(-proc.pid, "SIGKILL");
+    } catch {
+      // Group gone or platform didn't honor detached — fall back to the child.
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  };
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    try {
-      proc.kill("SIGKILL");
-    } catch {
-      // already gone
-    }
+    killGroup();
   }, timeoutMs);
   try {
     const stdoutP = readBounded(proc.stdout as ReadableStream<Uint8Array>);
