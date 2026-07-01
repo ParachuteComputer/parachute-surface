@@ -274,8 +274,8 @@ describe("buildSurface", () => {
       expect(env.HUB).toBeNull();
       expect(env.SECRET).toBeNull();
     } finally {
-      process.env.SUPER_SECRET = undefined;
-      process.env.PARACHUTE_HUB_ORIGIN = undefined;
+      delete process.env.SUPER_SECRET;
+      delete process.env.PARACHUTE_HUB_ORIGIN;
     }
   });
 
@@ -395,6 +395,7 @@ describe("POST /surface/api/git-pushed", () => {
     const state = makeState();
     for (const body of [
       { surface: "Bad Name", clone_url: "http://x/git/x", pull_token: "t" },
+      { surface: "api", clone_url: "http://x/git/api", pull_token: "t" }, // reserved mount
       { surface: "brain", pull_token: "t" },
       { surface: "brain", clone_url: "http://x/git/x" },
     ]) {

@@ -27,18 +27,26 @@
  *   • a wall-clock timeout that kills the process;
  *   • bounded captured output;
  *   • never elevated (runs as whatever user surface-host runs as).
- * What it does NOT do: kernel-level filesystem/network confinement. A hostile
- * build can still read files THIS USER can read via ABSOLUTE paths (env
- * redirection doesn't stop a hardcoded path) — including on-disk credentials.
- * That residual is bounded by "the pusher is operator-authorized," and is
- * closed by the hardening path: swap in a kernel sandbox runner
+ * What it does NOT do: kernel-level filesystem/network confinement. Residuals,
+ * all bounded by "the pusher is operator-authorized" and all closed by Option B:
+ *   • CONFIDENTIALITY — a hostile build can READ files this user can read via
+ *     ABSOLUTE paths (env redirection doesn't stop a hardcoded path), incl.
+ *     on-disk credentials;
+ *   • INTEGRITY — it can likewise WRITE via absolute paths, e.g. clobber a
+ *     sibling served bundle under the real `uis/` (persistence);
+ *   • RESOURCES — the build tree / TMPDIR are not disk-quota'd (only the 64 KiB
+ *     captured-output cap + the wall-clock timeout bound it); egress is open;
+ *   • PROCESS — the timeout SIGKILLs only the DIRECT child, not the process
+ *     group, so a grandchild can outlive the build (the runner still returns —
+ *     see `constrainedSubprocessRunner`).
+ * The hardening path closes all four: swap in a kernel sandbox runner
  * (Seatbelt / bubblewrap, e.g. `@anthropic-ai/sandbox-runtime`) that confines
- * the filesystem to the build dir + restricts egress. The `BuildRunner` seam
- * exists precisely so that swap is a one-function change with no callers to
- * touch.
+ * the filesystem to the build dir + restricts egress + contains the process
+ * tree. The `BuildRunner` seam exists precisely so that swap is a one-function
+ * change with no callers to touch.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -138,9 +146,11 @@ export async function pullSurfaceSource(opts: PullSourceOpts): Promise<{ sourceD
     PATH: process.env.PATH ?? "",
     GIT_TERMINAL_PROMPT: "0",
     // The Authorization header rides in env, not argv (avoids `ps` leak) and is
-    // not written to any repo config. One config entry, scoped by count.
+    // not written to any repo config. SCOPED to the clone origin
+    // (`http.<origin>/.extraHeader`) so the bearer never rides a cross-host
+    // redirect — only requests to the hub carry it.
     GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraHeader",
+    GIT_CONFIG_KEY_0: `http.${parsed.origin}/.extraHeader`,
     GIT_CONFIG_VALUE_0: `Authorization: Bearer ${opts.token}`,
   };
 
@@ -195,7 +205,15 @@ export const DEFAULT_BUILD_TIMEOUT_MS = 5 * 60 * 1000;
  * timeout-killed, bounded output. Does NOT provide kernel FS/network
  * confinement (see the file header). This is the Phase-0b default; the seam
  * lets a kernel-sandbox runner replace it.
+ *
+ * Termination is bounded on `proc.exited`, NOT on stream EOF: the timeout
+ * SIGKILLs the direct child (which `proc.exited` observes), then the stream
+ * drains get a short grace and are abandoned. So even a surviving GRANDCHILD
+ * that inherited the stdout/stderr pipe (this kills only the direct child, not
+ * the process group — full process containment is Option B's job) can never
+ * hang this runner past `timeoutMs + grace`.
  */
+const POST_KILL_DRAIN_GRACE_MS = 2000;
 export const constrainedSubprocessRunner: BuildRunner = async ({ argv, cwd, env, timeoutMs }) => {
   const proc = Bun.spawn(argv, { cwd, env, stdout: "pipe", stderr: "pipe" });
   let timedOut = false;
@@ -208,11 +226,16 @@ export const constrainedSubprocessRunner: BuildRunner = async ({ argv, cwd, env,
     }
   }, timeoutMs);
   try {
-    const [stdout, stderr] = await Promise.all([
-      readBounded(proc.stdout as ReadableStream<Uint8Array>),
-      readBounded(proc.stderr as ReadableStream<Uint8Array>),
-    ]);
+    const stdoutP = readBounded(proc.stdout as ReadableStream<Uint8Array>);
+    const stderrP = readBounded(proc.stderr as ReadableStream<Uint8Array>);
+    // SIGKILL guarantees the direct child exits, so this resolves within the
+    // budget regardless of whether the pipes ever EOF.
     const exitCode = await proc.exited;
+    const grace = new Promise<string>((r) => setTimeout(() => r(""), POST_KILL_DRAIN_GRACE_MS));
+    const [stdout, stderr] = await Promise.all([
+      Promise.race([stdoutP, grace]),
+      Promise.race([stderrP, grace]),
+    ]);
     return { exitCode, stdout, stderr, timedOut };
   } finally {
     clearTimeout(timer);
@@ -443,8 +466,5 @@ function resolveMeta(src: string, name: string, defaultScopes: readonly string[]
 function mkTempDir(parent: string | undefined, prefix: string): string {
   const base = parent ?? os.tmpdir();
   mkdirSync(base, { recursive: true });
-  // mkdtemp-style unique dir.
-  const dir = path.join(base, `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  return mkdtempSync(path.join(base, prefix));
 }

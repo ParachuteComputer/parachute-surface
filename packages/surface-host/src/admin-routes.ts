@@ -698,6 +698,11 @@ async function handleGitPushed(req: Request, opts: AdminHandlerOpts): Promise<Re
   if (typeof name !== "string" || !GIT_PUSHED_NAME_RE.test(name)) {
     return bad("surface must be a valid surface name (^[a-z][a-z0-9-]*$)");
   }
+  // Reject a host-reserved mount up front (a push to `api`/`admin`/`dev` would
+  // otherwise build then be silently dropped by scanUis as reserved-path).
+  if (RESERVED_PATHS.has(`/surface/${name}`)) {
+    return bad(`surface name "${name}" maps to a reserved mount (/surface/${name})`);
+  }
   if (typeof body.clone_url !== "string" || body.clone_url.length === 0) {
     return bad("clone_url must be a non-empty string");
   }
