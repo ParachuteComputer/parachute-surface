@@ -9,6 +9,46 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [surface 0.3.7] - 2026-06-30
+
+feat(surface-host): **Surface Git Transport Phase 1 — `#surface` discovery
+(vault declares).** surface-host now discovers surfaces from the vault and
+registers them with the hub, realizing "the vault declares; the hub
+authenticates; surface-host serves."
+
+- **New:** `src/surface-discovery.ts` — on boot, query the vault for
+  `tag:surface` (with a custodied read credential), parse each `#surface` note
+  into a `{ name, mount, mode, source.ref, scopes }` declaration, and register
+  each with the hub over `POST /admin/surfaces` (operator-authed) so its bare
+  repo is provisioned + the `/git/<name>` transport gates provisioning on it.
+  A surface thus exists — ready to receive a `git push` — the moment its note
+  does, before the first push. Best-effort, fire-and-forget: a missing read
+  credential / operator token / unreachable vault / malformed note logs + skips,
+  never blocks startup (mirrors the credential-renewal + redirect-self-heal boot
+  sweeps). Boot-only in Phase 1; periodic re-scan / live-query is Phase 1b.
+- **`#surface` note convention:** a note tagged `#surface` with metadata
+  `{ mount, mode: dev|prod, source: { ref }, scopes: [...] }`; content is its
+  identity (mirrors `#agent/thread`). The servable name derives from
+  `metadata.name` → the `/surface/<name>` suffix of `mount` → the note's last
+  path segment (first that matches the servable `NAME_PATTERN`). Git is the only
+  transport; a GitHub mirror is a separate optional remote (design Decisions-locked #1).
+- **`surface:write` declared** in `.parachute/module.json` `scopes.defines`
+  (joining `surface:read` / `surface:admin`) — the push authority for the git
+  transport.
+
+### Changed
+
+- **Build sandbox nits.** Dropped the cargo-culted `GIT_SSH_COMMAND` from
+  `SANDBOX_ENV_ALLOWLIST` (the surface clone is HTTPS, never git-over-SSH);
+  tightened the npm egress floor from `["registry.npmjs.org", "*.npmjs.org"]` to
+  just `["registry.npmjs.org"]` (verified a real `bun install` still resolves
+  metadata + tarballs from the single host under the kernel sandbox); and now
+  `logger.warn` before swallowing an egress-proxy-startup probe fault (a silent
+  swallow made a later "npm unreachable" failure baffling to diagnose).
+
+Stable patch (per the surface-ships-stable convention — `@rc` tag is dead and
+rc-first triggers the workspace caret-miss). `0.3.6` → `0.3.7`.
+
 ## [surface 0.3.6] - 2026-06-30
 
 feat(surface-host): **Surface Git Transport Phase 0c — kernel build

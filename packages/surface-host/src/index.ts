@@ -12,6 +12,8 @@
  *   https://github.com/ParachuteComputer/parachute.computer/blob/main/design/2026-05-21-parachute-apps-design.md
  */
 
+import { VaultClient } from "@openparachute/surface-client/vault-client";
+
 import pkg from "../package.json" with { type: "json" };
 
 import { addUiInternal, buildSelfRegisterExtraFields } from "./admin-routes.ts";
@@ -20,7 +22,11 @@ import { BackendSupervisor } from "./backend-supervisor.ts";
 import { maybeBootstrapDefaultApps } from "./bootstrap.ts";
 import { type AppConfig, loadConfig, resolveConfigPath, resolveUisDir } from "./config.ts";
 import { startCredentialRenewal } from "./credential-renewal.ts";
-import { createCredentialTokenProvider, createPendingCredentialGate } from "./credential-store.ts";
+import {
+  createCredentialTokenProvider,
+  createPendingCredentialGate,
+  resolveDiscoveryCredential,
+} from "./credential-store.ts";
 import { selfHealRedirectUris } from "./dcr.ts";
 import { disableDevMode, enableDevMode } from "./dev-mode.ts";
 import { stopAllWatchers } from "./dev-watcher.ts";
@@ -28,6 +34,7 @@ import { createHostContextBuilder } from "./host-context.ts";
 import { type AppState, startHttpServer } from "./http-server.ts";
 import { readOperatorToken } from "./operator-token.ts";
 import { resolveProjectRoot, selfRegister } from "./self-register.ts";
+import { type SurfaceDiscoveryResult, runSurfaceDiscovery } from "./surface-discovery.ts";
 import { scanUis } from "./ui-registry.ts";
 
 // Re-export everything so callers can drop down to a specific layer
@@ -102,6 +109,16 @@ export {
 } from "./surface-state-store.ts";
 export { resolveProjectRoot, selfRegister } from "./self-register.ts";
 export type { SelfRegisterOpts, SelfRegisterResult } from "./self-register.ts";
+export {
+  runSurfaceDiscovery,
+  discoverDeclaredSurfaces,
+  registerDeclaredSurfaces,
+  parseSurfaceNote,
+  SURFACE_TAG,
+  type DeclaredSurface,
+  type SkippedSurface,
+  type SurfaceDiscoveryResult,
+} from "./surface-discovery.ts";
 export { startHttpServer } from "./http-server.ts";
 export type { AppState, HttpServerOpts } from "./http-server.ts";
 
@@ -174,6 +191,24 @@ export type ServeOptions = {
    * re-registered. Best-effort; never blocks startup.
    */
   skipRedirectSelfHeal?: boolean;
+  /**
+   * Skip the boot-time `#surface` discovery sweep (tests + CI). When omitted, the
+   * sweep runs once on boot: query the vault for `tag:surface` (with a custodied
+   * read credential), then register each declared surface with the hub
+   * (`POST /admin/surfaces`) so its bare repo is provisioned + gated. Best-effort;
+   * never blocks startup. Skips cleanly when no read credential / operator token
+   * is available.
+   */
+  skipSurfaceDiscovery?: boolean;
+  /** Vault the discovery sweep queries for `#surface` notes. Defaults to `"default"`. */
+  discoveryVault?: string;
+  /**
+   * Inject the vault query fn for the discovery sweep (tests). When omitted,
+   * serve() builds one over a custodied read credential (or skips if none).
+   */
+  discoveryQueryNotes?: (
+    q: import("@openparachute/surface-client").NotesQueryInput,
+  ) => Promise<import("@openparachute/surface-client").Note[]>;
 };
 
 export type ServeHandle = {
@@ -204,6 +239,12 @@ export type ServeHandle = {
    * the daemon; tests await it to assert re-registration happened.
    */
   redirectSelfHeal?: Promise<import("./dcr.ts").RedirectSelfHealOutcome>;
+  /**
+   * Resolves once the boot-time `#surface` discovery sweep completes.
+   * `undefined` when skipped. Fire-and-forget for the daemon; tests await it to
+   * assert which surfaces were discovered + registered.
+   */
+  surfaceDiscovery?: Promise<SurfaceDiscoveryResult>;
 };
 
 /**
@@ -362,6 +403,73 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
         } satisfies import("./dcr.ts").RedirectSelfHealOutcome;
       });
 
+  // `#surface` discovery (Surface Git Transport Phase 1). Query the vault for
+  // `tag:surface` (with a custodied read credential) and register each declared
+  // surface with the hub (`POST /admin/surfaces`) so its bare repo is
+  // provisioned + the git endpoint gates provisioning on it — "vault declares,
+  // hub authenticates." Fire-and-forget, best-effort: skips cleanly when there's
+  // no usable read credential or operator token. Mirrors the boot sweeps above.
+  // (Phase 1b: periodic re-scan / live-query so a note created post-boot is
+  // picked up without a restart — today it's boot-only.)
+  const surfaceDiscovery = opts.skipSurfaceDiscovery
+    ? undefined
+    : (() => {
+        // The whole IIFE body (the synchronous credential resolution + client
+        // construction, not just the async sweep) is wrapped so NOTHING here can
+        // throw out of serve() and abort startup — discovery is strictly
+        // best-effort. The inner `.catch` handles async rejections; this outer
+        // try/catch handles a synchronous throw (a malformed cred, a bad hub_url).
+        try {
+          const discoveryVault = opts.discoveryVault ?? "default";
+          const operatorToken =
+            (opts.operatorTokenOverride
+              ? opts.operatorTokenOverride()
+              : readOperatorToken({ logger })) ?? undefined;
+          // Query fn: injected (tests) or built over a custodied read credential.
+          let queryNotes = opts.discoveryQueryNotes;
+          if (!queryNotes) {
+            const cred = resolveDiscoveryCredential(discoveryVault, {
+              ...(opts.credentialsDir !== undefined ? { dir: opts.credentialsDir } : {}),
+            });
+            if (cred) {
+              // Production uses the global fetch; tests inject `discoveryQueryNotes`
+              // directly (so the VaultClient path isn't exercised under test).
+              const client = VaultClient.fromHub({
+                hubOrigin: getHubOrigin(config.hub_url),
+                vaultName: discoveryVault,
+                tokenProvider: () => cred.token,
+              });
+              queryNotes = (q) => client.queryNotes(q);
+            }
+          }
+          return runSurfaceDiscovery({
+            ...(queryNotes !== undefined ? { queryNotes } : {}),
+            hubOrigin: getHubOrigin(config.hub_url),
+            ...(operatorToken !== undefined ? { operatorToken } : {}),
+            ...(opts.fetchFn !== undefined ? { fetchImpl: opts.fetchFn } : {}),
+            logger,
+          }).catch((e) => {
+            logger.warn(`[app] surface discovery sweep failed: ${(e as Error).message}`);
+            return {
+              declared: [],
+              skipped: [],
+              registered: [],
+              failed: [],
+              skipReason: "exception",
+            } satisfies SurfaceDiscoveryResult;
+          });
+        } catch (e) {
+          logger.warn(`[app] surface discovery setup failed: ${(e as Error).message}`);
+          return Promise.resolve({
+            declared: [],
+            skipped: [],
+            registered: [],
+            failed: [],
+            skipReason: "setup-exception",
+          } satisfies SurfaceDiscoveryResult);
+        }
+      })();
+
   let bootstrapPromise: Promise<import("./bootstrap.ts").BootstrapResult> | undefined;
   if (!opts.skipBootstrap && !config.disabled && state.registeredUis.length === 0) {
     // Fire-and-forget — daemon doesn't block on bootstrap. The add path
@@ -427,6 +535,7 @@ export function serve(opts: ServeOptions = {}): ServeHandle {
     backendsReady,
     ...(bootstrapPromise ? { bootstrap: bootstrapPromise } : {}),
     ...(redirectSelfHeal ? { redirectSelfHeal } : {}),
+    ...(surfaceDiscovery ? { surfaceDiscovery } : {}),
   };
 }
 

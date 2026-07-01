@@ -92,15 +92,18 @@ export const UNSANDBOXED_OPT_IN_ENV = "PARACHUTE_SURFACE_BUILD_ALLOW_UNSANDBOXED
 
 /**
  * The non-removable egress base for a build: the npm registry. A `bun install`
- * fetches packages + tarballs from here (bun's default registry is npmjs; both
- * the metadata and the `-/…` tarball path are on `registry.npmjs.org`). The
- * CLONE of the pushed source is NOT in this sandbox — it's the trusted substrate
- * fetch (`pullSurfaceSource`, authed by the hub read token), so the build itself
- * needs only npm, never the hub. A factory caller can WIDEN this (private
- * registry, git deps) via `makeKernelSandboxRunner({ egress })`; the base is
- * always present so a widening can only add, never strip.
+ * fetches BOTH package metadata and the `-/…` tarball path from
+ * `registry.npmjs.org` (bun's default registry), so exactly ONE host is needed —
+ * no `*.npmjs.org` wildcard (which would also admit e.g. `www.npmjs.com`'s
+ * neighbors and any future `*.npmjs.org` host; least-privilege keeps the egress
+ * floor to the one host a build actually reaches). The CLONE of the pushed
+ * source is NOT in this sandbox — it's the trusted substrate fetch
+ * (`pullSurfaceSource`, authed by the hub read token), so the build itself needs
+ * only npm, never the hub. A factory caller can WIDEN this (private registry, git
+ * deps) via `makeKernelSandboxRunner({ egress })`; the base is always present so a
+ * widening can only add, never strip.
  */
-export const NPM_EGRESS_HOSTS: readonly string[] = ["registry.npmjs.org", "*.npmjs.org"] as const;
+export const NPM_EGRESS_HOSTS: readonly string[] = ["registry.npmjs.org"] as const;
 
 // ─── engine adapter ────────────────────────────────────────────────────────────
 
@@ -284,7 +287,6 @@ export const SANDBOX_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
   "CLOUDSDK_PROXY_TYPE",
   "CLOUDSDK_PROXY_ADDRESS",
   "CLOUDSDK_PROXY_PORT",
-  "GIT_SSH_COMMAND",
   // Linux bwrap host-proxy-port markers (debug/transparency).
   "CLAUDE_CODE_HOST_HTTP_PROXY_PORT",
   "CLAUDE_CODE_HOST_SOCKS_PROXY_PORT",
@@ -547,9 +549,14 @@ export function makeKernelSandboxRunner(opts: KernelSandboxRunnerOpts = {}): Bui
       if (engine.waitForNetworkInitialization) {
         try {
           await engine.waitForNetworkInitialization();
-        } catch {
+        } catch (e) {
           // Non-fatal: the build will surface a network error itself if the proxy
           // genuinely failed; we don't want a probe fault to abort a valid build.
+          // But log it — a silently-swallowed egress-proxy-startup fault makes a
+          // subsequent "npm unreachable" build failure baffling to diagnose.
+          logger.warn(
+            `[surface-build] egress proxy startup probe failed (non-fatal): ${(e as Error).message}`,
+          );
         }
       }
       const wrapped = await engine.wrapWithSandboxArgv(shellJoin(argv));

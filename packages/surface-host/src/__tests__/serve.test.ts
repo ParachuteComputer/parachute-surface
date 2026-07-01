@@ -55,6 +55,7 @@ describe("serve — live integration", () => {
   test("mounts a UI and serves index.html", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "Hello from test UI" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -91,6 +92,7 @@ describe("serve — live integration", () => {
   test("self-registers into services.json", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "x" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -130,6 +132,7 @@ describe("serve — live integration", () => {
       }),
     );
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0, // OS picks
       configPath,
       uisDir,
@@ -151,6 +154,7 @@ describe("serve — live integration", () => {
   test("skipSelfRegister leaves services.json alone", async () => {
     seedUi("test-ui", "/surface/test-ui", { "index.html": "x" });
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -167,6 +171,7 @@ describe("serve — live integration", () => {
 
   test("starts even with no UIs", async () => {
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -194,6 +199,7 @@ describe("serve — live integration", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify({ disabled: true }));
     const h = serve({
+      skipSurfaceDiscovery: true,
       port: 0,
       configPath,
       uisDir,
@@ -244,5 +250,54 @@ describe("runOnce", () => {
     expect(result.state.registeredUis).toHaveLength(1);
     expect(result.state.skippedUis).toHaveLength(1);
     expect(result.state.skippedUis[0]!.status).toBe("missing-dist");
+  });
+
+  // Surface Git Transport Phase 1 — the #surface discovery sweep wiring. Fully
+  // hermetic: an injected vault query + operator token + a stub hub fetch (no
+  // real ~/.parachute, no real hub).
+  test("boot-time #surface discovery registers declared surfaces with the hub", async () => {
+    seedUi("test-ui", "/surface/test-ui", { "index.html": "x" });
+    const registered: Array<{ url: string; name: string; auth: string | null }> = [];
+    const stubFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { name: string };
+      registered.push({
+        url: String(url),
+        name: body.name,
+        auth: new Headers(init?.headers).get("authorization"),
+      });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const h = serve({
+      port: 0,
+      configPath,
+      uisDir,
+      manifestPath,
+      logger: silentLogger,
+      skipSelfRegister: true,
+      skipBootstrap: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
+      operatorTokenOverride: () => "op-token",
+      fetchFn: stubFetch,
+      // Inject the vault query so no real credential / vault is touched.
+      discoveryQueryNotes: async () => [
+        {
+          id: "note-1",
+          createdAt: "2026-06-30T00:00:00Z",
+          metadata: { name: "gitcoin-brain", mode: "prod" },
+        },
+      ],
+    });
+    try {
+      const result = await h.surfaceDiscovery;
+      expect(result?.registered).toEqual(["gitcoin-brain"]);
+      expect(registered).toHaveLength(1);
+      expect(registered[0]?.url).toBe("http://127.0.0.1:1939/admin/surfaces");
+      expect(registered[0]?.name).toBe("gitcoin-brain");
+      expect(registered[0]?.auth).toBe("Bearer op-token");
+    } finally {
+      await h.stop();
+    }
   });
 });

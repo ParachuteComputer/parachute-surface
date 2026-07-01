@@ -177,7 +177,7 @@
     },
     "packages/surface-host": {
       "name": "@openparachute/surface",
-      "version": "0.3.6",
+      "version": "0.3.7",
       "bin": {
         "parachute-surface": "bin/parachute-surface.ts",
       },
