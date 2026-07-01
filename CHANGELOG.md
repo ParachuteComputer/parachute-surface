@@ -9,6 +9,35 @@ side-by-side:
 The admin SPA at `web/admin/` ships inside the host package as
 `dist/admin/`; its version mirrors the host's version.
 
+## [surface 0.3.6] - 2026-06-30
+
+feat(surface-host): **Surface Git Transport Phase 0c — kernel build
+confinement.** The git-pushed-source build now runs inside a KERNEL sandbox
+(Seatbelt on macOS, bubblewrap on Linux) via `@anthropic-ai/sandbox-runtime`
+(the same engine the agent uses), replacing Phase 0b's constrained subprocess
+(Option A) as the DEFAULT `BuildRunner`. This is the hard gate before non-operator
+writers (Phase 2): it closes the Option-A residual where a malicious-but-authorized
+build could read absolute-path secrets (the vault read credential under
+`~/.parachute/**`, the operator token, other surfaces' source) or write outside
+its throwaway build dir (clobbering a sibling served bundle).
+
+- **New:** `src/build-sandbox.ts` — `makeKernelSandboxRunner` / `defaultBuildRunner`.
+  Reuses the agent's hard-won integration: the home-tree deny + scoped re-allow read
+  model, the Linux `apply-seccomp` ENOENT re-bind, a bun-binary read-bind, and the
+  engine env allowlist.
+- **Confinement:** writes confined to the build dir + a throwaway build HOME; reads
+  deny the home tree AND the real `$PARACHUTE_HOME`, re-allowing only the build dir +
+  toolchain; egress restricted to the npm registry (`registry.npmjs.org`). Every
+  Option-A protection (scrubbed env, process-group timeout, bounded output, non-root)
+  still holds.
+- **Fail-closed:** when the kernel sandbox is unavailable on the host, the build is
+  REFUSED (never run unsandboxed) unless the operator explicitly sets
+  `PARACHUTE_SURFACE_BUILD_ALLOW_UNSANDBOXED=1`, which degrades to Option A with a
+  loud warning (only for a trusted, operator-only box).
+- The `BuildRunner` seam is preserved — Option A (`constrainedSubprocessRunner`)
+  remains the injectable fallback.
+- Exact-pins `@anthropic-ai/sandbox-runtime@0.0.54` (matching the agent).
+
 ## [surface 0.3.3-rc.1] - 2026-06-30
 
 fix(surface-host): `parachute-surface add`/`list`/etc. now authenticate to a

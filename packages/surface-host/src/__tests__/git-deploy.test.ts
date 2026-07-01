@@ -257,6 +257,10 @@ describe("buildSurface", () => {
       const out = await buildSurface({
         sourceDir: src,
         name: "brain",
+        // Option A explicitly — the DEFAULT is now the kernel sandbox (Option B,
+        // build-sandbox.ts); this test asserts the constrained-subprocess runner's
+        // env scrub, which is the shared baseline both runners provide.
+        runner: constrainedSubprocessRunner,
         buildHomeParent,
         logger: silent,
       });

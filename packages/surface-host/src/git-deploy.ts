@@ -18,33 +18,39 @@
  *      behind a swappable `BuildRunner` seam.
  *
  * ── BUILD TRUST BOUNDARY (read this before touching the runner) ──────────────
- * The default runner (`constrainedSubprocessRunner`, Option A) runs the build
- * as a constrained subprocess:
+ * As of Phase 0c the DEFAULT runner is Option B — kernel confinement via
+ * `@anthropic-ai/sandbox-runtime` (Seatbelt on macOS, bubblewrap on Linux),
+ * implemented in `build-sandbox.ts` and resolved lazily as `defaultBuildRunner`.
+ * Both runners share these baseline protections:
  *   • NO hub secrets in the env — only PATH + a build-scoped HOME/TMPDIR/
  *     PARACHUTE_HOME (the daemon's real env, incl. any operator/hub token, is
  *     never inherited);
  *   • cwd pinned to the throwaway source checkout;
- *   • a wall-clock timeout that kills the process;
+ *   • a wall-clock timeout that kills the whole process GROUP (a build-spawned
+ *     grandchild can't be orphaned — see `spawnBoundedProcess`);
  *   • bounded captured output;
  *   • never elevated (runs as whatever user surface-host runs as).
- * What it does NOT do: kernel-level filesystem/network confinement. Residuals,
- * all bounded by "the pusher is operator-authorized" and all closed by Option B:
+ *
+ * Option A (`constrainedSubprocessRunner`, the pre-0c default, now an opt-in
+ * fallback) stops there — no kernel FS/network confinement. Its residuals, all
+ * bounded by "the pusher is operator-authorized" and all CLOSED by Option B:
  *   • CONFIDENTIALITY — a hostile build can READ files this user can read via
  *     ABSOLUTE paths (env redirection doesn't stop a hardcoded path), incl.
- *     on-disk credentials;
+ *     on-disk credentials (the vault read cred under `~/.parachute/**`);
  *   • INTEGRITY — it can likewise WRITE via absolute paths, e.g. clobber a
  *     sibling served bundle under the real `uis/` (persistence);
- *   • RESOURCES — the build tree / TMPDIR are not disk-quota'd (only the 64 KiB
- *     captured-output cap + the process-group wall-clock timeout bound it);
- *     egress is open.
- * (PROCESS containment IS handled in Option A: the timeout kills the whole
- * process GROUP, so a build-spawned grandchild can't be orphaned — see
- * `constrainedSubprocessRunner`.)
- * The hardening path closes the rest: swap in a kernel sandbox runner
- * (Seatbelt / bubblewrap, e.g. `@anthropic-ai/sandbox-runtime`) that confines
- * the filesystem to the build dir + restricts egress + contains the process
- * tree. The `BuildRunner` seam exists precisely so that swap is a one-function
- * change with no callers to touch.
+ *   • RESOURCES — egress is open (arbitrary exfil).
+ *
+ * Option B closes all three: reads are confined (the home tree + the real
+ * `$PARACHUTE_HOME` are denied, only the build dir + build-HOME + the toolchain
+ * are re-allowed → the vault cred / operator token / sibling surfaces are
+ * unreadable), writes are confined to the throwaway build dir (no clobbering a
+ * sibling bundle), and egress is restricted to the npm registry (no arbitrary
+ * exfil). This is the HARD GATE before Phase 2 (non-operator writers), design
+ * 2026-06-30-surface-git-transport.md §7 + "Decisions locked" #4. The
+ * `BuildRunner` seam is what made the swap a contained change — A is still
+ * reachable (tests inject it; operators opt in when the kernel sandbox is
+ * unavailable — see build-sandbox.ts).
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -70,6 +76,7 @@ export class GitDeployError extends Error {
     | "no_build_output"
     | "build_failed"
     | "build_timeout"
+    | "sandbox_unavailable"
     | "bad_meta";
   readonly detail?: string;
   constructor(message: string, code: GitDeployError["code"], detail?: string) {
@@ -202,20 +209,24 @@ const MAX_BUILD_OUTPUT_BYTES = 64 * 1024;
 export const DEFAULT_BUILD_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Option A — constrained subprocess. Non-privileged, minimal env, cwd-pinned,
- * PROCESS-GROUP timeout-killed, bounded output. Does NOT provide kernel
- * FS/network confinement (see the file header). This is the Phase-0b default;
- * the seam lets a kernel-sandbox runner replace it (Phase 0c).
+ * The shared launch primitive — a bounded, process-group-killed subprocess.
+ * Non-privileged, cwd-pinned, PROCESS-GROUP timeout-killed, bounded output. Does
+ * NOT itself provide kernel FS/network confinement — it is the raw spawn both
+ * runners build on: Option A (`constrainedSubprocessRunner`) IS this primitive;
+ * Option B (`build-sandbox.ts`) wraps the argv in a Seatbelt/bubblewrap prefix,
+ * then hands the wrapped argv here so the kill/timeout/output-bounding is
+ * identical across both.
  *
  * `detached: true` makes the child a new process-group leader (pgid = its pid),
  * so the wall-clock timeout `SIGKILL`s the WHOLE group (`process.kill(-pid)`) —
- * a grandchild the build spawned (a shell, a watcher) is killed too, not
- * orphaned. Termination is bounded on `proc.exited`, NOT on stream EOF: after
- * the kill the stream drains get a short grace and are abandoned, so a lingering
- * pipe holder can never hang the runner past `timeoutMs + grace`.
+ * a grandchild the build spawned (a shell, a watcher, the sandbox wrapper's
+ * child) is killed too, not orphaned. Termination is bounded on `proc.exited`,
+ * NOT on stream EOF: after the kill the stream drains get a short grace and are
+ * abandoned, so a lingering pipe holder can never hang the runner past
+ * `timeoutMs + grace`.
  */
 const POST_KILL_DRAIN_GRACE_MS = 2000;
-export const constrainedSubprocessRunner: BuildRunner = async ({ argv, cwd, env, timeoutMs }) => {
+export const spawnBoundedProcess: BuildRunner = async ({ argv, cwd, env, timeoutMs }) => {
   // `detached` isn't in Bun's SpawnOptions type yet but is honored at runtime
   // (new session/process group) — verified against bun 1.3.x.
   const proc = Bun.spawn(argv, {
@@ -260,6 +271,16 @@ export const constrainedSubprocessRunner: BuildRunner = async ({ argv, cwd, env,
   }
 };
 
+/**
+ * Option A — the constrained subprocess runner (the pre-0c default; now the
+ * opt-in fallback the kernel sandbox degrades to when the operator explicitly
+ * allows an unsandboxed build). Behaviourally identical to
+ * {@link spawnBoundedProcess}: it runs the argv directly with no Seatbelt/
+ * bubblewrap wrapper, so it provides NO kernel FS/network confinement — see the
+ * file-header TRUST BOUNDARY for the residuals Option B closes.
+ */
+export const constrainedSubprocessRunner: BuildRunner = spawnBoundedProcess;
+
 async function readBounded(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
@@ -300,7 +321,13 @@ export type BuildSurfaceOpts = {
   name: string;
   /** Fallback scopes when the source ships no meta.json (daemon config). */
   defaultScopes?: readonly string[];
-  /** Override the build executor (the sandbox seam). Defaults to Option A. */
+  /**
+   * Override the build executor (the sandbox seam). Defaults to Option B — the
+   * kernel sandbox runner (`defaultBuildRunner` in build-sandbox.ts), resolved
+   * lazily so this module carries no static dependency on the sandbox engine
+   * (and the prebuilt-dist path never loads it). Tests inject a stub; an
+   * operator who has opted into unsandboxed builds gets Option A via that path.
+   */
   runner?: BuildRunner;
   /** Override the build timeout. */
   timeoutMs?: number;
@@ -341,7 +368,6 @@ export async function buildSurface(opts: BuildSurfaceOpts): Promise<BuildSurface
   if (!SURFACE_NAME_RE.test(opts.name)) {
     throw new GitDeployError(`surface name "${opts.name}" is not servable`, "bad_name");
   }
-  const runner = opts.runner ?? constrainedSubprocessRunner;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS;
   const src = opts.sourceDir;
 
@@ -350,6 +376,12 @@ export async function buildSurface(opts: BuildSurfaceOpts): Promise<BuildSurface
 
   let built = false;
   if (hasBuildScript) {
+    // Resolve the runner ONLY when a build actually runs. Default = Option B (the
+    // kernel sandbox), dynamically imported so git-deploy.ts stays free of a
+    // static import cycle with build-sandbox.ts (which imports this module's
+    // BuildRunner type + spawn primitive) and so a prebuilt-dist push never even
+    // loads the sandbox engine.
+    const runner = opts.runner ?? (await import("./build-sandbox.ts")).defaultBuildRunner;
     // Build-scoped HOME/TMPDIR: contains bun/npm caches AND blunts any
     // $HOME/$PARACHUTE_HOME-relative read from the build (an absolute-path read
     // still escapes — see the file header TRUST BOUNDARY).

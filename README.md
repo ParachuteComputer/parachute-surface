@@ -81,6 +81,14 @@ PARACHUTE_APP_URL     Override the daemon URL (default http://127.0.0.1:1946).
 PARACHUTE_HUB_TOKEN   Operator bearer for admin-endpoint auth.
                       Falls back to ~/.parachute/operator.token.
 PARACHUTE_HOME        Ecosystem root (default ~/.parachute). State lands at $PARACHUTE_HOME/surface/.
+
+PARACHUTE_SURFACE_BUILD_ALLOW_UNSANDBOXED
+                      Escape hatch for git-pushed builds. A pushed surface's source
+                      is COMPILED inside a kernel sandbox (Seatbelt/bubblewrap). If
+                      that sandbox is unavailable on the host the build is REFUSED
+                      (fail-closed). Set to "1" to allow an UNSANDBOXED build instead
+                      — only on a trusted, operator-only box (it can read absolute-
+                      path files this user can read and reach any host).
 ```
 
 ## State on disk — `~/.parachute/surface/`
