@@ -94,18 +94,12 @@ export function resolveUisDir(env: Record<string, string | undefined> = process.
   return path.join(parachuteHome, "surface", "uis");
 }
 
-/**
- * Resolve `$PARACHUTE_HOME/surface/src/` — where the Surface Git Transport
- * clones a pushed surface's SOURCE before building it (Phase 0b). Distinct from
- * `uis/` (the served bundles): source checkouts are throwaway build inputs, one
- * `src/<name>/` per surface, replaced on every push.
- */
-export function resolveSurfaceSrcDir(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "surface", "src");
-}
+// NOTE: the Surface Git Transport no longer clones pushed source under
+// `$PARACHUTE_HOME/surface/src/` — that path sat inside the build sandbox's
+// home-tree deny, so `bun run build` couldn't read its own cwd's ancestors and
+// every build-script push failed with `CouldntReadCurrentDirectory`. The source
+// now clones into a private per-push throwaway under `os.tmpdir()` (outside the
+// deny). See git-deploy.ts `makeBuildSrcDir`.
 
 /** Defaults baked into the schema. Kept in sync with `.parachute/config/schema`. */
 export const DEFAULTS: AppConfig = {

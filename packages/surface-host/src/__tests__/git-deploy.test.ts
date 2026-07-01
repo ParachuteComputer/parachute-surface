@@ -15,13 +15,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { type AdminHandlerOpts, type EnforceScopeFn, routeAdmin } from "../admin-routes.ts";
+import { homeTreeDenyRoot } from "../build-sandbox.ts";
 import {
   type BuildRunner,
   GitDeployError,
   type GitSpawnFn,
   buildSurface,
   constrainedSubprocessRunner,
+  makeBuildSrcDir,
   pullSurfaceSource,
 } from "../git-deploy.ts";
 import type { AppState } from "../http-server.ts";
@@ -29,6 +32,11 @@ import { scanUis } from "../ui-registry.ts";
 
 const silent = { log: () => {}, warn: () => {}, error: () => {} };
 const allowAdmin: EnforceScopeFn = async () => ({ scopes: ["surface:admin"] });
+
+/** Whether this host can genuinely kernel-sandbox — gates the live-runner tests
+ * (green-skip on an incapable CI runner; the real boundary runs on a capable box). */
+const CAN_SANDBOX =
+  SandboxManager.isSupportedPlatform() && SandboxManager.checkDependencies().errors.length === 0;
 
 let tmpDir: string;
 let uisDir: string;
@@ -183,6 +191,73 @@ describe("pullSurfaceSource", () => {
         logger: silent,
       }),
     ).rejects.toMatchObject({ code: "pull_failed" });
+  });
+});
+
+// ─── makeBuildSrcDir ──────────────────────────────────────────────────────────
+
+describe("makeBuildSrcDir", () => {
+  test("resolves a private throwaway OUTSIDE the home tree (the build-cwd fix)", () => {
+    const { parentDir, sourceDir } = makeBuildSrcDir("brain");
+    try {
+      // The clone/build dir must NOT sit under EITHER platform's home-tree deny
+      // root — that ancestor-under-deny is exactly what broke `bun run build`
+      // (CouldntReadCurrentDirectory). It must live under os.tmpdir() instead.
+      for (const root of [homeTreeDenyRoot("darwin"), homeTreeDenyRoot("linux")]) {
+        expect(sourceDir.startsWith(`${root}/`)).toBe(false);
+        expect(parentDir.startsWith(`${root}/`)).toBe(false);
+      }
+      expect(sourceDir.startsWith(os.tmpdir())).toBe(true);
+      // `<parent>/<name>` shape; the parent (a real 0700 mkdtemp) is what the
+      // caller removes; it carries the surface name for legibility.
+      expect(path.dirname(sourceDir)).toBe(parentDir);
+      expect(path.basename(sourceDir)).toBe("brain");
+      expect(path.basename(parentDir)).toContain("parachute-surface-src-brain-");
+      expect(fs.existsSync(parentDir)).toBe(true);
+    } finally {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    }
+  });
+
+  test("each call is a fresh, unique dir (no shared predictable path)", () => {
+    const a = makeBuildSrcDir("brain");
+    const b = makeBuildSrcDir("brain");
+    try {
+      expect(a.parentDir).not.toBe(b.parentDir);
+    } finally {
+      fs.rmSync(a.parentDir, { recursive: true, force: true });
+      fs.rmSync(b.parentDir, { recursive: true, force: true });
+    }
+  });
+
+  test("FAILS LOUD (bad_build_workspace) when the temp base is under the home tree", () => {
+    // Model a box where $TMPDIR points inside the home tree — the workspace would
+    // land back under the sandbox deny → silent CouldntReadCurrentDirectory. The
+    // guard must throw instead, and clean up the dir it created (no leak).
+    const badBase = fs.mkdtempSync(path.join(os.homedir(), ".psrf-badbase-"));
+    try {
+      let err: unknown;
+      try {
+        makeBuildSrcDir("brain", badBase);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(GitDeployError);
+      expect((err as GitDeployError).code).toBe("bad_build_workspace");
+      // The throwaway it created under the bad base was removed before throwing.
+      expect(fs.readdirSync(badBase)).toHaveLength(0);
+    } finally {
+      fs.rmSync(badBase, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts a temp base under os.tmpdir() (outside the deny)", () => {
+    const { parentDir } = makeBuildSrcDir("brain", os.tmpdir());
+    try {
+      expect(fs.existsSync(parentDir)).toBe(true);
+    } finally {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -447,4 +522,59 @@ describe("POST /surface/api/git-pushed", () => {
     // Not served.
     expect(state.registeredUis.some((u) => u.meta.name === "brain")).toBe(false);
   });
+
+  // REGRESSION (the production shape that shipped the bug): the REAL notify path
+  // — no injected srcDir (so the route picks its own build-src dir via
+  // makeBuildSrcDir) and no injected buildRunner (so the DEFAULT Option-B kernel
+  // sandbox actually runs) — must BUILD a build-script source + serve it. Before
+  // the fix the route cloned under `$PARACHUTE_HOME/surface/src/<name>` (the home
+  // tree, which the sandbox denies), so `bun run build` died with
+  // `CouldntReadCurrentDirectory` → build_failed → 422. Skips on a host that
+  // can't sandbox (green CI on an incapable runner). Gated because it drives the
+  // real Seatbelt/bubblewrap engine.
+  (CAN_SANDBOX ? test : test.skip)(
+    "REAL Option-B runner builds a pushed build-script source (regression: build cwd readable)",
+    async () => {
+      const state = makeState();
+      // A dep-less package.json (offline `bun install --ignore-scripts` no-op) +
+      // a pure-shell build that emits dist/index.html — same shape as the live
+      // happy-path, but driven through the whole git-pushed route.
+      const { fn } = fakeClone({
+        "package.json": JSON.stringify({
+          name: "brain",
+          scripts: { build: "mkdir -p dist && cp index.html dist/index.html" },
+        }),
+        "index.html": "<h1>built through the route</h1>",
+      });
+      // NOTE: deliberately NO srcDir and NO buildRunner override — this is the
+      // whole point (exercise the production location selection + real sandbox).
+      const result = routeAdmin(
+        pushReq({
+          surface: "brain",
+          clone_url: "http://127.0.0.1:1939/git/brain",
+          pull_token: "t",
+        }),
+        {
+          state,
+          uisDir,
+          manifestPath,
+          logger: silent,
+          skipSelfRegisterRefresh: true,
+          enforceScopeFn: allowAdmin,
+          gitSpawnFn: fn,
+        },
+      );
+      if (!result.handled) throw new Error("routeAdmin did not handle git-pushed");
+      const res = await result.response;
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { ok: boolean; served: boolean; path: string };
+      expect(json.ok).toBe(true);
+      expect(json.served).toBe(true);
+      expect(fs.readFileSync(path.join(uisDir, "brain", "dist", "index.html"), "utf8")).toContain(
+        "built through the route",
+      );
+      expect(state.registeredUis.some((u) => u.meta.name === "brain")).toBe(true);
+    },
+    120_000,
+  );
 });

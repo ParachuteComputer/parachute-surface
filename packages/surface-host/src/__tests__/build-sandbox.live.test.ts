@@ -32,7 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { makeKernelSandboxRunner } from "../build-sandbox.ts";
-import { buildSurface } from "../git-deploy.ts";
+import { buildSurface, makeBuildSrcDir } from "../git-deploy.ts";
 
 const CAN_SANDBOX =
   SandboxManager.isSupportedPlatform() && SandboxManager.checkDependencies().errors.length === 0;
@@ -226,6 +226,63 @@ d("LIVE kernel sandbox — happy path through the DEFAULT (Option B) runner", ()
       expect(out.meta.path).toBe("/surface/brain");
     } finally {
       rmSync(srcBase, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
+/**
+ * REGRESSION — the build-CWD location bug (the fix in `makeBuildSrcDir`). The
+ * SAME source + SAME default Option-B runner builds or fails PURELY based on where
+ * the source lives: UNDER the home tree the build sandbox's home-tree deny masks
+ * the build cwd's ancestors and `bun run build` dies with
+ * `CouldntReadCurrentDirectory`; at the production build-src location
+ * (`makeBuildSrcDir`, under os.tmpdir()) the ancestors are readable and the build
+ * succeeds — while the crown-jewel deny is unchanged (proven by the confidentiality
+ * tests above, which still pass with the source in temp). The prior tests built
+ * from an ad-hoc temp dir and so could never have caught the regression; this pair
+ * builds from the exact location production selects.
+ */
+d("LIVE kernel sandbox — build-cwd regression (source location)", () => {
+  const logger = { log() {}, warn() {}, error() {} };
+  const srcFiles = {
+    "package.json": JSON.stringify({
+      name: "brain",
+      scripts: { build: "mkdir -p dist && cp index.html dist/index.html" },
+    }),
+    "index.html": "<h1>cwd-regression</h1>",
+  };
+  function writeSrc(dir: string): void {
+    mkdirSync(dir, { recursive: true });
+    for (const [rel, content] of Object.entries(srcFiles)) writeFileSync(join(dir, rel), content);
+  }
+
+  test("a source UNDER the home tree FAILS to read its own cwd (the shipped bug)", async () => {
+    // Model the old `$PARACHUTE_HOME/surface/src/<name>` location: a checkout under
+    // the operator's home dir — inside the sandbox's home-tree deny.
+    const parent = mkdtempSync(join(homedir(), ".psrf-cwd-regression-"));
+    const src = join(parent, "brain");
+    writeSrc(src);
+    try {
+      // `bun install` touches only the (re-allowed) leaf and passes; `bun run build`
+      // walks UP to a denied ancestor → CouldntReadCurrentDirectory → build_failed.
+      await expect(buildSurface({ sourceDir: src, name: "brain", logger })).rejects.toMatchObject({
+        code: "build_failed",
+      });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  test("a source at makeBuildSrcDir (production location, outside the deny) BUILDS", async () => {
+    const { parentDir, sourceDir } = makeBuildSrcDir("brain");
+    writeSrc(sourceDir);
+    try {
+      const out = await buildSurface({ sourceDir, name: "brain", logger });
+      expect(out.built).toBe(true);
+      expect(existsSync(join(out.distDir, "index.html"))).toBe(true);
+      expect(await Bun.file(join(out.distDir, "index.html")).text()).toContain("cwd-regression");
+    } finally {
+      rmSync(parentDir, { recursive: true, force: true });
     }
   }, 120_000);
 });
