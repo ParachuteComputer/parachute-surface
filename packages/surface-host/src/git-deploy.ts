@@ -86,6 +86,44 @@ export class GitDeployError extends Error {
   }
 }
 
+// ─── where the pushed source lands ───────────────────────────────────────────
+
+export type BuildSrcDir = {
+  /** The private throwaway PARENT — what the caller removes after the build. */
+  parentDir: string;
+  /** `<parent>/<name>` — the clone destination AND the build cwd. */
+  sourceDir: string;
+};
+
+/**
+ * Resolve the directory a pushed surface's SOURCE is cloned into before the
+ * sandboxed build — a PRIVATE, per-push throwaway OUTSIDE the operator's home tree.
+ *
+ * WHY NOT under `$PARACHUTE_HOME/surface/src/<name>` (the obvious spot, and where
+ * this used to clone): the Option-B build sandbox (build-sandbox.ts) DENIES reads
+ * on the whole home tree (`/Users` on macOS, `/home` on Linux) plus the real
+ * `$PARACHUTE_HOME`, re-allowing only the leaf build dir. But `bun run <script>`
+ * reads the build dir's ANCESTORS (package.json / workspace-root / bunfig discovery
+ * walks UP from cwd), and under `$PARACHUTE_HOME/surface/src/<name>` those ancestors
+ * sat under the deny with no re-allow — so bun could not read its own cwd and every
+ * build-script push died with `CouldntReadCurrentDirectory` (`bun install` / `pwd` /
+ * `ls` touch only the re-allowed leaf, so they passed; only the ancestor-walking
+ * `bun run` failed). Cloning under `os.tmpdir()` keeps the ancestors readable
+ * (system temp is outside the deny) while the crown-jewel deny stays FULLY intact:
+ * `~/.parachute/**` (the vault read cred, the operator token) and every sibling
+ * surface are still unreadable — the source is simply no longer under the denied
+ * tree, so nothing else moved out from behind the boundary.
+ *
+ * The parent is a `mkdtemp` (mode 0700) so a world-writable `/tmp` can't be
+ * pre-created as a symlink under us; a per-push fresh dir means no shared,
+ * predictable path. The caller removes {@link BuildSrcDir.parentDir} after each
+ * build (success AND failure). `parent` overrides the temp base (tests).
+ */
+export function makeBuildSrcDir(name: string, parent?: string): BuildSrcDir {
+  const parentDir = mkTempDir(parent, `parachute-surface-src-${name}-`);
+  return { parentDir, sourceDir: path.join(parentDir, name) };
+}
+
 // ─── git pull ────────────────────────────────────────────────────────────────
 
 /**

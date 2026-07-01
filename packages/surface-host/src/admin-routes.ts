@@ -55,7 +55,7 @@ import * as path from "node:path";
 
 import { SCOPE_ADMIN, SCOPE_READ, enforceScope as defaultEnforceScope } from "./auth.ts";
 import type { AppConfig } from "./config.ts";
-import { resolveConfigPath, resolveSurfaceSrcDir, resolveUisDir } from "./config.ts";
+import { resolveConfigPath, resolveUisDir } from "./config.ts";
 import { DEFAULT_RENEW_WITHIN_MS } from "./credential-renewal.ts";
 import {
   CONNECTION_ID_RE,
@@ -77,7 +77,7 @@ import {
   unregisterOauthClient,
   writeOauthClientFile,
 } from "./dcr.ts";
-import { GitDeployError, buildSurface, pullSurfaceSource } from "./git-deploy.ts";
+import { GitDeployError, buildSurface, makeBuildSrcDir, pullSurfaceSource } from "./git-deploy.ts";
 import {
   GithubResolveError,
   type ResolvedGithubRelease,
@@ -164,9 +164,12 @@ export type AdminHandlerOpts = {
    */
   configPath?: string;
   /**
-   * Base dir for Surface Git Transport source checkouts (Phase 0b). Defaults
-   * to `resolveSurfaceSrcDir()` — `$PARACHUTE_HOME/surface/src/`. Tests inject
-   * a tmpdir.
+   * Base dir for Surface Git Transport source checkouts (Phase 0b) — the clone
+   * lands at `<srcDir>/<name>`. When omitted (production), each push clones into
+   * a PRIVATE per-push throwaway under `os.tmpdir()` via `makeBuildSrcDir()`,
+   * which MUST stay OUTSIDE the home tree so the Option-B build sandbox can read
+   * the build cwd's ancestors (see git-deploy.ts `makeBuildSrcDir`). Tests inject
+   * a tmpdir for a deterministic location.
    */
   srcDir?: string;
   /**
@@ -713,119 +716,138 @@ async function handleGitPushed(req: Request, opts: AdminHandlerOpts): Promise<Re
   const pullToken = body.pull_token;
 
   const uisDir = opts.uisDir ?? resolveUisDir();
-  const srcBase = opts.srcDir ?? resolveSurfaceSrcDir();
-  const sourceDir = path.join(srcBase, name);
+  // Clone the pushed SOURCE to a PRIVATE throwaway dir OUTSIDE the home tree: the
+  // Option-B build sandbox denies the whole home tree + $PARACHUTE_HOME and
+  // re-allows only the build dir, but `bun run build` reads the build cwd's
+  // ANCESTORS — a source under $PARACHUTE_HOME/surface/src/<name> made bun unable
+  // to read its own cwd (`CouldntReadCurrentDirectory`), so every build-script
+  // push failed. os.tmpdir() keeps the ancestors readable while the crown-jewel
+  // deny (~/.parachute, sibling surfaces) stays fully intact — the source is
+  // simply no longer under it. See git-deploy.ts `makeBuildSrcDir`.
+  const { parentDir: srcParent, sourceDir } = opts.srcDir
+    ? { parentDir: opts.srcDir, sourceDir: path.join(opts.srcDir, name) }
+    : makeBuildSrcDir(name);
+  // Remove the throwaway after EVERY outcome (success, refusal, failure). When we
+  // minted the parent, drop the whole parent; when a test injected `srcDir`, drop
+  // only the per-surface checkout we created under it (the test owns the base).
+  const cleanupTarget = opts.srcDir ? sourceDir : srcParent;
 
-  // ── Pull + build happen OUTSIDE uis/ — a failure here leaves the served
-  //    bundle untouched (fail-closed). Only on success do we swap it in.
-  let distDir: string;
-  let meta: UiMeta;
   try {
-    await pullSurfaceSource({
-      cloneUrl,
-      token: pullToken,
-      destDir: sourceDir,
-      ...(opts.gitSpawnFn ? { spawnFn: opts.gitSpawnFn } : {}),
-      ...(opts.logger ? { logger: opts.logger } : {}),
-    });
-    const result = await buildSurface({
-      sourceDir,
-      name,
-      defaultScopes: opts.state.config.default_scope_required,
-      ...(opts.buildRunner ? { runner: opts.buildRunner } : {}),
-      ...(opts.buildTimeoutMs !== undefined ? { timeoutMs: opts.buildTimeoutMs } : {}),
-      ...(opts.buildHomeParent ? { buildHomeParent: opts.buildHomeParent } : {}),
-      ...(opts.logger ? { logger: opts.logger } : {}),
-    });
-    distDir = result.distDir;
-    meta = result.meta;
-  } catch (e) {
-    // Best-effort cleanup of the throwaway source checkout; keep serving last-good.
+    // ── Pull + build happen OUTSIDE uis/ — a failure here leaves the served
+    //    bundle untouched (fail-closed). Only on success do we swap it in.
+    let distDir: string;
+    let meta: UiMeta;
     try {
-      rmSync(sourceDir, { recursive: true, force: true });
+      await pullSurfaceSource({
+        cloneUrl,
+        token: pullToken,
+        destDir: sourceDir,
+        ...(opts.gitSpawnFn ? { spawnFn: opts.gitSpawnFn } : {}),
+        ...(opts.logger ? { logger: opts.logger } : {}),
+      });
+      const result = await buildSurface({
+        sourceDir,
+        name,
+        defaultScopes: opts.state.config.default_scope_required,
+        ...(opts.buildRunner ? { runner: opts.buildRunner } : {}),
+        ...(opts.buildTimeoutMs !== undefined ? { timeoutMs: opts.buildTimeoutMs } : {}),
+        ...(opts.buildHomeParent ? { buildHomeParent: opts.buildHomeParent } : {}),
+        ...(opts.logger ? { logger: opts.logger } : {}),
+      });
+      distDir = result.distDir;
+      meta = result.meta;
+    } catch (e) {
+      // Keep serving last-good; the throwaway source is removed by the finally.
+      if (e instanceof GitDeployError) {
+        const status = e.code === "pull_failed" ? 502 : e.code === "build_timeout" ? 504 : 422;
+        opts.logger?.warn(`[app-admin] git-pushed deploy failed for "${name}": ${e.code}`);
+        return Response.json(
+          {
+            error: "deploy_failed",
+            code: e.code,
+            message: e.message,
+            ...(e.detail ? { detail: e.detail } : {}),
+          },
+          { status },
+        );
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      opts.logger?.warn(`[app-admin] git-pushed deploy errored for "${name}": ${msg}`);
+      return Response.json({ error: "deploy_error", message: msg }, { status: 500 });
+    }
+
+    // Phase-0b safety boundary: a backed surface's `server` block would run
+    // attacker-supplied code IN-PROCESS at serve-time — outside the build
+    // sandbox. Refuse to serve one via git push (static surfaces only for now);
+    // the throwaway source is discarded by the finally, never mounted.
+    if (meta.server) {
+      return Response.json(
+        {
+          error: "unsupported",
+          message:
+            "backed surfaces (meta.json `server` block) are not yet supported via git push — static surfaces only in Phase 0b",
+        },
+        { status: 422 },
+      );
+    }
+
+    // ── Success: swap the built bundle into uis/<name>/ + serve it. Mirrors the
+    //    add/reload tail: copy dist, write meta, re-scan, swap state, refresh
+    //    services.json. The copy lifts dist/ OUT of the throwaway source before
+    //    the finally removes it.
+    try {
+      const targetDir = path.join(uisDir, name);
+      mkdirSync(targetDir, { recursive: true });
+      copyDir(distDir, path.join(targetDir, "dist"));
+      writeFileSync(
+        path.join(targetDir, "meta.json"),
+        `${JSON.stringify(gitPushedMeta(meta), null, 2)}\n`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      opts.logger?.warn(`[app-admin] git-pushed install failed for "${name}": ${msg}`);
+      return Response.json({ error: "install_failed", message: msg }, { status: 500 });
+    }
+
+    const scan = scanUis({ uisDir, logger: opts.logger });
+    opts.state.registeredUis = scan.registered;
+    opts.state.skippedUis = scan.skipped.map((s: SkippedUi) => ({
+      dirName: s.dirName,
+      status: s.status,
+      reason: s.reason,
+    }));
+
+    if (!opts.skipSelfRegisterRefresh) {
+      try {
+        selfRegister({
+          boundPort: 0, // ignored — existing entry's port preserves
+          installDir: resolveProjectRoot(),
+          manifestPath: opts.manifestPath,
+          extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
+          logger: opts.logger,
+        });
+      } catch (e) {
+        opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
+      }
+    }
+
+    const served = opts.state.registeredUis.find((u) => u.meta.name === name);
+    opts.logger?.log(`[app-admin] git-pushed: built + serving "${name}" at ${meta.path}`);
+    return Response.json({
+      ok: true,
+      surface: name,
+      served: served !== undefined,
+      path: meta.path,
+    });
+  } finally {
+    // Fresh clone per push — never leave the throwaway source on disk (it lived
+    // outside uis/, so the served bundle is unaffected).
+    try {
+      rmSync(cleanupTarget, { recursive: true, force: true });
     } catch {
       // ignore
     }
-    if (e instanceof GitDeployError) {
-      const status = e.code === "pull_failed" ? 502 : e.code === "build_timeout" ? 504 : 422;
-      opts.logger?.warn(`[app-admin] git-pushed deploy failed for "${name}": ${e.code}`);
-      return Response.json(
-        {
-          error: "deploy_failed",
-          code: e.code,
-          message: e.message,
-          ...(e.detail ? { detail: e.detail } : {}),
-        },
-        { status },
-      );
-    }
-    const msg = e instanceof Error ? e.message : String(e);
-    opts.logger?.warn(`[app-admin] git-pushed deploy errored for "${name}": ${msg}`);
-    return Response.json({ error: "deploy_error", message: msg }, { status: 500 });
   }
-
-  // Phase-0b safety boundary: a backed surface's `server` block would run
-  // attacker-supplied code IN-PROCESS at serve-time — outside the build
-  // sandbox. Refuse to serve one via git push (static surfaces only for now);
-  // the pushed source stays cloned but is never mounted.
-  if (meta.server) {
-    return Response.json(
-      {
-        error: "unsupported",
-        message:
-          "backed surfaces (meta.json `server` block) are not yet supported via git push — static surfaces only in Phase 0b",
-      },
-      { status: 422 },
-    );
-  }
-
-  // ── Success: swap the built bundle into uis/<name>/ + serve it. Mirrors the
-  //    add/reload tail: copy dist, write meta, re-scan, swap state, refresh
-  //    services.json.
-  try {
-    const targetDir = path.join(uisDir, name);
-    mkdirSync(targetDir, { recursive: true });
-    copyDir(distDir, path.join(targetDir, "dist"));
-    writeFileSync(
-      path.join(targetDir, "meta.json"),
-      `${JSON.stringify(gitPushedMeta(meta), null, 2)}\n`,
-    );
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    opts.logger?.warn(`[app-admin] git-pushed install failed for "${name}": ${msg}`);
-    return Response.json({ error: "install_failed", message: msg }, { status: 500 });
-  }
-
-  const scan = scanUis({ uisDir, logger: opts.logger });
-  opts.state.registeredUis = scan.registered;
-  opts.state.skippedUis = scan.skipped.map((s: SkippedUi) => ({
-    dirName: s.dirName,
-    status: s.status,
-    reason: s.reason,
-  }));
-
-  if (!opts.skipSelfRegisterRefresh) {
-    try {
-      selfRegister({
-        boundPort: 0, // ignored — existing entry's port preserves
-        installDir: resolveProjectRoot(),
-        manifestPath: opts.manifestPath,
-        extraFields: buildSelfRegisterExtraFields(opts.state.registeredUis, opts.state.backends),
-        logger: opts.logger,
-      });
-    } catch (e) {
-      opts.logger?.warn(`[app-admin] services.json refresh failed: ${(e as Error).message}`);
-    }
-  }
-
-  const served = opts.state.registeredUis.find((u) => u.meta.name === name);
-  opts.logger?.log(`[app-admin] git-pushed: built + serving "${name}" at ${meta.path}`);
-  return Response.json({
-    ok: true,
-    surface: name,
-    served: served !== undefined,
-    path: meta.path,
-  });
 }
 
 /** Projection of a UiMeta written to `uis/<name>/meta.json` (git-pushed path). */
