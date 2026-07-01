@@ -229,6 +229,36 @@ describe("makeBuildSrcDir", () => {
       fs.rmSync(b.parentDir, { recursive: true, force: true });
     }
   });
+
+  test("FAILS LOUD (bad_build_workspace) when the temp base is under the home tree", () => {
+    // Model a box where $TMPDIR points inside the home tree — the workspace would
+    // land back under the sandbox deny → silent CouldntReadCurrentDirectory. The
+    // guard must throw instead, and clean up the dir it created (no leak).
+    const badBase = fs.mkdtempSync(path.join(os.homedir(), ".psrf-badbase-"));
+    try {
+      let err: unknown;
+      try {
+        makeBuildSrcDir("brain", badBase);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(GitDeployError);
+      expect((err as GitDeployError).code).toBe("bad_build_workspace");
+      // The throwaway it created under the bad base was removed before throwing.
+      expect(fs.readdirSync(badBase)).toHaveLength(0);
+    } finally {
+      fs.rmSync(badBase, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts a temp base under os.tmpdir() (outside the deny)", () => {
+    const { parentDir } = makeBuildSrcDir("brain", os.tmpdir());
+    try {
+      expect(fs.existsSync(parentDir)).toBe(true);
+    } finally {
+      fs.rmSync(parentDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ─── buildSurface ─────────────────────────────────────────────────────────────

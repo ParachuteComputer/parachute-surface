@@ -724,9 +724,30 @@ async function handleGitPushed(req: Request, opts: AdminHandlerOpts): Promise<Re
   // push failed. os.tmpdir() keeps the ancestors readable while the crown-jewel
   // deny (~/.parachute, sibling surfaces) stays fully intact — the source is
   // simply no longer under it. See git-deploy.ts `makeBuildSrcDir`.
-  const { parentDir: srcParent, sourceDir } = opts.srcDir
-    ? { parentDir: opts.srcDir, sourceDir: path.join(opts.srcDir, name) }
-    : makeBuildSrcDir(name);
+  let srcParent: string;
+  let sourceDir: string;
+  try {
+    ({ parentDir: srcParent, sourceDir } = opts.srcDir
+      ? { parentDir: opts.srcDir, sourceDir: path.join(opts.srcDir, name) }
+      : makeBuildSrcDir(name));
+  } catch (e) {
+    // makeBuildSrcDir fails LOUD (bad_build_workspace) if $TMPDIR would land the
+    // workspace under the sandbox deny; it cleans up its own dir before throwing.
+    // A host-config error, so 500 — nothing was served, last-good keeps serving.
+    if (e instanceof GitDeployError) {
+      opts.logger?.warn(`[app-admin] git-pushed workspace unusable for "${name}": ${e.code}`);
+      return Response.json(
+        {
+          error: "deploy_failed",
+          code: e.code,
+          message: e.message,
+          ...(e.detail ? { detail: e.detail } : {}),
+        },
+        { status: 500 },
+      );
+    }
+    throw e;
+  }
   // Remove the throwaway after EVERY outcome (success, refusal, failure). When we
   // minted the parent, drop the whole parent; when a test injected `srcDir`, drop
   // only the per-surface checkout we created under it (the test owns the base).

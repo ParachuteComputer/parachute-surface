@@ -53,7 +53,7 @@
  * unavailable — see build-sandbox.ts).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -77,6 +77,7 @@ export class GitDeployError extends Error {
     | "build_failed"
     | "build_timeout"
     | "sandbox_unavailable"
+    | "bad_build_workspace"
     | "bad_meta";
   readonly detail?: string;
   constructor(message: string, code: GitDeployError["code"], detail?: string) {
@@ -118,10 +119,58 @@ export type BuildSrcDir = {
  * pre-created as a symlink under us; a per-push fresh dir means no shared,
  * predictable path. The caller removes {@link BuildSrcDir.parentDir} after each
  * build (success AND failure). `parent` overrides the temp base (tests).
+ *
+ * FAIL-LOUD GUARD: `os.tmpdir()` honors `$TMPDIR`, so on a (pathological but
+ * possible) box where `$TMPDIR` points inside the home tree the workspace would
+ * land back UNDER the sandbox deny → silent regression to the
+ * `CouldntReadCurrentDirectory` bug, or worse, attacker-influenceable source
+ * sitting under the denied tree. So after `mkdtemp` we canonicalize the resolved
+ * parent and THROW (`bad_build_workspace`) if it's under the home-tree deny root
+ * or the real `$PARACHUTE_HOME` — fail-closed, with an actionable message.
  */
 export function makeBuildSrcDir(name: string, parent?: string): BuildSrcDir {
   const parentDir = mkTempDir(parent, `parachute-surface-src-${name}-`);
+  // Canonicalize (resolve symlinks — e.g. macOS `/tmp` → `/private/tmp`) and check
+  // against the SAME roots build-sandbox.ts denies, so a workspace can never land
+  // inside the deny. Both roots computed locally to avoid an import cycle
+  // (build-sandbox.ts imports this module).
+  const canonicalParent = canonicalizePath(parentDir);
+  const homeRoot = buildDenyHomeRoot();
+  const paraHome = canonicalizePath(
+    process.env.PARACHUTE_HOME ?? path.join(os.homedir(), ".parachute"),
+  );
+  if (isUnderRoot(canonicalParent, homeRoot) || isUnderRoot(canonicalParent, paraHome)) {
+    rmSync(parentDir, { recursive: true, force: true });
+    throw new GitDeployError(
+      `build workspace resolved under the sandbox deny root (${canonicalParent}) — set TMPDIR to a directory outside the home tree (${homeRoot}) and outside $PARACHUTE_HOME so the confined build can read its own cwd`,
+      "bad_build_workspace",
+    );
+  }
   return { parentDir, sourceDir: path.join(parentDir, name) };
+}
+
+/** The home-tree deny root, per platform. MUST stay in lockstep with
+ * build-sandbox.ts `homeTreeDenyRoot` — duplicated inline (not imported) because
+ * build-sandbox.ts imports THIS module, and an import back would cycle. */
+function buildDenyHomeRoot(): string {
+  return process.platform === "darwin" ? "/Users" : "/home";
+}
+
+/** Is `p` at or under `root`? Path-boundary aware (`/home` matches `/home/x` but
+ * not `/homework`). Mirrors build-sandbox.ts `isUnder`. */
+function isUnderRoot(p: string, root: string): boolean {
+  if (p === root) return true;
+  const withSep = root.endsWith("/") ? root : `${root}/`;
+  return p.startsWith(withSep);
+}
+
+/** realpath a path if it exists; else pass it through unchanged. */
+function canonicalizePath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 // ─── git pull ────────────────────────────────────────────────────────────────
