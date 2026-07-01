@@ -14,7 +14,7 @@
   "adminCapabilities": ["config"],
   "startCmd": ["parachute-surface", "serve"],
   "scopes": {
-    "defines": ["surface:read", "surface:admin"]
+    "defines": ["surface:read", "surface:write", "surface:admin"]
   },
   "credentials": [
     {

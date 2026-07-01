@@ -295,6 +295,38 @@ export function createPendingCredentialGate(deps: {
 }
 
 /**
+ * Resolve a vault READ credential usable for `#surface` discovery
+ * (surface-discovery.ts): a stored `vault:<vault>:read` credential for the
+ * discovery vault, in `ok` status and unexpired. Prefers the BROADEST (fewest
+ * `scoped_tags`) so it can actually see `#surface` notes — a credential
+ * tag-scoped away from `surface` would return nothing (discovery then just finds
+ * no surfaces). Returns null when no usable read credential exists, in which case
+ * the caller skips discovery (best-effort). Read-only by design: discovery never
+ * needs write, so we never reach for a write credential.
+ */
+export function resolveDiscoveryCredential(
+  vaultName: string,
+  opts: { dir?: string; now?: () => Date } = {},
+): StoredCredential | null {
+  const dir = opts.dir ?? resolveCredentialsDir();
+  const now = opts.now ?? (() => new Date());
+  const usable = listCredentials(dir).filter((c) => {
+    if (c.vault !== vaultName) return false;
+    if (!c.scope.endsWith(":read")) return false;
+    if (c.status !== "ok") return false;
+    const expires = Date.parse(c.expires_at);
+    if (Number.isFinite(expires) && expires <= now().getTime()) return false;
+    return true;
+  });
+  if (usable.length === 0) return null;
+  usable.sort(
+    (a, b) =>
+      a.scoped_tags.length - b.scoped_tags.length || a.connection_id.localeCompare(b.connection_id),
+  );
+  return usable[0] ?? null;
+}
+
+/**
  * The host-side tokenProvider for a surface's ScopedVaultClient (P2↔P3
  * seam). Reads the store FRESH per call (deliveries + renewals take effect
  * without a remount); throws operator-actionable errors on every

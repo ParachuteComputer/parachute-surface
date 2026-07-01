@@ -53,6 +53,30 @@ hub :1939  ──/surface/*──▶  parachute-surface :1946
 
 Surfaces reach vault data directly in the browser via hub OAuth (PKCE) — no vault token ever touches the host module for static surfaces. A *backed* surface (one that ships a `server` entry) is mounted in-process and gets a standing tag-scoped vault credential that Surface custodies (0600) and renews; the token never reaches a browser. See [`design/2026-06-10-surface-runtime-primitives.md`](./design/2026-06-10-surface-runtime-primitives.md).
 
+## Declaring a surface in the vault (`#surface`)
+
+A surface can be **declared in the vault and shipped by a `git push`** — the [Surface Git Transport](https://parachute.computer/design/2026-06-30-surface-git-transport/). The vault *declares*, the hub *authenticates + transports*, Surface *builds + serves*:
+
+1. **Declare.** Write a note tagged `#surface` (an agent via MCP, or a human). Its metadata declares the surface; the content is its identity (mirrors an agent's `#agent/thread`):
+
+   ```yaml
+   #surface  "Surfaces/gitcoin-brain"
+   metadata:
+     mount: /surface/gitcoin-brain     # → the served path; also fixes the name
+     mode: prod                        # dev | prod
+     source:
+       ref: main                       # optional pointer, informational
+     scopes: [vault:default:read]      # what the surface's backend may read
+   ```
+
+   The **name** is the one key the hub registry + git endpoint agree on. It's resolved from `metadata.name` → the `/surface/<name>` suffix of `mount` → the note's last path segment (first that matches the servable pattern `^[a-z][a-z0-9-]*$`).
+
+2. **Discover.** On boot Surface queries the vault for `tag:surface` (with its custodied read credential) and registers each declared surface with the hub (`POST /admin/surfaces`), which provisions a per-surface bare git repo. The surface exists — ready to receive a push — the moment its note does.
+
+3. **Push.** `git push <hub>/git/<name>` (authenticated by a hub-issued `surface:<name>:write` token). The hub notifies Surface, which pulls the source, **builds it in a kernel sandbox**, and serves the result at `/surface/<name>`. Git is the only transport; a GitHub mirror is a separate optional remote.
+
+Discovery is best-effort and boot-time in Phase 1 (a missing credential or unreachable vault just logs + skips). See the [design doc](https://parachute.computer/design/2026-06-30-surface-git-transport/) for the full model.
+
 ## CLI
 
 The `parachute-surface` verbs are a thin HTTP client over the running daemon's admin endpoints — `parachute-surface serve` must be running locally, and admin calls authenticate with the on-disk operator token (`~/.parachute/operator.token`, or `PARACHUTE_HUB_TOKEN`).

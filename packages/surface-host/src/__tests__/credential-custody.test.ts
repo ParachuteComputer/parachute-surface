@@ -24,6 +24,7 @@ import {
   listCredentials,
   readCredential,
   resolveCredentialForSurface,
+  resolveDiscoveryCredential,
 } from "../credential-store.ts";
 import { parseMeta } from "../meta-schema.ts";
 import type { RegisteredUi } from "../ui-registry.ts";
@@ -378,5 +379,42 @@ describe("renewal sweep (proof of possession against the hub)", () => {
     } finally {
       hub.stop();
     }
+  });
+});
+
+describe("resolveDiscoveryCredential (surface discovery)", () => {
+  test("picks a usable read credential for the vault", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(payload(), dir);
+    const rec = resolveDiscoveryCredential("default", { dir });
+    expect(rec?.connection_id).toBe("cred-surface-vault-default");
+  });
+
+  test("prefers the broadest read credential (fewest scoped_tags)", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(payload({ connection_id: "narrow", scoped_tags: ["a", "b", "c"] }), dir);
+    applyCredentialPayload(payload({ connection_id: "broad", scoped_tags: [] }), dir);
+    expect(resolveDiscoveryCredential("default", { dir })?.connection_id).toBe("broad");
+  });
+
+  test("returns null when no read credential exists for the vault", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(payload({ vault: "other" }), dir);
+    expect(resolveDiscoveryCredential("default", { dir })).toBeNull();
+  });
+
+  test("ignores a write credential (discovery is read-only)", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(
+      payload({ connection_id: "w", scope: "vault:default:write", scoped_tags: [] }),
+      dir,
+    );
+    expect(resolveDiscoveryCredential("default", { dir })).toBeNull();
+  });
+
+  test("ignores an expired read credential", () => {
+    const dir = tmpDir("creds-");
+    applyCredentialPayload(payload({ expires_at: new Date(Date.now() - 1000).toISOString() }), dir);
+    expect(resolveDiscoveryCredential("default", { dir })).toBeNull();
   });
 });
