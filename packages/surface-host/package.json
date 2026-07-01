@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface",
-  "version": "0.3.5-rc.1",
+  "version": "0.3.5",
   "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
