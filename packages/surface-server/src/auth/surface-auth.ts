@@ -96,6 +96,32 @@ export function getHubOrigin(): string {
 }
 
 /**
+ * Parse `PARACHUTE_HUB_ORIGINS` (comma-separated) into a deduped origin list —
+ * the hub's multi-origin iss-set (hub#692), same shape vault's `hub-jwt.ts`
+ * ships. A hub reachable at several legitimate origins (loopback + tailnet +
+ * public FQDN) mints `iss: <request origin>`; the supervisor publishes the
+ * full set via this env var so a token minted under any of them validates.
+ *
+ * SECURITY INVARIANT: this set is ADDITIVE membership checking that runs
+ * AFTER JWKS signature verification inside scope-guard — never a substitute
+ * for it. It comes only from operator/supervisor env config, NEVER from a
+ * request Host header.
+ *
+ * BACK-COMPAT INVARIANT: when `PARACHUTE_HUB_ORIGINS` is UNSET this returns
+ * `[]`. scope-guard's `resolveAcceptedIssuers` sees an empty set and collapses
+ * to the single canonical hub origin — byte-identical to before.
+ */
+export function parseHubOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  for (const part of raw.split(",")) {
+    const origin = part.trim().replace(/\/$/, "");
+    if (origin.length > 0) seen.add(origin);
+  }
+  return Array.from(seen);
+}
+
+/**
  * A refusal `resolveActor` produced — convert with `.response()` or
  * branch on `.status`.
  */
@@ -209,7 +235,15 @@ export class SurfaceAuth {
       this.#validate = opts.validateHubJwt;
     } else {
       const origin = opts.hubOrigin ?? (() => getHubOrigin());
-      const guard = createScopeGuard({ hubOrigin: origin });
+      const guard = createScopeGuard({
+        hubOrigin: origin,
+        // Multi-origin iss-set (hub#692): accept the hub's full legitimate-
+        // origin set (published via PARACHUTE_HUB_ORIGINS). Resolver form —
+        // re-evaluated per validation call. Env unset → `[]` → scope-guard
+        // collapses to the single hubOrigin (byte-identical to before).
+        // Additive after signature verify; see parseHubOrigins.
+        allowedIssuers: () => parseHubOrigins(process.env.PARACHUTE_HUB_ORIGINS),
+      });
       this.#guard = guard;
       this.#validate = (token, expectedAudience) =>
         guard.validateHubJwt(token, { expectedAudience });

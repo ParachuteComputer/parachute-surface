@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Host module for custom Parachute UIs — drop a built bundle in and serve it under one origin.",
   "module": "src/index.ts",
   "type": "module",
@@ -39,6 +39,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
+    "jose": "^6.2.2",
     "typescript": "^5"
   },
   "peerDependencies": {
@@ -47,7 +48,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.54",
     "@openparachute/surface-client": "^0.3.3",
-    "@openparachute/scope-guard": "^0.4.0-rc.1"
+    "@openparachute/scope-guard": "^0.5.0"
   },
   "repository": {
     "type": "git",
