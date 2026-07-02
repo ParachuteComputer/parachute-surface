@@ -450,7 +450,7 @@ function NotFoundBlock({ id }: { id: string }) {
       <p className="mb-4 text-sm text-fg-muted">
         No note with id <span className="font-mono">{id}</span> in this vault.
       </p>
-      <Link to="/" className="text-sm text-accent hover:underline">
+      <Link to="/all" className="text-sm text-accent hover:underline">
         Back to all notes
       </Link>
     </div>

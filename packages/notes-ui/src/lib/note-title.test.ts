@@ -1,0 +1,95 @@
+import { describe, expect, it } from "vitest";
+import { leadingH1, noteTitle, pathLeaf, stripLeadingH1 } from "./note-title";
+
+describe("noteTitle", () => {
+  it("prefers a leading H1 in the content", () => {
+    expect(noteTitle({ id: "a", content: "# Meeting notes\n\nbody" })).toBe("Meeting notes");
+  });
+
+  it("prefers the first H1 even when prose precedes it", () => {
+    expect(noteTitle({ id: "a", content: "intro line\n\n# The heading\n\nmore" })).toBe(
+      "The heading",
+    );
+  });
+
+  it("uses the first non-empty line when there is no H1", () => {
+    expect(noteTitle({ id: "a", content: "Hello world\n\nmore text" })).toBe("Hello world");
+  });
+
+  it("strips leading markdown heading hashes on the first-line fallback", () => {
+    expect(noteTitle({ id: "a", content: "### Deep" })).toBe("Deep");
+  });
+
+  it("skips leading blank lines", () => {
+    expect(noteTitle({ id: "a", content: "\n\n\nfirst real line" })).toBe("first real line");
+  });
+
+  it("truncates a very long first line with an ellipsis", () => {
+    const long = "x".repeat(200);
+    const title = noteTitle({ id: "a", content: long });
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("falls back to the last path segment without .md", () => {
+    expect(noteTitle({ id: "abc", path: "Canon/Aaron.md" })).toBe("Aaron");
+    expect(noteTitle({ id: "abc", path: "notes/journal/day.md" })).toBe("day");
+  });
+
+  it("strips .md case-insensitively", () => {
+    expect(noteTitle({ id: "abc", path: "Foo.MD" })).toBe("Foo");
+  });
+
+  it("falls back to id when there is nothing else", () => {
+    expect(noteTitle({ id: "abc" })).toBe("abc");
+  });
+
+  it("prefers content over path when both exist", () => {
+    expect(noteTitle({ id: "x", path: "Some/Path.md", content: "Content wins" })).toBe(
+      "Content wins",
+    );
+  });
+});
+
+describe("leadingH1", () => {
+  it("returns the H1 text", () => {
+    expect(leadingH1("# Title\n\nbody")).toBe("Title");
+  });
+
+  it("finds the first H1 even after prose", () => {
+    expect(leadingH1("prose\n# Later")).toBe("Later");
+  });
+
+  it("ignores h2+ headings", () => {
+    expect(leadingH1("## Not a title")).toBeNull();
+    expect(leadingH1("### Deep")).toBeNull();
+  });
+
+  it("returns null for empty or missing content", () => {
+    expect(leadingH1("")).toBeNull();
+    expect(leadingH1(undefined)).toBeNull();
+    expect(leadingH1(null)).toBeNull();
+  });
+});
+
+describe("stripLeadingH1", () => {
+  it("removes a leading H1 and the blank lines around it", () => {
+    expect(stripLeadingH1("# Title\n\nHello.")).toBe("Hello.");
+  });
+
+  it("removes a leading H1 preceded by blank lines", () => {
+    expect(stripLeadingH1("\n\n# Title\nbody")).toBe("body");
+  });
+
+  it("leaves content without a leading H1 untouched", () => {
+    expect(stripLeadingH1("Just prose.\n# Later heading")).toBe("Just prose.\n# Later heading");
+    expect(stripLeadingH1("## Subheading first")).toBe("## Subheading first");
+  });
+});
+
+describe("pathLeaf", () => {
+  it("returns the last segment without .md", () => {
+    expect(pathLeaf("a/b/c.md")).toBe("c");
+    expect(pathLeaf("bare")).toBe("bare");
+  });
+});

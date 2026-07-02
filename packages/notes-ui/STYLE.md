@@ -50,9 +50,19 @@ Build surfaces from these instead of re-hand-rolling strings:
 - **Surfaces** — `.card`.
 - **Chips** — `.chip` + `.chip-tag` / `.chip-tag-active`.
 - **Dialogs** — `.dialog-overlay` + `.dialog-panel`.
-- **Type helpers** — `.eyebrow` (uppercase micro-label), `.note-id` (mono path).
+- **Type helpers** — `.page-title` (the serif page headline — a fluid `clamp`
+  that scales with the text-size knob at its rem lower bound; use it for every
+  route's `<h1>`), `.eyebrow` (uppercase micro-label; pair with a hairline
+  `<span className="h-px flex-1 bg-border" />` for a section-label rule),
+  `.note-id` (mono path — the dim metadata line under a human title, never the
+  headline).
+- **Canvas** — `.app-canvas` on the app shell: `--color-bg` plus a whisper of
+  warm sage radially washed in from the top. Text still resolves against the
+  solid `--color-bg` beneath it, so AA contrast is unchanged.
 - **Page wrappers** — `.page` (centered, `--w-page`, canonical gutters) /
-  `.page-prose` (reading width).
+  `.page-prose` (reading width — the calm single-column flows like the Today
+  timeline live here). `.prose-note` caps its measure at `--w-prose` so
+  long-form reading stays comfortable in a wide column.
 - **Skeleton** — `.skeleton` (honors `prefers-reduced-motion`).
 - **Focus** — `.focus-ring`: one accessible `focus-visible` ring that works on
   bordered and unbordered elements. Apply to any interactive element lacking a

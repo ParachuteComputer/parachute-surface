@@ -282,7 +282,10 @@ body {
 .prose-note {
   color: var(--color-fg);
   font-size: var(--font-size-prose);
-  line-height: 1.7;
+  /* Generous leading + a bounded measure so long-form reading stays
+     comfortable — the eye shouldn't have to travel a full wide column. */
+  line-height: 1.78;
+  max-width: var(--w-prose);
 }
 .prose-note h1,
 .prose-note h2,
@@ -693,12 +696,39 @@ body {
     box-shadow: var(--shadow-lg);
   }
 
+  /* --- App canvas ---
+     A whisper of warm sage washed in from the top of the page — enough to
+     lift the paper off a flat fill without reading as a colour. Sits on the
+     shell so it spans the header + content; text still resolves against the
+     solid --color-bg beneath it, so contrast is unchanged. */
+  .app-canvas {
+    background-color: var(--color-bg);
+    background-image: radial-gradient(
+      1100px 520px at 50% -6%,
+      color-mix(in srgb, var(--color-accent) 6%, transparent),
+      transparent 70%
+    );
+    background-repeat: no-repeat;
+  }
+
+  /* --- Page title ---
+     The serif page headline. A fluid clamp gives it altitude on wide screens
+     while the rem lower-bound keeps it scaling with the text-size knob. Used
+     by every route's <h1> so page titles share one voice. */
+  .page-title {
+    font-family: var(--font-serif);
+    font-size: clamp(var(--text-2xl), calc(var(--text-xl) + 2vw), 2.5rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    color: var(--color-fg);
+  }
+
   /* --- Micro typography helpers --- */
   /* The uppercase micro-label used as section eyebrows everywhere. */
   .eyebrow {
     font-size: var(--text-xs);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
     color: var(--color-fg-dim);
   }
   /* Mono path / id label. */
@@ -715,26 +745,26 @@ body {
   .page {
     margin-inline: auto;
     max-width: var(--w-page);
-    padding-inline: 1rem;
+    padding-inline: 1.25rem;
     padding-block: 1.5rem;
   }
   @media (min-width: 768px) {
     .page {
-      padding-inline: 1.5rem;
-      padding-block: 2.5rem;
+      padding-inline: 2.5rem;
+      padding-block: 2.75rem;
     }
   }
   /* Reading-width variant for single-column reading/settings flows. */
   .page-prose {
     margin-inline: auto;
     max-width: var(--w-prose);
-    padding-inline: 1rem;
-    padding-block: 1.75rem;
+    padding-inline: 1.25rem;
+    padding-block: 2rem;
   }
   @media (min-width: 768px) {
     .page-prose {
-      padding-inline: 1.5rem;
-      padding-block: 3rem;
+      padding-inline: 2rem;
+      padding-block: 3.25rem;
     }
   }
 

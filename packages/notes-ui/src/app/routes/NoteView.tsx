@@ -7,6 +7,7 @@ import { TranscriptionStatus } from "@/components/TranscriptionStatus";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { leadingH1, pathLeaf, stripLeadingH1 } from "@/lib/note-title";
 import { pushRecent } from "@/lib/quick-switch/recents";
 import { relativeTime } from "@/lib/time";
 import { useActiveVaultClient, useNote, useVaultStore } from "@/lib/vault";
@@ -30,7 +31,7 @@ export function NoteView() {
   return (
     <div className="page">
       <nav className="mb-6 text-sm text-fg-dim">
-        <Link to="/" className="hover:text-accent">
+        <Link to="/all" className="hover:text-accent">
           ← All notes
         </Link>
       </nav>
@@ -51,6 +52,15 @@ export function NoteView() {
 function NoteBody({ note }: { note: Note }) {
   const resolver = useMemo(() => buildWikilinkResolver(note), [note]);
   const label = note.path ?? note.id;
+  // Human title: the content's leading H1 when it has one, else the path leaf.
+  // When the H1 becomes the page title we strip it from the rendered body so
+  // the note isn't headed by its own title twice.
+  const h1 = leadingH1(note.content);
+  const title = h1 ?? (note.path ? pathLeaf(note.path) : note.id);
+  const bodyNote = useMemo(
+    () => (h1 ? { ...note, content: stripLeadingH1(note.content ?? "") } : note),
+    [note, h1],
+  );
   const summary = typeof note.metadata?.summary === "string" ? note.metadata.summary : null;
   const inbound = useMemo(
     () =>
@@ -76,9 +86,7 @@ function NoteBody({ note }: { note: Note }) {
     <article className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="min-w-0">
         <header className="mb-6 border-b border-border pb-4">
-          <h1 className="font-serif text-3xl tracking-tight">
-            {note.path ? pathTitle(note.path) : note.id}
-          </h1>
+          <h1 className="page-title">{title}</h1>
           {note.tags && note.tags.length > 0 ? <HeaderTags tags={note.tags} /> : null}
           <p className="note-id mt-2">{label}</p>
           {summary ? <p className="mt-3 text-fg-muted">{summary}</p> : null}
@@ -96,7 +104,7 @@ function NoteBody({ note }: { note: Note }) {
 
         <TranscriptionStatus content={note.content ?? ""} />
 
-        <NoteRenderer note={note} resolve={resolver} />
+        <NoteRenderer note={bodyNote} resolve={resolver} />
 
         {note.attachments && note.attachments.length > 0 ? (
           <section className="mt-10 border-t border-border pt-6">
@@ -121,11 +129,6 @@ function NoteBody({ note }: { note: Note }) {
       </aside>
     </article>
   );
-}
-
-function pathTitle(path: string): string {
-  const last = path.split("/").pop() ?? path;
-  return last.replace(/\.md$/i, "");
 }
 
 function MetadataPanel({ note }: { note: Note }) {
@@ -175,7 +178,7 @@ function HeaderTags({ tags }: { tags: string[] }) {
       {tags.map((t) => (
         <Link
           key={t}
-          to={`/?tag=${encodeURIComponent(t)}`}
+          to={`/all?tag=${encodeURIComponent(t)}`}
           className="chip chip-tag focus-ring max-w-full break-all font-medium"
         >
           #{t}
@@ -384,7 +387,7 @@ function NotFoundBlock({ id }: { id: string }) {
         </>
       }
       action={
-        <Link to="/" className="text-sm text-accent hover:underline">
+        <Link to="/all" className="text-sm text-accent hover:underline">
           Back to all notes
         </Link>
       }

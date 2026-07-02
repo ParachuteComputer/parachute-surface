@@ -1,7 +1,7 @@
+import { noteTitle } from "@/lib/note-title";
 import type { Note, TagSummary } from "@/lib/vault/types";
 import { fuzzyScore } from "./fuzzy";
 import type { RecentEntry } from "./recents";
-import { noteTitle } from "./title";
 
 // The switcher returns a heterogeneous list. In a tag-first IA a tag is a
 // whole view — jumping to #daily is usually a stronger intent than opening a
@@ -49,9 +49,9 @@ export const COMMANDS: Array<{
   {
     id: "today",
     label: "Today",
-    description: "Notes created or edited today",
-    keywords: ["today", "now", "daily"],
-    action: { type: "navigate", to: "/today" },
+    description: "Your recent notes, grouped by day",
+    keywords: ["today", "now", "daily", "home", "recent"],
+    action: { type: "navigate", to: "/" },
   },
   {
     id: "calendar",
@@ -69,38 +69,38 @@ export const COMMANDS: Array<{
   },
   {
     id: "notes",
-    label: "Notes",
-    description: "All notes list",
-    keywords: ["notes", "all"],
-    action: { type: "navigate", to: "/" },
+    label: "All notes",
+    description: "The full notes browser",
+    keywords: ["notes", "all", "browse", "files"],
+    action: { type: "navigate", to: "/all" },
   },
   {
     id: "pinned",
     label: "Pinned",
     description: "Notes tagged as pinned",
     keywords: ["pinned", "star", "favorites"],
-    action: { type: "navigate", to: "/pinned" },
+    action: { type: "navigate", to: "/all?view=pinned" },
   },
   {
     id: "archived",
     label: "Archived",
     description: "Notes tagged as archived",
     keywords: ["archived", "archive"],
-    action: { type: "navigate", to: "/archived" },
+    action: { type: "navigate", to: "/all?view=archived" },
   },
   {
     id: "untagged",
     label: "Untagged",
     description: "Notes with no tags — quick-tag inline",
     keywords: ["untagged", "unfiled", "inbox"],
-    action: { type: "navigate", to: "/untagged" },
+    action: { type: "navigate", to: "/all?view=untagged" },
   },
   {
     id: "orphaned",
     label: "Orphaned",
     description: "Notes with no inbound or outbound links",
     keywords: ["orphaned", "orphans", "isolated", "unlinked"],
-    action: { type: "navigate", to: "/orphaned" },
+    action: { type: "navigate", to: "/all?view=orphaned" },
   },
 ];
 

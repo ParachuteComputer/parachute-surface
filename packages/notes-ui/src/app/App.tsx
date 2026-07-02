@@ -19,11 +19,13 @@ import { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router";
 import { Home } from "./routes/Home";
 import { Notes } from "./routes/Notes";
+import { Today } from "./routes/Today";
 
-// Home + Notes stay eager because the index dispatcher renders one of them on
-// first paint — splitting them would block FCP on a network round-trip. Every
-// other route gets its own chunk so the editor's CodeMirror, the graph's
-// force-graph layer, settings, etc. don't pile into the initial download.
+// Home + Today + Notes stay eager: the index dispatcher paints Today (with a
+// vault) or Home (without) on first load, so splitting them would block FCP on
+// a network round-trip. Every other route gets its own chunk so the editor's
+// CodeMirror, the graph's force-graph layer, settings, etc. don't pile into
+// the initial download.
 const Activity = lazy(() => import("./routes/Activity").then((m) => ({ default: m.Activity })));
 const AddVault = lazy(() => import("./routes/AddVault").then((m) => ({ default: m.AddVault })));
 const Calendar = lazy(() => import("./routes/Calendar").then((m) => ({ default: m.Calendar })));
@@ -38,19 +40,20 @@ const OAuthCallback = lazy(() =>
 );
 const Settings = lazy(() => import("./routes/Settings").then((m) => ({ default: m.Settings })));
 const Tags = lazy(() => import("./routes/Tags").then((m) => ({ default: m.Tags })));
-const Today = lazy(() => import("./routes/Today").then((m) => ({ default: m.Today })));
 const VaultGraph = lazy(() =>
   import("./routes/VaultGraph").then((m) => ({ default: m.VaultGraph })),
 );
 const Vaults = lazy(() => import("./routes/Vaults").then((m) => ({ default: m.Vaults })));
 
-// Index dispatcher: render the notes list when a vault is connected, else the
-// landing page. Both live at internal `/`, which maps to external `/notes/`
-// via BrowserRouter's basename. Keeps Notes free of "no vault?" presentation
-// concerns and Home free of any redirect logic.
+// Index dispatcher: the front door is the day-grouped Today timeline when a
+// vault is connected, else the landing page. Both live at internal `/`, which
+// maps to external `/notes/` via BrowserRouter's basename. The full notes
+// browser moved to `/all` (Today became the calm daily driver at `/`). Keeps
+// Today free of "no vault?" presentation concerns and Home free of any
+// redirect logic.
 function NotesIndex() {
   const activeVault = useVaultStore((s) => s.getActiveVault());
-  return activeVault ? <Notes /> : <Home />;
+  return activeVault ? <Today /> : <Home />;
 }
 
 // Fallback while a lazy route's chunk loads. Routes are tiny once split, so
@@ -120,7 +123,7 @@ export function App() {
           for the detector + the design rationale.
         */}
         <BrowserRouter basename={detectMountBase()}>
-          <div className="min-h-dvh overflow-x-hidden bg-bg text-fg pb-16 md:pb-0">
+          <div className="app-canvas min-h-dvh overflow-x-hidden text-fg pb-16 md:pb-0">
             <Toaster />
             <UpdateBanner />
             <VaultStatusBanner />
@@ -131,10 +134,16 @@ export function App() {
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   <Route path="/" element={<NotesIndex />} />
-                  <Route path="/pinned" element={<Notes preset="pinned" />} />
-                  <Route path="/archived" element={<Notes preset="archived" />} />
-                  <Route path="/untagged" element={<Notes preset="untagged" />} />
-                  <Route path="/orphaned" element={<Notes preset="orphaned" />} />
+                  <Route path="/all" element={<Notes />} />
+                  {/*
+                    The four built-in views are filters inside /all now (a
+                    ?view= chip), not their own routes. Old bookmarks redirect
+                    into the filtered list so links keep working.
+                  */}
+                  <Route path="/pinned" element={<Navigate to="/all?view=pinned" replace />} />
+                  <Route path="/archived" element={<Navigate to="/all?view=archived" replace />} />
+                  <Route path="/untagged" element={<Navigate to="/all?view=untagged" replace />} />
+                  <Route path="/orphaned" element={<Navigate to="/all?view=orphaned" replace />} />
                   <Route path="/tags" element={<Tags />} />
                   <Route path="/new" element={<NoteNew />} />
                   {/*

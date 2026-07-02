@@ -1,5 +1,6 @@
-import { Today } from "@/app/routes/Today";
+import { Today, groupNotesByDay } from "@/app/routes/Today";
 import { useVaultStore } from "@/lib/vault/store";
+import type { Note } from "@/lib/vault/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -75,7 +76,7 @@ function localIso(year: number, month: number, day: number, hour = 12): string {
   return new Date(year, month - 1, day, hour).toISOString();
 }
 
-describe("Today route", () => {
+describe("Today — single day (?date drill-in)", () => {
   beforeEach(() => {
     localStorage.clear();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
@@ -112,7 +113,7 @@ describe("Today route", () => {
       },
     ]);
     render(
-      <Wrap>
+      <Wrap initial="/today?date=2026-04-18">
         <Today />
       </Wrap>,
     );
@@ -146,13 +147,12 @@ describe("Today route", () => {
   it("shows empty state with a create link when today is empty", async () => {
     installFetch([]);
     render(
-      <Wrap>
+      <Wrap initial="/today?date=2026-04-18">
         <Today />
       </Wrap>,
     );
     expect(await screen.findByText(/nothing yet today — start capturing/i)).toBeInTheDocument();
-    // Empty-state CTA points at /new (unified create surface) since
-    // 2026-05-27. Was /capture pre-rename.
+    // Empty-state CTA points at /new (unified create surface).
     expect(screen.getByRole("link", { name: /^new note$/i })).toBeInTheDocument();
   });
 
@@ -206,5 +206,95 @@ describe("Today route", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location").textContent).toBe("/");
     });
+  });
+});
+
+describe("Today — front-door timeline (no date)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    seedStore();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 3, 18, 12, 0, 0));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    localStorage.clear();
+  });
+
+  it("groups recent notes by day, newest day first, with human titles", async () => {
+    installFetch([
+      {
+        id: "n1",
+        path: "journal/today-note.md",
+        preview: "Something from today.",
+        createdAt: localIso(2026, 4, 18, 9),
+        updatedAt: localIso(2026, 4, 18, 9),
+      },
+      {
+        id: "n2",
+        path: "journal/yesterday-note.md",
+        preview: "Something from yesterday.",
+        createdAt: localIso(2026, 4, 17, 9),
+        updatedAt: localIso(2026, 4, 17, 9),
+      },
+    ]);
+    render(
+      <Wrap>
+        <Today />
+      </Wrap>,
+    );
+
+    // Page title (level-1) reads "Today"; day-group headers are links.
+    expect(await screen.findByRole("heading", { level: 1, name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Today" })).toHaveAttribute(
+      "href",
+      "/today?date=2026-04-18",
+    );
+    expect(screen.getByRole("link", { name: "Yesterday" })).toHaveAttribute(
+      "href",
+      "/today?date=2026-04-17",
+    );
+    // Human title headline (path leaf), full mono path as metadata, preview.
+    expect(screen.getByText("today-note")).toBeInTheDocument();
+    expect(screen.getByText("journal/today-note.md")).toBeInTheDocument();
+    expect(screen.getByText("Something from today.")).toBeInTheDocument();
+  });
+
+  it("invites the first capture when the vault is empty", async () => {
+    installFetch([]);
+    render(
+      <Wrap>
+        <Today />
+      </Wrap>,
+    );
+    expect(await screen.findByText(/a quiet, empty page/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /capture the first one/i })).toHaveAttribute(
+      "href",
+      "/new",
+    );
+  });
+});
+
+describe("groupNotesByDay", () => {
+  // Build local-time timestamps at noon so day bucketing is host-timezone
+  // stable (the keys are local dates, matching the calendar surfaces).
+  const mk = (id: string, month: number, day: number, hour = 12): Note => {
+    const ts = new Date(2026, month - 1, day, hour).toISOString();
+    return { id, createdAt: ts, updatedAt: ts };
+  };
+
+  it("buckets by the updated day and sorts days newest-first", () => {
+    const groups = groupNotesByDay([mk("a", 4, 15, 10), mk("b", 4, 17, 10), mk("c", 4, 17, 8)]);
+    expect(groups.map((g) => g.key)).toEqual(["2026-04-17", "2026-04-15"]);
+    // Within a day, newest-first.
+    expect(groups[0]?.notes.map((n) => n.id)).toEqual(["b", "c"]);
+  });
+
+  it("skips notes with an unparseable date", () => {
+    const groups = groupNotesByDay([{ id: "a", createdAt: "not-a-date", updatedAt: "not-a-date" }]);
+    expect(groups).toEqual([]);
   });
 });
