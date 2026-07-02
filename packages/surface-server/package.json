@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-server",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Server kit for backed Parachute surfaces — actor resolution (hub JWT / capability links / anon), audience store, vault-native grants with live SSE cache, deny-by-default routing, and a public conformance suite. A library surface backends import inside createBackend(ctx); never a host object.",
   "module": "src/index.ts",
   "type": "module",
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
+    "jose": "^6.2.2",
     "typescript": "^5"
   },
   "peerDependencies": {
@@ -36,7 +37,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openparachute/scope-guard": "^0.4.0-rc.1",
+    "@openparachute/scope-guard": "^0.5.0",
     "@openparachute/surface": "^0.3.4",
     "@openparachute/surface-client": "^0.3.3",
     "yjs": "^13.6.27"

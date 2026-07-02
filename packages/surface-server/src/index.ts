@@ -100,6 +100,7 @@ export {
   AuthRefusal,
   createSurfaceAuth,
   getHubOrigin,
+  parseHubOrigins,
   SESSION_COOKIE,
   SurfaceAuth,
   type EmailSender,
