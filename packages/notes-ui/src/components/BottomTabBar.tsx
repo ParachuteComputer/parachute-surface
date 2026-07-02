@@ -23,8 +23,9 @@ export function BottomTabBar() {
   if (!hasActiveVault) return null;
 
   const path = location.pathname;
-  const isHome =
-    path === "/" || path.startsWith("/n/") || path === "/pinned" || path === "/archived";
+  // Today is the front door; reading a note (/n/:id) and the single-day view
+  // (/today) both live under it.
+  const isToday = path === "/" || path === "/today" || path.startsWith("/n/");
   const isTags = path === "/tags";
   // `/new` is the unified create surface; `/capture` is a legacy redirect
   // but it still flashes through this component during the location update,
@@ -39,7 +40,7 @@ export function BottomTabBar() {
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <ul className="mx-auto flex max-w-[--w-page] items-stretch justify-around">
-        <Tab to="/" label="Home" active={isHome} icon={<IconHome />} />
+        <Tab to="/" label="Today" active={isToday} icon={<IconHome />} />
         <Tab to="/tags" label="Tags" active={isTags} icon={<IconTag />} />
         <Tab to="/new" label="New" active={isNew} icon={<IconPlus />} />
         <TabButton label="Search" icon={<IconSearch />} onClick={() => setSwitcherOpen(true)} />

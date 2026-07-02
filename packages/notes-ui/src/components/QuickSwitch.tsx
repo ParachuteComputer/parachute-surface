@@ -66,7 +66,7 @@ export function QuickSwitch({ onClose }: Props) {
       if (entry.kind === "note") {
         navigate(`/n/${encodeURIComponent(entry.id)}`);
       } else if (entry.kind === "tag") {
-        navigate(`/?tag=${encodeURIComponent(entry.name)}`);
+        navigate(`/all?tag=${encodeURIComponent(entry.name)}`);
       } else {
         navigate(entry.action.to);
       }

@@ -115,11 +115,61 @@ describe("NoteView route", () => {
     expect(screen.getByText("Canon note on Aaron.")).toBeInTheDocument();
     // Tag chip links to the filtered list
     const tagChip = screen.getByRole("link", { name: "#canon" });
-    expect(tagChip).toHaveAttribute("href", "/?tag=canon");
+    expect(tagChip).toHaveAttribute("href", "/all?tag=canon");
     // Back link to / is present
     expect(screen.getByRole("link", { name: /all notes/i })).toBeInTheDocument();
     // Edit placeholder routes to the edit route (PR #5)
     expect(screen.getByRole("link", { name: /edit/i })).toHaveAttribute("href", "/n/abc-123/edit");
+  });
+
+  it("titles by the leading H1 and strips it from the body (no double render)", async () => {
+    installFetch({
+      "/api/notes": {
+        body: {
+          id: "lead",
+          path: "Canon/Aaron",
+          createdAt: "2026-04-16T00:00:00Z",
+          content: "# Aaron Gabriel\n\nTeacher and builder.",
+          tags: [],
+          links: [],
+          attachments: [],
+        },
+      },
+    });
+    renderAt("/n/lead");
+    // The leading H1 becomes the page title …
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Aaron Gabriel" }),
+    ).toBeInTheDocument();
+    // … and appears exactly once (stripped from the rendered body).
+    expect(screen.getAllByText("Aaron Gabriel")).toHaveLength(1);
+    expect(screen.getByText("Teacher and builder.")).toBeInTheDocument();
+  });
+
+  it("falls back to the path leaf for a buried H1 and leaves it in the body", async () => {
+    installFetch({
+      "/api/notes": {
+        body: {
+          id: "buried",
+          path: "Canon/Aaron",
+          createdAt: "2026-04-16T00:00:00Z",
+          // The H1 isn't the leading line, so it is NOT the title — and must
+          // still render in the body (regression guard for the strip/derive
+          // mismatch the reviewer caught).
+          content: "Some intro paragraph.\n\n# Buried Title\n\nMore body.",
+          tags: [],
+          links: [],
+          attachments: [],
+        },
+      },
+    });
+    renderAt("/n/buried");
+    // Header falls back to the path leaf, not the buried heading.
+    expect(await screen.findByRole("heading", { level: 1, name: "Aaron" })).toBeInTheDocument();
+    // The buried H1 renders once (in the body), never promoted to the title.
+    expect(screen.getAllByText("Buried Title")).toHaveLength(1);
+    expect(screen.getByText("Some intro paragraph.")).toBeInTheDocument();
+    expect(screen.getByText("More body.")).toBeInTheDocument();
   });
 
   it("resolves [[wikilinks]] via the outbound links table and renders as a /n/<id> link", async () => {

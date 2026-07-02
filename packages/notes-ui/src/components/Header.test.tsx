@@ -1,7 +1,7 @@
 import { Header } from "@/components/Header";
 import { useVaultStore } from "@/lib/vault/store";
 import type { VaultRecord } from "@/lib/vault/types";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -144,5 +144,65 @@ describe("Header responsive structure (notes#136)", () => {
     const labelSpan = trigger.querySelector("span.truncate");
     expect(labelSpan).not.toBeNull();
     expect(labelSpan?.textContent).toContain("a-very-long-vault-name");
+  });
+});
+
+// The Layer-1 spine: the desktop cluster reduces to five load-bearing items,
+// with everything secondary one tap off in the ⋯ overflow.
+describe("Header five-item spine + overflow (Layer-1)", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ vaults: [], services: [] }),
+        }) as Response,
+    ) as unknown as typeof fetch;
+    useVaultStore.setState({
+      vaults: { a: makeVault({ id: "a", url: "http://localhost:1940", name: "default" }) },
+      activeVaultId: "a",
+    });
+  });
+
+  afterEach(() => {
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    vi.restoreAllMocks();
+  });
+
+  it("renders the five-item spine when a vault is connected", () => {
+    renderHeader();
+    expect(screen.getByRole("link", { name: "Today" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "All notes" })).toHaveAttribute("href", "/all");
+    expect(screen.getByRole("link", { name: "Tags" })).toHaveAttribute("href", "/tags");
+    expect(screen.getByRole("link", { name: /\+ Capture/ })).toHaveAttribute("href", "/new");
+    expect(screen.getByRole("button", { name: /^search$/i })).toBeInTheDocument();
+  });
+
+  it("opens and closes the ⋯ overflow, which holds the secondary destinations", () => {
+    renderHeader();
+    const more = screen.getByRole("button", { name: /more/i });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Graph" })).toHaveAttribute("href", "/graph");
+    expect(within(menu).getByRole("menuitem", { name: "Activity" })).toHaveAttribute(
+      "href",
+      "/activity",
+    );
+    expect(within(menu).getByRole("menuitem", { name: "Calendar" })).toHaveAttribute(
+      "href",
+      "/calendar",
+    );
+    expect(within(menu).getByRole("menuitem", { name: "Import" })).toHaveAttribute(
+      "href",
+      "/import",
+    );
+
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

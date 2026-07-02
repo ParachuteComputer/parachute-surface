@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { noteTitle } from "@/lib/note-title";
 import { meetsAutoThreshold, usePathTreeMode } from "@/lib/path-tree";
 import {
   useDeleteView,
@@ -42,6 +43,8 @@ import { Link, Navigate, useSearchParams } from "react-router";
 
 export type NotesPreset = "pinned" | "archived" | "untagged" | "orphaned";
 
+const PRESET_ORDER: NotesPreset[] = ["pinned", "archived", "untagged", "orphaned"];
+
 const PRESET_TITLES: Record<NotesPreset, string> = {
   pinned: "Pinned",
   archived: "Archived",
@@ -54,11 +57,20 @@ const PRESET_SUBTITLES: Partial<Record<NotesPreset, string>> = {
   orphaned: "Notes with no inbound or outbound links.",
 };
 
-export function Notes({ preset }: { preset?: NotesPreset } = {}) {
+function parsePreset(value: string | null): NotesPreset | undefined {
+  return PRESET_ORDER.find((p) => p === value);
+}
+
+// `preset` is normally read from the `?view=` query param — the four built-in
+// views are filters INSIDE the All-notes list now, not their own routes (the
+// old /pinned etc. redirect into /all?view=). The optional prop is an explicit
+// override kept for direct-render callers (tests, embeds).
+export function Notes({ preset: presetProp }: { preset?: NotesPreset } = {}) {
   const activeVault = useVaultStore((s) => s.getActiveVault());
   const { roles } = useTagRoles(activeVault?.id ?? null);
   const { pinnedTags } = usePinnedTags(activeVault?.id ?? null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const preset = presetProp ?? parsePreset(searchParams.get("view"));
 
   // Hydrate filter state from URL on mount and when the URL changes
   // externally (clicking a saved view rewrites params). Sync direction is
@@ -257,7 +269,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
 
   if (!activeVault) return <Navigate to="/" replace />;
 
-  const title = preset ? PRESET_TITLES[preset] : "Notes";
+  const title = preset ? PRESET_TITLES[preset] : "All notes";
   const subtitle = preset ? PRESET_SUBTITLES[preset] : null;
   const pageFirst = offset + 1;
   const pageLast = offset + (displayNotes?.length ?? 0);
@@ -270,7 +282,7 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
       <header className="mb-5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-3 md:mb-6">
         <div>
           <p className="eyebrow">{activeVault.name}</p>
-          <h1 className="font-serif text-2xl tracking-tight md:text-3xl">{title}</h1>
+          <h1 className="page-title">{title}</h1>
           {subtitle ? <p className="mt-1 text-sm text-fg-muted">{subtitle}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -298,6 +310,8 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
         </div>
       </header>
 
+      <PresetFilterBar active={preset} />
+
       {!preset ? (
         <PinnedTagsStrip
           pinnedTags={pinnedTags}
@@ -310,24 +324,24 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
         />
       ) : null}
 
-      <div className={preset ? "" : "grid gap-6 md:grid-cols-[14rem_1fr]"}>
+      <div className={!preset && sidebarOpen ? "grid gap-6 md:grid-cols-[15rem_1fr]" : ""}>
         {!preset ? (
           <div className="space-y-3 md:space-y-6">
             <button
               type="button"
               onClick={() => setSidebarOpen((o) => !o)}
-              className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-1.5 text-left text-sm text-fg-muted hover:text-accent md:hidden"
+              className="flex w-full items-center justify-between rounded-md border border-border bg-card px-3 py-1.5 text-left text-sm text-fg-muted hover:border-accent hover:text-accent md:w-auto"
               aria-expanded={sidebarOpen}
               aria-controls="notes-sidebar"
             >
-              <span>Folders & saved views</span>
-              <span aria-hidden="true" className="font-mono text-xs">
+              <span>Folders &amp; views</span>
+              <span aria-hidden="true" className="ml-2 font-mono text-xs">
                 {sidebarOpen ? "▾" : "▸"}
               </span>
             </button>
             <div
               id="notes-sidebar"
-              className={`space-y-6 md:sticky md:top-6 md:self-start ${sidebarOpen ? "" : "hidden md:block"}`}
+              className={`space-y-6 md:sticky md:top-6 md:self-start ${sidebarOpen ? "" : "hidden"}`}
             >
               <TagBrowser
                 tags={tags.data ?? []}
@@ -341,7 +355,6 @@ export function Notes({ preset }: { preset?: NotesPreset } = {}) {
                 onClear={() => setSelectedTags([])}
                 isLoading={tags.isPending}
               />
-              <BuiltInViewsSidebar />
               <SavedViewsSidebar
                 views={savedViews.data}
                 isPending={savedViews.isPending}
@@ -566,7 +579,7 @@ function SavedViewsSidebar({
               className="group flex items-center rounded-md border border-transparent hover:border-border hover:bg-card"
             >
               <Link
-                to={`/?${filtersToSearchParams(v.filters).toString()}`}
+                to={`/all?${filtersToSearchParams(v.filters).toString()}`}
                 className="block flex-1 truncate px-2 py-1 text-sm text-fg-muted hover:text-accent"
               >
                 {v.name}
@@ -789,7 +802,12 @@ function NoteRow({
   archivedTag: string;
   quickTagSuggestions?: TagSummary[];
 }) {
-  const label = note.path ?? note.id;
+  const title = noteTitle(note);
+  // The mono path is metadata under the human title — but only when it says
+  // something the title doesn't (a folder the leaf drops). Compare against the
+  // extension-stripped path so a bare root file ("Aaron.md" vs title "Aaron")
+  // doesn't render a redundant line that differs only by ".md".
+  const showPath = !!note.path && note.path.replace(/\.md$/i, "") !== title;
   const stamp = note.updatedAt ?? note.createdAt;
   const isPinned = (note.tags ?? []).includes(pinnedTag);
   const isArchived = (note.tags ?? []).includes(archivedTag);
@@ -807,10 +825,11 @@ function NoteRow({
                   ★
                 </span>
               ) : null}
-              <span className="min-w-0 truncate font-mono text-sm text-fg">{label}</span>
+              <span className="min-w-0 truncate text-sm font-medium text-fg">{title}</span>
             </span>
             <span className="shrink-0 text-xs text-fg-dim">{relativeTime(stamp)}</span>
           </div>
+          {showPath ? <p className="mt-0.5 min-w-0 truncate note-id">{note.path}</p> : null}
           {note.tags && note.tags.length > 0 ? (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {note.tags.map((t) => (
@@ -1009,34 +1028,37 @@ function PinnedTagsStrip({
   );
 }
 
-function BuiltInViewsSidebar() {
-  const items: Array<{ to: string; label: string; glyph?: string }> = [
-    { to: "/pinned", label: "Pinned", glyph: "★" },
-    { to: "/archived", label: "Archived" },
-    { to: "/untagged", label: "Untagged" },
-    { to: "/orphaned", label: "Orphaned" },
+// The four built-in views live as inline filter chips at the top of the list
+// (progressive disclosure — they used to be their own routes + a sidebar
+// section). "All" clears the preset; each chip links to /all?view=<preset>.
+function PresetFilterBar({ active }: { active?: NotesPreset }) {
+  const items: Array<{ to: string; label: string; preset?: NotesPreset; glyph?: string }> = [
+    { to: "/all", label: "All" },
+    { to: "/all?view=pinned", label: "Pinned", preset: "pinned", glyph: "★" },
+    { to: "/all?view=archived", label: "Archived", preset: "archived" },
+    { to: "/all?view=untagged", label: "Untagged", preset: "untagged" },
+    { to: "/all?view=orphaned", label: "Orphaned", preset: "orphaned" },
   ];
   return (
-    <aside>
-      <h2 className="eyebrow mb-2">Views</h2>
-      <ul className="space-y-1">
-        {items.map((it) => (
-          <li key={it.to}>
-            <Link
-              to={it.to}
-              className="flex items-center gap-1.5 truncate rounded-md border border-transparent px-2 py-1 text-sm text-fg-muted hover:border-border hover:bg-card hover:text-accent"
-            >
-              {it.glyph ? (
-                <span className="shrink-0 text-accent" aria-hidden="true">
-                  {it.glyph}
-                </span>
-              ) : null}
-              <span className="truncate">{it.label}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </aside>
+    <nav aria-label="Views" className="mb-6 flex flex-wrap items-center gap-2">
+      <span className="eyebrow">Views</span>
+      {items.map((it) => {
+        const isActive = it.preset === active;
+        return (
+          <Link
+            key={it.to}
+            to={it.to}
+            aria-current={isActive ? "page" : undefined}
+            className={`chip focus-ring max-w-full ${
+              isActive ? "chip-tag-active font-medium" : "chip-tag"
+            }`}
+          >
+            {it.glyph ? <span aria-hidden="true">{it.glyph}</span> : null}
+            <span className="min-w-0 break-all">{it.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

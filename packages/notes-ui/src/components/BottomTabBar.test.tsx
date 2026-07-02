@@ -43,10 +43,10 @@ describe("BottomTabBar", () => {
     useQuickSwitchOpen.setState({ open: false });
   });
 
-  it("renders Home, Tags, New, Search, Settings tabs when a vault is active", () => {
+  it("renders Today, Tags, New, Search, Settings tabs when a vault is active", () => {
     renderAt("/");
     const nav = screen.getByRole("navigation", { name: /primary/i });
-    expect(within(nav).getByLabelText(/home/i)).toBeInTheDocument();
+    expect(within(nav).getByLabelText(/^today$/i)).toBeInTheDocument();
     expect(within(nav).getByLabelText(/^tags$/i)).toBeInTheDocument();
     // The "+ Capture" / "+ New" tab is the unified create entry point —
     // labeled "New" since 2026-05-27 (notes-ui unified create + tag
@@ -72,10 +72,10 @@ describe("BottomTabBar", () => {
     expect(nav.className).not.toMatch(/\bmd:hidden\b/);
   });
 
-  it("marks the Home tab active on /", () => {
+  it("marks the Today tab active on /", () => {
     renderAt("/");
-    const home = screen.getByLabelText(/home/i);
-    expect(home).toHaveAttribute("aria-current", "page");
+    const today = screen.getByLabelText(/^today$/i);
+    expect(today).toHaveAttribute("aria-current", "page");
   });
 
   it("marks the Tags tab active on /tags", () => {
@@ -84,10 +84,10 @@ describe("BottomTabBar", () => {
     expect(tags).toHaveAttribute("aria-current", "page");
   });
 
-  it("keeps Home tab active on /n/:id (reading a note is still under Home)", () => {
+  it("keeps Today tab active on /n/:id (reading a note is still under Today)", () => {
     renderAt("/n/abc");
-    const home = screen.getByLabelText(/home/i);
-    expect(home).toHaveAttribute("aria-current", "page");
+    const today = screen.getByLabelText(/^today$/i);
+    expect(today).toHaveAttribute("aria-current", "page");
   });
 
   it("opens the quick-switch via the Search tab", () => {

@@ -307,7 +307,7 @@ export function NoteNew() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-5 md:px-6 md:py-8">
       <nav className="mb-4 text-sm text-fg-dim">
-        <Link to="/" className="hover:text-accent">
+        <Link to="/all" className="hover:text-accent">
           ← All notes
         </Link>
       </nav>
