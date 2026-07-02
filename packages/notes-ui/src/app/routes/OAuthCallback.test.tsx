@@ -398,3 +398,47 @@ describe("OAuthCallback auth-halt clearing on successful reconnect (notes#148)",
     });
   });
 });
+
+// E2E repro (2026-07-02 cloud → notes.parachute.computer): the consent screen
+// bounced back with `error=invalid_scope&error_description=you do not own the
+// vault: e2e-notes`, and Notes showed only "Vault returned: invalid_scope" —
+// the actionable half was dropped. The error branch must surface
+// `error_description` when the issuer sends one.
+describe("OAuthCallback error rendering", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function renderWithError(query: string) {
+    return render(
+      <MemoryRouter initialEntries={[`/oauth/callback?${query}`]}>
+        <Routes>
+          <Route path="/oauth/callback" element={<OAuthCallback />} />
+          <Route path="/add" element={<div>Add vault page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("appends error_description to the error code when present", async () => {
+    renderWithError(
+      "error=invalid_scope&error_description=you%20do%20not%20own%20the%20vault%3A%20e2e-notes",
+    );
+    expect(
+      await screen.findByText(
+        "Vault returned: invalid_scope — you do not own the vault: e2e-notes",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows just the code when error_description is absent", async () => {
+    renderWithError("error=access_denied");
+    expect(await screen.findByText("Vault returned: access_denied")).toBeInTheDocument();
+  });
+});

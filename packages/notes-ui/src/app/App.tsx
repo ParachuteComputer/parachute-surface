@@ -16,7 +16,7 @@ import { SchemaAuditRunnerMount } from "@/lib/vault/schema-audit-runner";
 import { QueryProvider } from "@/providers/QueryProvider";
 import { SyncProvider } from "@/providers/SyncProvider";
 import { Suspense, lazy, useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router";
 import { Home } from "./routes/Home";
 import { Notes } from "./routes/Notes";
 import { Today } from "./routes/Today";
@@ -53,6 +53,14 @@ const Vaults = lazy(() => import("./routes/Vaults").then((m) => ({ default: m.Va
 // redirect logic.
 function NotesIndex() {
   const activeVault = useVaultStore((s) => s.getActiveVault());
+  const [searchParams] = useSearchParams();
+  // `?add=<vault url>` connect deep link — the cloud console links the
+  // origin root (`/?add=…`), but /add owns the connect flow. Forward the
+  // full search string so companions like `redirect=` ride along; AddVault
+  // strips the param from history once consumed.
+  if (searchParams.get("add")) {
+    return <Navigate to={`/add?${searchParams.toString()}`} replace />;
+  }
   return activeVault ? <Today /> : <Home />;
 }
 

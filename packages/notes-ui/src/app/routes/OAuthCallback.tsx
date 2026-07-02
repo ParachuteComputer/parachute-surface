@@ -31,7 +31,14 @@ export function OAuthCallback() {
     const oauthError = params.get("error");
 
     if (oauthError) {
-      setStatus({ kind: "error", message: `Vault returned: ${oauthError}` });
+      // Surface the issuer's human-readable `error_description` alongside
+      // the bare code — "invalid_scope" alone hides the actual reason
+      // ("you do not own the vault: …").
+      const description = params.get("error_description");
+      setStatus({
+        kind: "error",
+        message: `Vault returned: ${oauthError}${description ? ` — ${description}` : ""}`,
+      });
       return;
     }
     if (!code || !state) {

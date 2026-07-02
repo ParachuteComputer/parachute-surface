@@ -5,6 +5,7 @@ import {
   completeOAuth,
   redirectUriForOrigin,
   refreshAccessToken,
+  vaultNameFromUrl,
 } from "./oauth";
 import { deriveCodeChallenge } from "./pkce";
 import { clearCachedClientId, loadPendingOAuth, savePendingOAuth } from "./storage";
@@ -164,6 +165,64 @@ describe("beginOAuth", () => {
     expect(pending.priorHaltedVaultId).toBeUndefined();
     const loaded = loadPendingOAuth();
     expect(loaded?.priorHaltedVaultId).toBeUndefined();
+  });
+
+  // Consent `vault=` hint derivation — when the pasted URL names a vault
+  // (`…/vault/<name>`), the authorize URL carries `vault=<name>` so the
+  // issuer's consent screen can pre-select/lock it instead of making the
+  // user re-type the name free-text (a typo there bounces back with a
+  // cryptic invalid_scope). Both hub and cloud honour the param; unaware
+  // issuers ignore it.
+  it("derives vault=<name> on the authorize URL from a /vault/<name> issuer URL", async () => {
+    const fetchImpl = mockFetch([{ json: validMetadata }, { json: clientReg }]);
+    const { authorizeUrl } = await beginOAuth(
+      "https://u.parachute.computer/vault/aaron",
+      "vault:read",
+      fetchImpl,
+    );
+    expect(new URL(authorizeUrl).searchParams.get("vault")).toBe("aaron");
+  });
+
+  it("derives no vault hint from a bare origin", async () => {
+    const fetchImpl = mockFetch([{ json: validMetadata }, { json: clientReg }]);
+    const { authorizeUrl } = await beginOAuth("http://localhost:1940", "vault:read", fetchImpl);
+    expect(new URL(authorizeUrl).searchParams.get("vault")).toBeNull();
+  });
+
+  it("lets a caller-supplied params.vault win over the derived hint", async () => {
+    // The vault popover passes an explicit `vault: row.name` — that intent
+    // beats anything derived from the URL shape.
+    const fetchImpl = mockFetch([{ json: validMetadata }, { json: clientReg }]);
+    const { authorizeUrl } = await beginOAuth(
+      "https://host.example/vault/derived",
+      "vault:read",
+      fetchImpl,
+      { params: { vault: "explicit" } },
+    );
+    expect(new URL(authorizeUrl).searchParams.get("vault")).toBe("explicit");
+  });
+});
+
+describe("vaultNameFromUrl", () => {
+  it("extracts the name from a /vault/<name> URL", () => {
+    expect(vaultNameFromUrl("https://u.parachute.computer/vault/aaron")).toBe("aaron");
+  });
+
+  it("tolerates a trailing slash and stripped API suffixes (via normalizeVaultUrl)", () => {
+    expect(vaultNameFromUrl("https://host.example/vault/aaron/")).toBe("aaron");
+    expect(vaultNameFromUrl("https://host.example/vault/aaron/api")).toBe("aaron");
+  });
+
+  it("decodes a percent-encoded name", () => {
+    expect(vaultNameFromUrl("https://host.example/vault/my%20vault")).toBe("my vault");
+  });
+
+  it("returns undefined for non-vault shapes", () => {
+    expect(vaultNameFromUrl("http://localhost:1939")).toBeUndefined();
+    expect(vaultNameFromUrl("https://host.example/notvault/x")).toBeUndefined();
+    expect(vaultNameFromUrl("https://host.example/vault/a/b")).toBeUndefined();
+    expect(vaultNameFromUrl("not a url")).toBeUndefined();
+    expect(vaultNameFromUrl("")).toBeUndefined();
   });
 });
 
