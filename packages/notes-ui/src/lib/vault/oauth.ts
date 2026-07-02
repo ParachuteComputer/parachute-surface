@@ -81,6 +81,32 @@ export function redirectUriForOrigin(origin: string = window.location.origin): s
   return `${origin.replace(/\/$/, "")}${basePathPrefix()}${REDIRECT_PATH}`;
 }
 
+/**
+ * Derive a `vault=<name>` consent hint from a user-entered vault URL.
+ *
+ * When the pasted URL names a specific vault (`…/vault/<name>`), the issuer's
+ * consent screen can pre-select or lock that vault instead of making the user
+ * re-type the name free-text — a typo there bounces them back with a cryptic
+ * `invalid_scope`. Both hub and cloud honour the `vault` authorize param;
+ * issuers that don't simply ignore it. Returns `undefined` unless the
+ * normalized URL's path is exactly a single-segment `/vault/<name>`.
+ */
+export function vaultNameFromUrl(input: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(normalizeVaultUrl(input));
+  } catch {
+    return undefined;
+  }
+  const match = parsed.pathname.match(/^\/vault\/([^/]+)$/);
+  if (!match?.[1]) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface BeginOAuthOptions {
   /**
    * Extra query params appended to the authorize URL after the standard
@@ -182,6 +208,15 @@ export async function beginOAuth(
         authorizeUrl.searchParams.set(key, value);
       }
     }
+  }
+  // Derived consent hint: when the pasted URL names a vault
+  // (`…/vault/<name>`), tell the issuer which vault the user meant so its
+  // consent screen can pre-select/lock it. Applied after `options.params`
+  // so an explicit caller hint (e.g. the vault popover's `vault: row.name`)
+  // always wins — this only fills the gap.
+  if (!authorizeUrl.searchParams.has("vault")) {
+    const vaultHint = vaultNameFromUrl(issuerUrl);
+    if (vaultHint) authorizeUrl.searchParams.set("vault", vaultHint);
   }
 
   return { authorizeUrl: authorizeUrl.toString(), pending };
