@@ -804,9 +804,10 @@ function NoteRow({
 }) {
   const title = noteTitle(note);
   // The mono path is metadata under the human title — but only when it says
-  // something the title doesn't (a folder or extension). For a bare-word path
-  // the leaf equals the title, so the line would just be a duplicate.
-  const showPath = !!note.path && note.path !== title;
+  // something the title doesn't (a folder the leaf drops). Compare against the
+  // extension-stripped path so a bare root file ("Aaron.md" vs title "Aaron")
+  // doesn't render a redundant line that differs only by ".md".
+  const showPath = !!note.path && note.path.replace(/\.md$/i, "") !== title;
   const stamp = note.updatedAt ?? note.createdAt;
   const isPinned = (note.tags ?? []).includes(pinnedTag);
   const isArchived = (note.tags ?? []).includes(archivedTag);

@@ -271,7 +271,10 @@ function Section({ title, notes }: { title: string; notes: Note[] }) {
 // something the title doesn't, then preview and tag chips.
 function NoteTimelineRow({ note }: { note: Note }) {
   const title = noteTitle(note);
-  const showPath = !!note.path && note.path !== title;
+  // Show the mono path only when it carries a folder the title's leaf drops;
+  // compare extension-stripped so a bare "Morning.md" isn't shown under
+  // the title "Morning".
+  const showPath = !!note.path && note.path.replace(/\.md$/i, "") !== title;
   const stamp = note.updatedAt ?? note.createdAt;
   return (
     <li>

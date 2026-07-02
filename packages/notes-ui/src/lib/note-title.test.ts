@@ -6,9 +6,11 @@ describe("noteTitle", () => {
     expect(noteTitle({ id: "a", content: "# Meeting notes\n\nbody" })).toBe("Meeting notes");
   });
 
-  it("prefers the first H1 even when prose precedes it", () => {
+  it("uses the first prose line when the H1 is buried (consistent with the body strip)", () => {
+    // Strict-first-line: a `# …` that isn't the leading line is NOT the title,
+    // so NoteView never titles a note by a heading that still renders in-body.
     expect(noteTitle({ id: "a", content: "intro line\n\n# The heading\n\nmore" })).toBe(
-      "The heading",
+      "intro line",
     );
   });
 
@@ -52,12 +54,18 @@ describe("noteTitle", () => {
 });
 
 describe("leadingH1", () => {
-  it("returns the H1 text", () => {
+  it("returns the H1 text when it's the leading line", () => {
     expect(leadingH1("# Title\n\nbody")).toBe("Title");
+    expect(leadingH1("\n\n# Title\nbody")).toBe("Title");
   });
 
-  it("finds the first H1 even after prose", () => {
-    expect(leadingH1("prose\n# Later")).toBe("Later");
+  it("returns null when the first non-blank line is prose (a buried H1 is not a title)", () => {
+    expect(leadingH1("prose\n# Later")).toBeNull();
+  });
+
+  it("returns null when the leading line opens a fenced code block", () => {
+    // A `# comment` inside a code fence must not become the title.
+    expect(leadingH1("```\n# comment\n```")).toBeNull();
   });
 
   it("ignores h2+ headings", () => {

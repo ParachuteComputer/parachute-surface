@@ -6,7 +6,7 @@ import type { Note, NoteSummary } from "@/lib/vault/types";
 // this helper is what makes the headline human.
 //
 // Resolution order (matches the Layer-1 redesign spec):
-//   1. the first ATX `# H1` in the content, if any;
+//   1. the content's leading `# H1` (when the first non-blank line is one);
 //   2. else the first non-empty line of content (leading `#`s stripped),
 //      truncated;
 //   3. else the path leaf (last segment, `.md` stripped);
@@ -34,16 +34,21 @@ export function noteTitle(note: TitleSource): string {
   return note.id;
 }
 
-// The text of a leading ATX H1 (`# Heading`) — the first such line anywhere in
-// the content — or null when there isn't one. A single `#` followed by
-// whitespace only; `##`+ are lower headings and don't count as the title.
+// The text of a leading ATX H1 (`# Heading`) when the FIRST non-blank line is
+// one, else null. Deliberately strict-first-line so it stays in lockstep with
+// `stripLeadingH1`: a header derived from `leadingH1` is exactly the line the
+// body strips, so a note is never titled by an H1 that still renders in its
+// body (a buried `# …` or one inside a fenced code block is not a title).
+// A single `#` + whitespace only; `##`+ are lower headings, not the title.
 export function leadingH1(content: string | undefined | null): string | null {
   if (!content) return null;
-  for (const line of content.split("\n")) {
-    const m = line.match(/^#\s+(.+?)\s*$/);
-    if (m?.[1]) return m[1];
-  }
-  return null;
+  const lines = content.split("\n");
+  let i = 0;
+  while (i < lines.length && lines[i]?.trim() === "") i++;
+  const first = lines[i];
+  if (first === undefined) return null;
+  const m = first.match(/^#\s+(.+?)\s*$/);
+  return m?.[1] ?? null;
 }
 
 // Remove a single leading H1 line (and the blank lines around it) so a note

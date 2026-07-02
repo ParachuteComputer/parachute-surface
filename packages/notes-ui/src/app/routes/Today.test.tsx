@@ -118,11 +118,14 @@ describe("Today — single day (?date drill-in)", () => {
       </Wrap>,
     );
 
-    await screen.findByText("Morning.md");
+    // Rows show the human title (path leaf); a bare "Morning.md" doesn't
+    // repeat as a mono metadata line since it differs from the title only by
+    // the extension.
+    await screen.findByText("Morning");
     expect(screen.getByText(/created today \(1\)/i)).toBeInTheDocument();
-    expect(screen.getByText("Earlier.md")).toBeInTheDocument();
+    expect(screen.getByText("Earlier")).toBeInTheDocument();
     expect(screen.getByText(/edited today \(1\)/i)).toBeInTheDocument();
-    expect(screen.queryByText("Unrelated.md")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unrelated")).not.toBeInTheDocument();
   });
 
   it("renders 'On <date>' header with date param", async () => {
@@ -138,7 +141,7 @@ describe("Today — single day (?date drill-in)", () => {
         <Today />
       </Wrap>,
     );
-    await screen.findByText("Past.md");
+    await screen.findByText("Past");
     expect(screen.getByText(/created on 2026-04-10 \(1\)/i)).toBeInTheDocument();
     // "Today" jump button is visible when not on today.
     expect(screen.getByRole("link", { name: /^today$/i })).toBeInTheDocument();
