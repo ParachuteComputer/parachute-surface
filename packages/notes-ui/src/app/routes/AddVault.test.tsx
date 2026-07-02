@@ -356,6 +356,28 @@ describe("AddVault ?add= connect deep link", () => {
     expect(loadPendingOAuth()).toBeNull();
   });
 
+  it("never auto-begins when an explicit ?url= rides along (prefill-only wins)", async () => {
+    // With BOTH params present (attacker-craftable), the field displays the
+    // ?url= value — auto-beginning against a DIFFERENT ?add= value would be
+    // a display/action mismatch. ?url= (the hub /account flow) wins and the
+    // flow stays prefill-only.
+    mockDiscoveryAndDcr();
+    renderAddVault(
+      `/add?url=${encodeURIComponent("http://hub.example")}&add=${encodeURIComponent(cloudVaultUrl)}`,
+    );
+
+    // ?add= consumed + stripped; ?url= survives as the prefill source.
+    await waitFor(() => {
+      expect(screen.getByTestId("location-echo").textContent).toBe(
+        "/add?url=http%3A%2F%2Fhub.example",
+      );
+    });
+    const input = screen.getByLabelText(/vault address/i) as HTMLInputElement;
+    expect(input.value).toBe("http://hub.example");
+    expect(window.location.assign).not.toHaveBeenCalled();
+    expect(loadPendingOAuth()).toBeNull();
+  });
+
   it("switches to an already-connected vault instead of re-running OAuth", async () => {
     mockDiscoveryAndDcr();
     const id = vaultIdFromUrl(cloudVaultUrl);

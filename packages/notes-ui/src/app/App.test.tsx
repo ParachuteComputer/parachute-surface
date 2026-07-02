@@ -72,6 +72,32 @@ describe("App", () => {
     });
   });
 
+  it("forwards a root-path ?add= deep link to /add, preserving companions (cloud console link)", async () => {
+    // The cloud console links the origin root — `/?add=<encoded vault URL>`.
+    // NotesIndex must forward to /add with the full search string; AddVault
+    // then consumes ?add= (stripping it from history) while ?redirect=
+    // survives. This is the headline path for "Open in Notes".
+    window.history.replaceState(
+      {},
+      "",
+      "/notes/?add=https%3A%2F%2Fu.parachute.computer%2Fvault%2Faaron&redirect=%2Fimport",
+    );
+    render(<App />);
+
+    // Lands on the connect screen (lazy route), field prefilled from the
+    // forwarded ?add= value.
+    expect(await screen.findByRole("heading", { name: /connect a vault/i })).toBeInTheDocument();
+    expect((screen.getByLabelText(/vault address/i) as HTMLInputElement).value).toBe(
+      "https://u.parachute.computer/vault/aaron",
+    );
+    // ?add= consumed + stripped; ?redirect= preserved. External URL sits
+    // under the /notes mount (basename applied — never /notes/notes).
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/notes/add");
+      expect(window.location.search).toBe("?redirect=%2Fimport");
+    });
+  });
+
   it("clamps horizontal overflow at the shell so a stray wide descendant can't scroll the viewport", () => {
     render(<App />);
     // Belt-and-suspenders against mobile overflow regressions. If any

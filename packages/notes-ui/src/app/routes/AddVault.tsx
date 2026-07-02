@@ -103,6 +103,11 @@ export function AddVault() {
     next.delete("add");
     setSearchParams(next, { replace: true });
 
+    // When an explicit ?url= rides along, prefill-only wins: the field
+    // displays queryUrl, so auto-beginning against a DIFFERENT ?add= value
+    // would be a display/action mismatch a crafted link could exploit.
+    if (queryUrl) return;
+
     // Only explicit http(s) URLs may auto-begin OAuth — a crafted link must
     // not smuggle another scheme (or a bare hostname) into the flow.
     if (!addUrlIsHttp) return;
@@ -126,7 +131,7 @@ export function AddVault() {
     }
 
     void connect(normalized);
-  }, [addUrl, addUrlIsHttp, searchParams, setSearchParams, navigate, connect]);
+  }, [addUrl, addUrlIsHttp, queryUrl, searchParams, setSearchParams, navigate, connect]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
