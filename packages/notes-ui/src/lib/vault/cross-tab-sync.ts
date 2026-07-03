@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { AUTH_HALT_KEY_PREFIX, useAuthHaltStore } from "./auth-halt-store";
-import { SCHEMA_BANNER_KEY_PREFIX, useSchemaBannerStore } from "./schema-banner-store";
 import { ACTIVE_KEY, VAULTS_KEY, loadActiveVaultId, loadVaults } from "./storage";
 import { useVaultStore } from "./store";
 
@@ -18,8 +17,6 @@ import { useVaultStore } from "./store";
 //   - lens:auth-halt:<id>               (per-vault auth halt; reload entire
 //                                        halt store because there's no per-
 //                                        key removal in zustand)
-//   - notes:schema-banner-dismissed:<id> (per-vault schema-banner dismissal
-//                                        from notes#129 — same pattern)
 
 export function useCrossTabVaultSync(): void {
   useEffect(() => {
@@ -33,7 +30,6 @@ export function useCrossTabVaultSync(): void {
           activeVaultId: loadActiveVaultId(),
         });
         useAuthHaltStore.getState().reloadFromStorage();
-        useSchemaBannerStore.getState().reloadFromStorage();
         return;
       }
       if (e.key === ACTIVE_KEY) {
@@ -46,10 +42,6 @@ export function useCrossTabVaultSync(): void {
       }
       if (e.key.startsWith(AUTH_HALT_KEY_PREFIX)) {
         useAuthHaltStore.getState().reloadFromStorage();
-        return;
-      }
-      if (e.key.startsWith(SCHEMA_BANNER_KEY_PREFIX)) {
-        useSchemaBannerStore.getState().reloadFromStorage();
         return;
       }
     }

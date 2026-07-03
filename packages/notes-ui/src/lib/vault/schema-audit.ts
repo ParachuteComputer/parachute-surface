@@ -1,11 +1,12 @@
 import type { VaultClient } from "./client";
 import { NOTES_REQUIRED_SCHEMA, type RequiredTagDecl } from "./schema";
 
-// Audit helper for notes#129 — compare the vault's current tag schema
-// against `NOTES_REQUIRED_SCHEMA` and return a structured diff. Powers
-// the Settings panel (per-tag rows + one-click fix) AND the connect-time
-// banner. Idempotent + side-effect free — the fix path goes through
-// `ensureNotesSchema()` (which re-uses the audit's misaligned set).
+// Audit helper — compare the vault's current tag schema against
+// `NOTES_REQUIRED_SCHEMA` and return a structured diff. Originally built
+// for notes#129's Settings panel + connect-time banner (both retired
+// 2026-07 in favor of the quiet lazy-ensure); kept as the pure read side
+// that `ensureNotesSchema()` uses to decide which tags are MISSING and
+// need creating. Idempotent + side-effect free.
 //
 // Distinguished from `schema-ensure.ts` so this module can be imported
 // without dragging in the per-session ref guard. The audit is read-only;
@@ -50,8 +51,8 @@ export interface SchemaAuditResult {
 }
 
 // String[] equality with null/undefined normalization. `parent_names: null`
-// from vault means "no parents"; `[]` means same thing. Schema declares
-// either `["capture"]` or nothing — normalize both sides before compare.
+// from vault means "no parents"; `[]` means same thing. The declared schema
+// carries no parents today — normalize both sides before compare.
 function parentNamesEqual(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
   const av = a ?? [];
   const bv = b ?? [];
@@ -90,9 +91,8 @@ function diffOne(decl: RequiredTagDecl, row: TagSchemaRow | undefined): TagAudit
 }
 
 // Fetches the vault's tag schema and diffs against `NOTES_REQUIRED_SCHEMA`.
-// Network failures bubble — callers decide whether to retry / surface in
-// UI. The Settings panel renders an error state; the connect-time banner
-// silently skips (no banner is better than a misleading one).
+// Network failures bubble — callers decide whether to retry / surface;
+// `ensureNotesSchema()` swallows them (capture must never fail on this).
 export async function auditSchema(client: VaultClient): Promise<SchemaAuditResult> {
   const rows = await client.listTagsWithSchema();
   const byName = new Map(rows.map((r) => [r.name, r] as const));

@@ -117,16 +117,30 @@ export function NoteNew() {
   const pending = mutation.isPending || isSavingAudio;
 
   // ---- text-only save ------------------------------------------------------
+  // A typed note through this surface IS a capture: it carries the capture
+  // role tag (default `capture`) + `metadata.source: "text"` so the how-it-
+  // arrived axis lives in metadata, not tag identity (2026-07 one-tag
+  // simplification).
   const saveTextOnly = useCallback(() => {
     if (!isValid || pending) return;
     const explicit = draft.tags;
     const extracted = extractHashtags(draft.content);
-    const allTags = Array.from(new Set([...explicit, ...extracted].filter((t) => t.length > 0)));
+    const allTags = Array.from(
+      new Set([roles.captureText, ...explicit, ...extracted].filter((t) => t.length > 0)),
+    );
     const payload: CreateNotePayload = {
       content: draft.content,
       path: draft.path.trim(),
+      metadata: { source: "text" },
     };
     if (allTags.length) payload.tags = allTags;
+
+    // Fire-and-forget schema ensure — creates the `capture` tag row if the
+    // vault doesn't have it yet. Never blocks the save; vault accepts notes
+    // with unwritten tag-identity rows.
+    if (client) {
+      void ensureNotesSchema(activeVault.id, client);
+    }
 
     setSaveError(null);
     mutation.mutate(payload, {
@@ -160,7 +174,19 @@ export function NoteNew() {
         }
       },
     });
-  }, [draft, isValid, linkAttachment, mutation, navigate, pending, pushToast, staged]);
+  }, [
+    activeVault,
+    client,
+    draft,
+    isValid,
+    linkAttachment,
+    mutation,
+    navigate,
+    pending,
+    pushToast,
+    roles.captureText,
+    staged,
+  ]);
 
   // ---- audio save ----------------------------------------------------------
   // Mirrors Capture's audio path: enqueue create-note + upload-attachment +
@@ -182,6 +208,11 @@ export function NoteNew() {
     const path = draft.path.trim();
     const explicit = draft.tags;
     const extracted = extractHashtags(draft.content);
+    // Audio present → this is a voice capture (`metadata.source: "voice"`,
+    // below). The voice role tag (default `capture`) rides along; when the
+    // operator also typed text, the text role tag joins it — a no-op under
+    // the defaults (both roles point at `capture`, de-duped), but it keeps
+    // custom role mappings honest.
     const finalTags = Array.from(
       new Set([roles.captureVoice, ...explicit, ...extracted].filter((t) => t.length > 0)),
     );
@@ -197,8 +228,9 @@ export function NoteNew() {
       ? `${draft.content.trim()}\n\n_Transcript pending._\n\n![[${filename}]]\n`
       : `_Transcript pending._\n\n![[${filename}]]\n`;
 
-    // Fire-and-forget schema ensure — mirrors Capture's behavior. Vault
-    // accepts notes with unwritten tag-identity rows, so we don't await.
+    // Fire-and-forget schema ensure — creates the `capture` tag row if the
+    // vault doesn't have it yet. Vault accepts notes with unwritten
+    // tag-identity rows, so we don't await.
     if (client) {
       void ensureNotesSchema(activeVault.id, client);
     }
@@ -213,6 +245,7 @@ export function NoteNew() {
           payload: {
             content: body,
             path,
+            metadata: { source: "voice" },
             ...(tags.length ? { tags } : {}),
           },
         },
