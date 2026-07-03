@@ -87,6 +87,7 @@ function renderAddVault(initialPath = "/add") {
           }
         />
         <Route path="/" element={<div>Today timeline</div>} />
+        <Route path="/import" element={<div>Import wizard</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -378,8 +379,8 @@ describe("AddVault ?add= connect deep link", () => {
     expect(loadPendingOAuth()).toBeNull();
   });
 
-  it("switches to an already-connected vault instead of re-running OAuth", async () => {
-    mockDiscoveryAndDcr();
+  // Seeds the store with cloudVaultUrl already connected; returns its id.
+  function seedConnectedVault() {
     const id = vaultIdFromUrl(cloudVaultUrl);
     useVaultStore.setState({
       vaults: {
@@ -397,11 +398,34 @@ describe("AddVault ?add= connect deep link", () => {
       },
       activeVaultId: null,
     });
+    return id;
+  }
+
+  it("switches to an already-connected vault instead of re-running OAuth", async () => {
+    mockDiscoveryAndDcr();
+    const id = seedConnectedVault();
 
     renderAddVault(`/add?add=${encodeURIComponent(cloudVaultUrl)}`);
 
-    // Lands on the index route (the connected vault's home), no OAuth.
+    // No redirect companion → lands on the index route (the connected
+    // vault's home), no OAuth.
     expect(await screen.findByText("Today timeline")).toBeInTheDocument();
+    expect(useVaultStore.getState().activeVaultId).toBe(id);
+    expect(window.location.assign).not.toHaveBeenCalled();
+    expect(loadPendingOAuth()).toBeNull();
+  });
+
+  it("honours the redirect companion when the vault is already connected", async () => {
+    // The cloud console's "Import notes" door arrives as
+    // `?add=<vault>&redirect=%2Fimport`. The already-connected short-circuit
+    // must land on the sanitized redirect target — not home — matching the
+    // fresh-connect path (OAuthCallback honours it on the pending state).
+    mockDiscoveryAndDcr();
+    const id = seedConnectedVault();
+
+    renderAddVault(`/add?add=${encodeURIComponent(cloudVaultUrl)}&redirect=%2Fimport`);
+
+    expect(await screen.findByText("Import wizard")).toBeInTheDocument();
     expect(useVaultStore.getState().activeVaultId).toBe(id);
     expect(window.location.assign).not.toHaveBeenCalled();
     expect(loadPendingOAuth()).toBeNull();
