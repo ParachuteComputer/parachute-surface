@@ -6,6 +6,7 @@ import { PinArchiveButtons } from "@/components/PinArchiveButtons";
 import { TranscriptionStatus } from "@/components/TranscriptionStatus";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { OfflineRibbon } from "@/components/ui/OfflineRibbon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { leadingH1, pathLeaf, stripLeadingH1 } from "@/lib/note-title";
 import { pushRecent } from "@/lib/quick-switch/recents";
@@ -38,12 +39,18 @@ export function NoteView() {
 
       {note.isPending ? (
         <NoteSkeleton />
+      ) : note.data ? (
+        // Data present wins over an error: a failed background refetch (e.g.
+        // going offline mid-read) must not blank the note you're reading — we
+        // keep the saved copy on screen under a small offline ribbon.
+        <>
+          {note.isError ? <OfflineRibbon /> : null}
+          <NoteBody note={note.data} />
+        </>
       ) : note.isError ? (
         <NoteErrorBlock error={note.error} retry={() => note.refetch()} />
-      ) : !note.data ? (
-        <NotFoundBlock id={decodedId ?? ""} />
       ) : (
-        <NoteBody note={note.data} />
+        <NotFoundBlock id={decodedId ?? ""} />
       )}
     </div>
   );

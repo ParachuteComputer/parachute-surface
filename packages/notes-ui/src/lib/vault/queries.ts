@@ -1,5 +1,5 @@
 import type { LensDB } from "@/lib/sync/db";
-import { newLocalId } from "@/lib/sync/id-map";
+import { isLocalId, newLocalId, resolveNoteId } from "@/lib/sync/id-map";
 import { enqueue } from "@/lib/sync/queue";
 import { useSync } from "@/providers/SyncProvider";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -251,11 +251,39 @@ export function useUpdateTag() {
 export function useNote(id: string | undefined) {
   const client = useActiveVaultClient();
   const activeId = useVaultStore((s) => s.activeVaultId);
+  const { db } = useSync();
+  const qc = useQueryClient();
 
   return useQuery({
     queryKey: ["note", activeId, id],
     enabled: !!client && !!id,
-    queryFn: () => client!.getNote(id!, { includeLinks: true, includeAttachments: true }),
+    queryFn: async () => {
+      // Offline-created notes (a voice or text capture made while offline)
+      // navigate to `/n/<localId>` before their `create-note` row drains.
+      // `getNote(localId)` would 404, so resolve the local id to its server id
+      // via the sync id-map first. Until the row drains (no mapping yet), serve
+      // the optimistic note the capture flow seeded into the cache — the
+      // capture must land on a readable note, not an error screen.
+      if (id && isLocalId(id)) {
+        const realId = db && activeId ? await resolveNoteId(db, id, activeId) : null;
+        if (!realId) {
+          const optimistic = qc.getQueryData<Note>(["note", activeId, id]);
+          if (optimistic) return optimistic;
+          throw new Error("This note is still syncing — try again in a moment.");
+        }
+        return client!.getNote(realId, { includeLinks: true, includeAttachments: true });
+      }
+      return client!.getNote(id!, { includeLinks: true, includeAttachments: true });
+    },
+    // While we're still sitting on a local id that hasn't resolved to a server
+    // note, poll so the view flips to the real note once the `create-note` row
+    // drains and the id-map fills. Stops as soon as the data is a server note.
+    refetchInterval: (query) => {
+      if (!id || !isLocalId(id)) return false;
+      const data = query.state.data as Note | undefined;
+      if (data && !isLocalId(data.id)) return false;
+      return 2_000;
+    },
     staleTime: 10_000,
   });
 }
@@ -301,7 +329,7 @@ export async function withOfflineFallback<T>(
   }
 }
 
-function optimisticCreatedNote(payload: CreateNotePayload, localId: string): Note {
+export function optimisticCreatedNote(payload: CreateNotePayload, localId: string): Note {
   const now = new Date().toISOString();
   return {
     id: localId,

@@ -46,37 +46,46 @@
 import { detectMountBase } from "./base-url";
 
 /**
- * The mount path the current bundle was built for. Trimmed of trailing
- * slash to match `detectMountBase()`'s no-trailing-slash contract.
+ * Pure normalisation of the build-time mount signals into the base the
+ * service worker + PWA manifest were baked for. Extracted from `buildTimeBase`
+ * so it can be unit-tested without stubbing `import.meta.env`.
  *
- * `import.meta.env.BASE_URL` reflects Vite's `base` config option at
- * build time. The current `vite.config.ts` sets `base: ""` for relative
- * asset URLs, in which case Vite still surfaces the canonical mount via
- * the `VITE_BASE_PATH` env arg through the manifest's `start_url` /
- * `scope`. We mirror that with our own env var read so the gate
- * compares against the same path the PWA manifest baked in.
+ * The load-bearing case is the **standalone origin-root deploy**
+ * (notes.parachute.computer), whose build stamps `VITE_BASE_PATH="/"`.
+ * `detectMountBase()` returns "" (origin root) for that build — so the
+ * build-time base MUST also be "" or the SW gate (`runtime === build-time`,
+ * see `shouldRegisterServiceWorker`) can never pass, and the installed PWA
+ * gets no offline shell on cold start. We therefore special-case an explicit
+ * `VITE_BASE_PATH === "/"` to "" BEFORE the generic normalisation below —
+ * which otherwise folds a bare "/" into the legacy `/notes` default. That
+ * generic fold is correct only when the "/" arrives via Vite's `BASE_URL`
+ * on a bundled-host build (`base: ""` → `BASE_URL === "/"`) where
+ * `VITE_BASE_PATH` is unset; there the runtime mount is `/notes` or
+ * `/surface/<slug>` (never ""), so `/notes` is the right comparator.
  *
- * Resolution order:
- *   1. `import.meta.env.VITE_BASE_PATH` — explicit override (matches
- *      `vite.config.ts`'s `basePath` variable).
- *   2. `import.meta.env.BASE_URL` — Vite's own resolved base, used when
- *      no override is provided.
- *   3. `/notes/` — the historical daemon default.
+ * This mirrors `detectMountBase()`'s `STANDALONE_DEPLOY` branch
+ * (`VITE_BASE_PATH === "/"` → "") so the two sides of the gate agree by
+ * construction.
  */
-function buildTimeBase(): string {
-  const envOverride =
-    typeof import.meta !== "undefined" && import.meta.env
-      ? (import.meta.env.VITE_BASE_PATH as string | undefined)
-      : undefined;
-  const baseUrl =
-    typeof import.meta !== "undefined" && import.meta.env
-      ? (import.meta.env.BASE_URL as string | undefined)
-      : undefined;
-  const raw = envOverride && envOverride.length > 0 ? envOverride : baseUrl;
+export function resolveBuildTimeBase(
+  viteBasePath: string | undefined,
+  baseUrl: string | undefined,
+): string {
+  // Standalone deploy: explicit VITE_BASE_PATH="/" → origin-root mount "".
+  if (viteBasePath === "/") return "";
+  const raw = viteBasePath && viteBasePath.length > 0 ? viteBasePath : baseUrl;
   // When vite.config sets `base: ""`, BASE_URL becomes "/" — useless as a
-  // mount comparator. Fall through to the legacy default in that case.
+  // mount comparator on a bundled-host build. Fall through to the legacy
+  // default in that case.
   const normalised = !raw || raw === "" || raw === "/" ? "/notes/" : raw;
   return normalised.replace(/\/$/, "") || "/notes";
+}
+
+function buildTimeBase(): string {
+  const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : undefined;
+  const viteBasePath = env ? (env.VITE_BASE_PATH as string | undefined) : undefined;
+  const baseUrl = env ? (env.BASE_URL as string | undefined) : undefined;
+  return resolveBuildTimeBase(viteBasePath, baseUrl);
 }
 
 /** Frozen for downstream comparison + log lines. */

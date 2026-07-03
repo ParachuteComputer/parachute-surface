@@ -1,5 +1,37 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.12] - 2026-07-03
+
+### Fixed — Stage-0 offline trust (three phone-first PWA fixes)
+
+Three bug fixes from the 2026-07-03 offline-PWA brief that make the installed,
+phone-first PWA trustworthy offline. The excellent existing sync-queue behavior
+is untouched.
+
+- **Service worker now registers on the promoted standalone mount.** The SW
+  registration gate compares the runtime mount to the build-time base. For the
+  standalone `notes.parachute.computer` build (`VITE_BASE_PATH=/`),
+  `detectMountBase()` returns `""` but the build-time base normalised `"/"` →
+  `"/notes"`, so the gate could **never** pass — the installed PWA had **zero
+  offline shell** on cold start (the front door had no offline capability at
+  all). `resolveBuildTimeBase` now maps the standalone `VITE_BASE_PATH="/"`
+  build to `""`, matching `detectMountBase()` so the gate passes. Bundled-host
+  / local mounts (`/notes`, `/surface/<slug>`) stay gated exactly as before.
+- **A failed background refetch no longer blanks what you're reading.** Today,
+  the single-note view, and the All-notes list rendered the error block on
+  `isError` **without** checking for cached `data`. They now render the saved
+  data (under a quiet "Offline — showing what's saved" ribbon) whenever data is
+  present, and fall back to the error block only when there is genuinely no
+  cached data.
+- **Offline voice capture lands on a readable note, not an error page.** The
+  audio path navigated to `/n/<localId>` before its `create-note` row drained,
+  but never seeded the query cache (the text path already did), so
+  `getNote("local-…")` 404'd right after "Captured — syncing audio." The audio
+  path now seeds the optimistic note into the cache (mirroring the text path),
+  and `useNote` resolves a local id via the sync id-map — rendering the
+  optimistic note until sync assigns the real id, then flipping to the server
+  note.
+
 ## [0.1.11] - 2026-07-03
 
 ### Changed — one capture tag, quietly ensured
