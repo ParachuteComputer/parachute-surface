@@ -1,43 +1,59 @@
 import type { VaultClient } from "./client";
-import { NOTES_REQUIRED_SCHEMA } from "./schema";
+import type { RequiredTagDecl } from "./schema";
+import { auditSchema } from "./schema-audit";
 
 // Per-session ref guard so we don't hammer the vault on every capture. The
-// `update-tag` calls are idempotent (already-correct rows are no-op writes
-// vault-side), but there's no point making the network round-trip if we
-// already ensured this vault's schema in this session.
+// audit + create calls are idempotent, but there's no point making the
+// network round-trip if we already ensured this vault's schema in this
+// session.
 //
 // Module-level Set rather than a hook because the call sites
-// (Capture's save) are short-lived components and we want the guard to
+// (NoteNew's save paths) are short-lived components and we want the guard to
 // survive remount. localStorage was the alternative but it has the
 // "delete localStorage = re-run forever" failure mode the team-lead
 // flagged — refs in a module are the right scope: ephemeral, but
 // session-stable.
 const ensuredVaults = new Set<string>();
 
-// Surface schema-ensure entry point. Fires the `update-tag` calls for the
-// declared schema (NOTES_REQUIRED_SCHEMA) against the given vault.
-// Idempotent: subsequent calls per (vault, session) are skipped via the
-// module-level guard. First-call failures are logged but not rethrown —
-// schema-ensure is plumbing, not a user-actionable surface; the next
-// capture will retry. If the user needs visibility into schema state,
-// notes#129 will add the audit UI.
+// The schema-apply machinery as a plain function: writes the given tag
+// declarations via `update-tag`. Callers decide WHICH declarations to write —
+// the lazy-ensure passes only the audit's `missing` set so an existing
+// (possibly user-customized) tag row is never overwritten.
+async function applyTagDecls(client: VaultClient, decls: RequiredTagDecl[]): Promise<void> {
+  // Sequential rather than Promise.all — write parents before children so
+  // `parent_names` can resolve. The vault's PUT is permissive about ordering,
+  // but keeping the order matches the conceptual model + makes failure modes
+  // clearer in logs. (The declared schema is a single parentless tag today;
+  // the ordering discipline stands if it ever grows again.)
+  for (const decl of decls) {
+    await client.updateTag(decl.name, {
+      description: decl.description,
+      ...(decl.parent_names ? { parent_names: decl.parent_names } : {}),
+    });
+  }
+}
+
+// Quiet lazy-ensure, fired on first capture into a vault this session
+// (NoteNew's text + voice save paths). Audits the vault's tags against
+// `NOTES_REQUIRED_SCHEMA` and creates only the MISSING ones — a tag the
+// vault already has is left alone even if its description drifted; the row
+// belongs to the operator once it exists. Replaces the connect-time
+// suggestion banner (notes#129, retired 2026-07): populate quietly instead
+// of prompting.
+//
+// Contract: best-effort, silent, idempotent — NEVER blocks or fails the
+// capture. Failures are logged and the guard rolls back so a later capture
+// retries.
 export async function ensureNotesSchema(vaultId: string, client: VaultClient): Promise<void> {
   if (ensuredVaults.has(vaultId)) return;
   // Mark as ensured BEFORE the async calls so concurrent invocations don't
-  // race into a double-fire (Capture's save can run in parallel via the
-  // 5s autosave + manual click in the same tick).
+  // race into a double-fire (two save paths can run in the same tick).
   ensuredVaults.add(vaultId);
   try {
-    // Sequential rather than Promise.all — vault writes the parent first
-    // so children can resolve `parent_names`. The vault's PUT is permissive
-    // about ordering (children can reference yet-to-exist parents), but
-    // keeping the order matches the conceptual model + makes failure modes
-    // clearer in logs.
-    for (const decl of NOTES_REQUIRED_SCHEMA.tags) {
-      await client.updateTag(decl.name, {
-        description: decl.description,
-        ...(decl.parent_names ? { parent_names: decl.parent_names } : {}),
-      });
+    const audit = await auditSchema(client);
+    const missing = audit.missing.map((row) => row.expected);
+    if (missing.length > 0) {
+      await applyTagDecls(client, missing);
     }
   } catch (err) {
     // Roll back the guard so a future capture can retry. Schema-ensure is
@@ -45,30 +61,11 @@ export async function ensureNotesSchema(vaultId: string, client: VaultClient): P
     // session.
     ensuredVaults.delete(vaultId);
     // Don't rethrow — the capture itself still succeeds without the schema
-    // setup. Log for debugging; notes#129 will surface this in the audit UI.
+    // setup (vault accepts notes whose tags have no identity row yet).
     if (typeof console !== "undefined") {
       console.warn(`[schema-ensure] failed to ensure required schema for vault ${vaultId}:`, err);
     }
   }
-}
-
-// User-driven fix path (notes#129). Always runs the full sweep — bypasses
-// the per-session guard, because the user is explicitly asking us to ensure
-// the schema (Settings panel button or connect-time banner action). Marks
-// the vault as ensured on success so subsequent first-captures don't redo
-// the work. Throws on failure so the UI can show "fix failed" rather than
-// silently swallowing (unlike `ensureNotesSchema` which is fire-and-forget
-// from capture's save path).
-export async function fixSchema(vaultId: string, client: VaultClient): Promise<void> {
-  for (const decl of NOTES_REQUIRED_SCHEMA.tags) {
-    await client.updateTag(decl.name, {
-      description: decl.description,
-      ...(decl.parent_names ? { parent_names: decl.parent_names } : {}),
-    });
-  }
-  // Fix succeeded → in-session "we ensured this vault" is now true. Skip
-  // re-running on the next capture.
-  ensuredVaults.add(vaultId);
 }
 
 // Test-only escape hatch — resets the in-session guard so a test can

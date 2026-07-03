@@ -1,7 +1,6 @@
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { Header } from "@/components/Header";
 import { QuickSwitchMount } from "@/components/QuickSwitchMount";
-import { SchemaAuditBanner } from "@/components/SchemaAuditBanner";
 import { TextSizeShortcutsMount } from "@/components/TextSizeControl";
 import { Toaster } from "@/components/Toaster";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -12,7 +11,6 @@ import { useVaultStore } from "@/lib/vault";
 import { useCrossTabVaultSync } from "@/lib/vault/cross-tab-sync";
 import { useActiveVaultClient } from "@/lib/vault/queries";
 import { useReachabilityProbe } from "@/lib/vault/reachability-probe";
-import { SchemaAuditRunnerMount } from "@/lib/vault/schema-audit-runner";
 import { QueryProvider } from "@/providers/QueryProvider";
 import { SyncProvider } from "@/providers/SyncProvider";
 import { Suspense, lazy, useEffect } from "react";
@@ -121,7 +119,6 @@ export function App() {
     <QueryProvider>
       <SyncProvider>
         <ReachabilityProbeMount />
-        <SchemaAuditRunnerMount />
         <TextSizeShortcutsMount />
         {/*
           Mount-agnostic basename: detected at runtime from window.location
@@ -135,7 +132,6 @@ export function App() {
             <Toaster />
             <UpdateBanner />
             <VaultStatusBanner />
-            <SchemaAuditBanner />
             <Header />
             <QuickSwitchMount />
             <main>

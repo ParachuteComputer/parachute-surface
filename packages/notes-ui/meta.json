@@ -14,14 +14,6 @@
       {
         "name": "capture",
         "description": "Notes captured directly by the user (text or voice)."
-      },
-      {
-        "name": "capture/text",
-        "description": "Text capture."
-      },
-      {
-        "name": "capture/voice",
-        "description": "Voice capture."
       }
     ]
   }

@@ -57,8 +57,8 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
   };
 });
 
-// schema-ensure fires real `PUT /api/tags/:name` against the active vault.
-// The text-only tests mock fetch but don't enumerate every tag-ensure call;
+// schema-ensure fires real vault calls (audit GET + create PUT) against the
+// active vault. The tests here mock fetch but don't enumerate those calls;
 // stub the module to a no-op (schema-ensure has its own focused tests).
 vi.mock("@/lib/vault/schema-ensure", () => ({
   ensureNotesSchema: vi.fn(async () => {}),
@@ -345,12 +345,21 @@ describe("NoteNew route — unified create surface", () => {
     );
     expect(postCall).toBeDefined();
     const body = JSON.parse((postCall![1] as RequestInit).body as string);
-    // No `metadata.summary` — Summary field is gone from this surface.
+    // A typed note through this surface is a capture: the capture role tag
+    // (default `capture`) leads the tag list and `metadata.source` records
+    // HOW it arrived. No `metadata.summary` — Summary field is gone from
+    // this surface.
     expect(body).toEqual({
       content: "# hi",
       path: "Projects/README",
-      tags: ["docs"],
+      metadata: { source: "text" },
+      tags: ["capture", "docs"],
     });
+
+    // The quiet lazy-ensure fired for the active vault (fire-and-forget —
+    // it must never gate the save).
+    const { ensureNotesSchema } = await import("@/lib/vault/schema-ensure");
+    expect(vi.mocked(ensureNotesSchema)).toHaveBeenCalledWith("dev", expect.anything());
 
     expect(useToastStore.getState().toasts[0]?.message).toContain("Created");
   });
@@ -385,7 +394,7 @@ describe("NoteNew route — unified create surface", () => {
       ([, init]) => (init as RequestInit | undefined)?.method === "POST",
     );
     const body = JSON.parse((post![1] as RequestInit).body as string);
-    expect(new Set(body.tags)).toEqual(new Set(["docs", "idea"]));
+    expect(new Set(body.tags)).toEqual(new Set(["capture", "docs", "idea"]));
   });
 
   it("drop file → uploads, inserts image markdown, stages for link-on-create", async () => {
@@ -695,6 +704,15 @@ describe("NoteNew — voice affordance", () => {
     expect(link).toBeDefined();
     if (link && link.mutation.kind === "link-attachment") {
       expect(link.mutation.transcribe).toBe(true);
+    }
+    // Voice capture carries the capture role tag (default `capture`) +
+    // `metadata.source: "voice"` — the how-it-arrived axis lives in
+    // metadata, not tag identity.
+    const create = pending.find((p) => p.mutation.kind === "create-note");
+    expect(create).toBeDefined();
+    if (create && create.mutation.kind === "create-note") {
+      expect(create.mutation.payload.tags).toContain("capture");
+      expect(create.mutation.payload.metadata).toEqual({ source: "voice" });
     }
   });
 

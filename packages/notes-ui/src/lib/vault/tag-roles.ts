@@ -24,15 +24,18 @@ export interface TagRoles {
 export const DEFAULT_TAG_ROLES: TagRoles = {
   pinned: "pinned",
   archived: "archived",
-  // captureVoice/captureText default to the hierarchical `capture/*` shape
-  // (notes#126 reshape). The matching parent + parent_names rows are
-  // declared in `NOTES_REQUIRED_SCHEMA` (schema.ts) and ensured on first
-  // capture per session via `ensureNotesSchema()` — so `tag: "capture"`
-  // queries auto-expand to both children. Existing vaults that have stored
-  // "voice"/"quick" in their settings note keep those values (no
-  // force-migrate); only the defaults a fresh vault inherits change here.
-  captureVoice: "capture/voice",
-  captureText: "capture/text",
+  // captureVoice/captureText both default to the single `capture` tag
+  // (2026-07 simplification — one tag, with the text-vs-voice distinction
+  // riding note metadata `source` instead of tag identity). The tag row is
+  // declared in `NOTES_REQUIRED_SCHEMA` (schema.ts) and lazily ensured on
+  // first capture per session via `ensureNotesSchema()`. The two roles stay
+  // separate knobs so an operator can still route voice memos and typed
+  // notes to different tags. Existing vaults that have stored
+  // "capture/voice"/"capture/text" (or "voice"/"quick" from rc.6) in their
+  // settings note keep those values (no force-migrate); only the defaults a
+  // fresh vault inherits change here.
+  captureVoice: "capture",
+  captureText: "capture",
   view: "view",
 };
 

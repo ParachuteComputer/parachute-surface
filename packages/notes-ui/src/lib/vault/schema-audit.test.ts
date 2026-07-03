@@ -19,7 +19,8 @@ function makeClient(rows: unknown[]): VaultClient {
 }
 
 // Helper — every test starts with the canonical "ok" shape and then
-// mutates one row to exercise the diff branches.
+// mutates one row to exercise the diff branches. The declared schema is
+// a single `capture` tag (2026-07 one-tag simplification).
 function okShape() {
   return NOTES_REQUIRED_SCHEMA.tags.map((decl) => ({
     name: decl.name,
@@ -42,14 +43,14 @@ describe("auditSchema", () => {
     }
   });
 
-  it("detects a missing tag", async () => {
-    // Vault doesn't have `capture/voice` yet.
-    const rows = okShape().filter((r) => r.name !== "capture/voice");
-    const client = makeClient(rows);
+  it("detects the missing `capture` tag", async () => {
+    // Vault doesn't have `capture` yet — e.g. a pre-existing vault that
+    // was never seeded and never captured into.
+    const client = makeClient([]);
     const result = await auditSchema(client);
     expect(result.ok).toBe(false);
     expect(result.missing).toHaveLength(1);
-    expect(result.missing[0]?.name).toBe("capture/voice");
+    expect(result.missing[0]?.name).toBe("capture");
     expect(result.misaligned).toHaveLength(0);
   });
 
@@ -66,20 +67,21 @@ describe("auditSchema", () => {
 
   it("detects misaligned parent_names", async () => {
     const rows = okShape();
-    // `capture/text` declares parent_names: ["capture"]. Mutate to wrong parent.
-    const captureText = rows.find((r) => r.name === "capture/text")!;
-    captureText.parent_names = ["note"];
+    // `capture` declares no parents. A vault row that acquired one (e.g.
+    // leftover hierarchy from the pre-simplification schema) is a diff.
+    const capture = rows.find((r) => r.name === "capture")!;
+    capture.parent_names = ["note"];
     const client = makeClient(rows);
     const result = await auditSchema(client);
     expect(result.ok).toBe(false);
     expect(result.misaligned).toHaveLength(1);
-    expect(result.misaligned[0]?.name).toBe("capture/text");
+    expect(result.misaligned[0]?.name).toBe("capture");
     expect(result.misaligned[0]?.differences).toContain("parent_names");
   });
 
-  it("treats null and empty-array parent_names as equivalent for parent tags", async () => {
-    // Parent `capture` declares no parent_names. Vault could store the
-    // column as `null` OR `[]` — both mean "no parents". Both must pass.
+  it("treats null and empty-array parent_names as equivalent for parentless tags", async () => {
+    // `capture` declares no parent_names. Vault could store the column as
+    // `null` OR `[]` — both mean "no parents". Both must pass.
     const rows = okShape();
     const capture = rows.find((r) => r.name === "capture")!;
     capture.parent_names = [];
@@ -89,8 +91,7 @@ describe("auditSchema", () => {
   });
 
   it("includes every declared tag in `rows` regardless of status", async () => {
-    const rows = okShape().filter((r) => r.name !== "capture/voice");
-    const client = makeClient(rows);
+    const client = makeClient([]);
     const result = await auditSchema(client);
     expect(result.rows).toHaveLength(NOTES_REQUIRED_SCHEMA.tags.length);
     const names = result.rows.map((r) => r.name);
@@ -100,13 +101,15 @@ describe("auditSchema", () => {
   });
 
   it("does not flag extra vault tags (user-owned tags are not audited)", async () => {
-    // A vault that has the required schema PLUS the user's own tags
-    // (e.g. "pinned", "voice" leftover from rc.6) must still come back ok.
-    // Audit is narrow — surface-required only.
+    // A vault that has the required schema PLUS the user's own tags —
+    // including the legacy `capture/text` / `capture/voice` children from
+    // the pre-simplification schema — must still come back ok. Audit is
+    // narrow — surface-required only.
     const rows = [
       ...okShape(),
+      { name: "capture/text", count: 4, description: "Text capture.", parent_names: ["capture"] },
+      { name: "capture/voice", count: 3, description: "Voice capture.", parent_names: ["capture"] },
       { name: "pinned", count: 5, description: null, parent_names: null },
-      { name: "voice", count: 3, description: null, parent_names: null },
     ];
     const client = makeClient(rows);
     const result = await auditSchema(client);

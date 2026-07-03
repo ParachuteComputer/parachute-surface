@@ -1,5 +1,27 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.11] - 2026-07-03
+
+### Changed — one capture tag, quietly ensured
+- **Captures carry a single `capture` tag**; how the note arrived now rides
+  note metadata (`source: "text"` for typed notes, `source: "voice"` when
+  audio is present) instead of the `capture/text` / `capture/voice` tag
+  hierarchy. Typed notes through the create surface are captures too — they
+  previously carried no capture tag at all. Coordinated with parachute-vault
+  shrinking its seeded starter pack to the same single `capture` tag.
+- **`NOTES_REQUIRED_SCHEMA` is now that one tag** (same description, no
+  parents), and `meta.json`'s `required_schema` (the surface-host install-time
+  provisioner input) matches.
+- **Connect-time schema-suggestion banner retired** (with the Settings "Vault
+  schema" audit panel and the audit runner/stores behind them). Replaced by a
+  quiet lazy-ensure: the first capture into a vault this session audits the
+  vault's tags and creates the `capture` row **only if it's missing** —
+  best-effort, silent, never blocks a capture, and never overwrites an
+  existing (possibly operator-customized) tag row.
+- Tag Role defaults for text + voice capture both point at `capture` now.
+  Stored per-vault role customizations are untouched (no force-migrate), and
+  existing notes keep their `capture/text` / `capture/voice` tags.
+
 ## [0.1.7-rc.1] - 2026-06-23
 
 First rc under the resumed per-PR rc-bump convention (every code-touching
