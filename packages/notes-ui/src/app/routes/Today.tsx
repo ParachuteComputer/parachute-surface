@@ -1,3 +1,4 @@
+import { OfflineRibbon } from "@/components/ui";
 import { formatLongDate, pad2, parseDateKey, toDateKey, todayKey } from "@/lib/dates";
 import { noteTitle } from "@/lib/note-title";
 import { relativeTime } from "@/lib/time";
@@ -76,12 +77,15 @@ function Timeline({ vaultName }: { vaultName: string }) {
 
       {notes.isPending ? (
         <Skeleton />
-      ) : notes.isError ? (
+      ) : notes.isError && !notes.data ? (
+        // Only a genuinely empty cache falls through to the error block — when
+        // a background refetch fails but we still hold notes, keep showing them.
         <ErrorBlock error={notes.error} />
       ) : groups.length === 0 ? (
         <TimelineEmpty />
       ) : (
         <div className="space-y-10">
+          {notes.isError ? <OfflineRibbon /> : null}
           {groups.map((g) => (
             <section key={g.key}>
               <SectionLabel>
@@ -201,12 +205,13 @@ function SingleDay({ dateParam }: { dateParam: string }) {
 
       {notes.isPending ? (
         <Skeleton />
-      ) : notes.isError ? (
+      ) : notes.isError && !notes.data ? (
         <ErrorBlock error={notes.error} />
       ) : buckets.created.length === 0 && buckets.edited.length === 0 ? (
         <EmptyBlock isToday={isToday} targetKey={targetKey} />
       ) : (
         <div className="space-y-8">
+          {notes.isError ? <OfflineRibbon /> : null}
           {buckets.created.length > 0 ? (
             <Section
               title={isToday ? "Created today" : `Created on ${targetKey}`}

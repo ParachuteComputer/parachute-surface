@@ -3,6 +3,7 @@ import { type LensDB, openLensDB } from "@/lib/sync/db";
 import { listPending } from "@/lib/sync/queue";
 import { useToastStore } from "@/lib/toast/store";
 import { useVaultStore } from "@/lib/vault/store";
+import type { Note } from "@/lib/vault/types";
 import { SyncProvider } from "@/providers/SyncProvider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -714,6 +715,59 @@ describe("NoteNew — voice affordance", () => {
       expect(create.mutation.payload.tags).toContain("capture");
       expect(create.mutation.payload.metadata).toEqual({ source: "voice" });
     }
+  });
+
+  it("seeds the optimistic note into the query cache so /n/<localId> lands on a readable note [FIX 3]", async () => {
+    installFetch({});
+    // Non-zero gcTime: the seeded /n/<localId> query has no observer here (the
+    // route is a stub), so gcTime:0 would garbage-collect it before we inspect.
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 60_000 } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SyncProvider>
+          <MemoryRouter initialEntries={["/new"]}>
+            <Routes>
+              <Route path="/new" element={<NoteNew />} />
+              <Route path="/n/:id" element={<div>NoteViewPage</div>} />
+              <Route path="/" element={<div>NotesListPage</div>} />
+            </Routes>
+          </MemoryRouter>
+        </SyncProvider>
+      </QueryClientProvider>,
+    );
+
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.pointerDown(recordBtn);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releasePointer();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage")).toBeInTheDocument();
+    });
+
+    // The audio path seeds an optimistic note into the cache keyed by its local
+    // id (mirroring the text path) so NoteView can render it immediately rather
+    // than 404ing on getNote(localId).
+    const seeded = qc
+      .getQueryCache()
+      .findAll({ queryKey: ["note", "dev"] })
+      .map((q) => q.state.data as Note | undefined)
+      .find((d) => typeof d?.content === "string" && d.content.includes("Transcript pending"));
+    expect(seeded).toBeDefined();
+    expect(seeded?.metadata).toEqual({ source: "voice" });
+    expect(seeded?.id.startsWith("local-")).toBe(true);
   });
 
   it("discard audio reverts the panel to idle", async () => {

@@ -3,6 +3,7 @@ import { TagBrowser } from "@/components/TagBrowser";
 import { normalizeTag } from "@/components/TagEditor";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { OfflineRibbon } from "@/components/ui/OfflineRibbon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { noteTitle } from "@/lib/note-title";
@@ -448,23 +449,28 @@ export function Notes({ preset: presetProp }: { preset?: NotesPreset } = {}) {
 
           {notes.isPending ? (
             <SkeletonRows />
-          ) : notes.isError ? (
+          ) : notes.isError && !notes.data ? (
+            // Keep the last-loaded list on screen when a background refetch
+            // fails (offline mid-session); only a truly empty cache errors.
             <NotesErrorBlock error={notes.error} retry={() => notes.refetch()} />
           ) : displayNotes && displayNotes.length > 0 ? (
-            <ol
-              aria-label="Notes"
-              className="divide-y divide-border rounded-md border border-border bg-card"
-            >
-              {displayNotes.map((n) => (
-                <NoteRow
-                  key={n.id}
-                  note={n}
-                  pinnedTag={roles.pinned}
-                  archivedTag={roles.archived}
-                  quickTagSuggestions={preset === "untagged" ? (tags.data ?? []) : undefined}
-                />
-              ))}
-            </ol>
+            <>
+              {notes.isError ? <OfflineRibbon /> : null}
+              <ol
+                aria-label="Notes"
+                className="divide-y divide-border rounded-md border border-border bg-card"
+              >
+                {displayNotes.map((n) => (
+                  <NoteRow
+                    key={n.id}
+                    note={n}
+                    pinnedTag={roles.pinned}
+                    archivedTag={roles.archived}
+                    quickTagSuggestions={preset === "untagged" ? (tags.data ?? []) : undefined}
+                  />
+                ))}
+              </ol>
+            </>
           ) : (
             <NotesEmptyBlock filtering={isFilteringActive(queryState) || !!preset} />
           )}

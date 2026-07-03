@@ -1,10 +1,33 @@
 import { NoteView } from "@/app/routes/NoteView";
+import { type LensDB, openLensDB } from "@/lib/sync/db";
+import { newLocalId, recordIdMap } from "@/lib/sync/id-map";
 import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// FIX 3 uses `useSync().db` to resolve a local id via the id-map. Mock the
+// provider so the id-map test can hand `useNote` a db it fully controls
+// (deterministic — no async provider bootstrap). The default `db: null` matches
+// the un-wrapped context default the other describes already run against, so
+// real-id tests are unaffected.
+const { syncState } = vi.hoisted(() => ({ syncState: { db: null as LensDB | null } }));
+vi.mock("@/providers/SyncProvider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/providers/SyncProvider")>();
+  return {
+    ...actual,
+    useSync: () => ({
+      db: syncState.db,
+      blobStore: null,
+      engine: null,
+      isOnline: true,
+      isDraining: false,
+      lastSyncedAt: null,
+    }),
+  };
+});
 
 interface FetchMap {
   [urlMatcher: string]: { status?: number; body: unknown };
@@ -383,5 +406,92 @@ describe("NoteView route", () => {
       const body = JSON.parse((patchCall![1] as RequestInit).body as string);
       expect(body.tags).toEqual({ add: ["pinned"] });
     });
+  });
+});
+
+describe("NoteView — offline voice capture (local id → id-map resolution) [FIX 3]", () => {
+  let db: LensDB;
+
+  beforeEach(async () => {
+    indexedDB.deleteDatabase("parachute-lens");
+    db = await openLensDB();
+    syncState.db = db;
+    localStorage.clear();
+    sessionStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    seedStore();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    db.close();
+    syncState.db = null;
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+  });
+
+  function renderWith(qc: QueryClient, path: string) {
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/n/:id" element={<NoteView />} />
+            <Route path="*" element={<div>Other</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders the optimistic note for a not-yet-synced local id, then the server note once the id-map fills", async () => {
+    const localId = newLocalId();
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, refetchOnWindowFocus: false } },
+    });
+    // The capture flow seeds the optimistic note into the cache before it
+    // navigates to /n/<localId>. A bare getNote(localId) would 404.
+    qc.setQueryData(["note", "dev", localId], {
+      id: localId,
+      path: "Voice/memo",
+      createdAt: "2026-07-03T00:00:00Z",
+      updatedAt: "2026-07-03T00:00:00Z",
+      content: "_Transcript pending._",
+      tags: ["capture"],
+      metadata: { source: "voice" },
+    });
+    // The server route for the eventual real note. It is never hit during the
+    // optimistic phase (getNote(localId) is short-circuited to the cached
+    // optimistic row); only a resolved id-map fetches it. Installed up front
+    // because the vault client binds `fetch` at construction (client.ts:145),
+    // so a later re-stub would be invisible to it. Everything else 404s —
+    // proving we never fall through to getNote(localId).
+    installFetch({
+      "id=real-123": {
+        body: {
+          id: "real-123",
+          path: "Voice/memo",
+          createdAt: "2026-07-03T00:00:00Z",
+          content: "# Memo\n\nThe transcribed text.",
+          tags: ["capture"],
+          links: [],
+          attachments: [],
+        },
+      },
+    });
+    renderWith(qc, `/n/${encodeURIComponent(localId)}`);
+
+    // Lands on a readable note, not an error/404 screen.
+    expect(await screen.findByRole("heading", { level: 1, name: "memo" })).toBeInTheDocument();
+    expect(screen.getByText(/transcript pending/i)).toBeInTheDocument();
+    expect(screen.queryByText(/could not load note/i)).toBeNull();
+    expect(screen.queryByText(/note not found/i)).toBeNull();
+
+    // The create-note row drains: the id-map now maps local → server.
+    await recordIdMap(db, localId, "real-123", "dev");
+
+    // A refetch now resolves the id-map and fetches the real note — the view
+    // flips from the optimistic row to the server note.
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ["note", "dev", localId] });
+    });
+    expect(await screen.findByText("The transcribed text.")).toBeInTheDocument();
   });
 });

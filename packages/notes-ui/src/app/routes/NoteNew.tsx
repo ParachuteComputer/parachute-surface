@@ -14,10 +14,11 @@ import { blobRef, enqueue, newBlobId, newLocalId } from "@/lib/sync";
 import { useToastStore } from "@/lib/toast/store";
 import { useCreateNote, useLinkAttachment, useTagRoles, useVaultStore } from "@/lib/vault";
 import { type CreateNotePayload, VaultAuthError } from "@/lib/vault/client";
-import { useActiveVaultClient } from "@/lib/vault/queries";
+import { optimisticCreatedNote, useActiveVaultClient } from "@/lib/vault/queries";
 import { ensureNotesSchema } from "@/lib/vault/schema-ensure";
 import type { Note } from "@/lib/vault/types";
 import { useSync } from "@/providers/SyncProvider";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 
@@ -66,6 +67,7 @@ export function NoteNew() {
   const pushToast = useToastStore((s) => s.push);
   const mutation = useCreateNote();
   const linkAttachment = useLinkAttachment();
+  const qc = useQueryClient();
   const { db, blobStore, engine } = useSync();
   const { roles } = useTagRoles(activeVault?.id ?? null);
   const client = useActiveVaultClient();
@@ -235,20 +237,20 @@ export function NoteNew() {
       void ensureNotesSchema(activeVault.id, client);
     }
 
+    // Built once so the enqueued create-note row and the optimistic cache
+    // seed below stay in lockstep.
+    const createPayload: CreateNotePayload = {
+      content: body,
+      path,
+      metadata: { source: "voice" },
+      ...(tags.length ? { tags } : {}),
+    };
+
     try {
       await blobStore.put(blobId, audio.data, audio.mimeType, activeVault.id);
       await enqueue(
         db,
-        {
-          kind: "create-note",
-          localId,
-          payload: {
-            content: body,
-            path,
-            metadata: { source: "voice" },
-            ...(tags.length ? { tags } : {}),
-          },
-        },
+        { kind: "create-note", localId, payload: createPayload },
         { vaultId: activeVault.id },
       );
       await enqueue(
@@ -273,6 +275,14 @@ export function NoteNew() {
         { vaultId: activeVault.id },
       );
       void engine?.runOnce();
+      // Seed the optimistic note so navigating to /n/<localId> lands on a
+      // readable page instead of a 404 (getNote(localId) has no server row
+      // yet). Mirrors the text path's useCreateNote onSuccess cache-seed;
+      // useNote resolves the local id via the id-map once the row drains.
+      qc.setQueryData(
+        ["note", activeVault.id, localId],
+        optimisticCreatedNote(createPayload, localId),
+      );
       pushToast("Captured — syncing audio.", "success");
       voice.discardAudio();
       navigate(`/n/${encodeURIComponent(localId)}`);
@@ -294,6 +304,7 @@ export function NoteNew() {
     navigate,
     pending,
     pushToast,
+    qc,
     roles.captureText,
     roles.captureVoice,
     voice,

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUILD_TIME_BASE,
   cleanupStaleServiceWorker,
+  resolveBuildTimeBase,
   shouldRegisterServiceWorker,
 } from "./sw-bootstrap";
 
@@ -22,6 +23,49 @@ import {
 describe("BUILD_TIME_BASE", () => {
   it("trims the trailing slash from vite's BASE_URL", () => {
     expect(BUILD_TIME_BASE).toBe("/notes");
+  });
+});
+
+describe("resolveBuildTimeBase — standalone-mount SW gate reconciliation (FIX 1)", () => {
+  // The bug this guards against: the standalone deploy (notes.parachute.computer)
+  // stamps `VITE_BASE_PATH="/"`. `detectMountBase()` returns "" (origin root)
+  // for that build, but `buildTimeBase()` used to normalise "/" → "/notes", so
+  // `shouldRegisterServiceWorker` (`runtime === build-time`) could NEVER pass —
+  // the installed PWA got no offline shell on cold start. The fix reconciles
+  // the build-time base to "" for the standalone build so the gate passes.
+
+  // The mount `detectMountBase()` returns for the standalone (VITE_BASE_PATH=/)
+  // build. Kept as a named constant so the reconciliation is explicit: the
+  // build-time base must equal this for the gate to pass.
+  const STANDALONE_RUNTIME_MOUNT = "";
+
+  it("maps the standalone VITE_BASE_PATH=/ build to '' so it matches detectMountBase()", () => {
+    // VITE_BASE_PATH wins even when Vite's BASE_URL disagrees.
+    expect(resolveBuildTimeBase("/", "/notes/")).toBe(STANDALONE_RUNTIME_MOUNT);
+    expect(resolveBuildTimeBase("/", "/")).toBe(STANDALONE_RUNTIME_MOUNT);
+    expect(resolveBuildTimeBase("/", undefined)).toBe(STANDALONE_RUNTIME_MOUNT);
+    // Gate now passes for standalone: runtime ("") === build-time ("").
+  });
+
+  it("still folds a bundled-host BASE_URL=/ (VITE_BASE_PATH unset) to the legacy /notes", () => {
+    // A `base: ""` build surfaces BASE_URL as "/", but its runtime mount is
+    // always `/notes` or `/surface/<slug>` (never ""), so the gate must
+    // compare against `/notes` — NOT be misread as the standalone build.
+    expect(resolveBuildTimeBase(undefined, "/")).toBe("/notes");
+  });
+
+  it("resolves the default daemon build (BASE_URL=/notes/) to /notes", () => {
+    expect(resolveBuildTimeBase(undefined, "/notes/")).toBe("/notes");
+  });
+
+  it("resolves an explicit custom surface mount verbatim (trailing slash trimmed)", () => {
+    expect(resolveBuildTimeBase("/surface/notes/", undefined)).toBe("/surface/notes");
+    expect(resolveBuildTimeBase("/surface/my-notes", undefined)).toBe("/surface/my-notes");
+  });
+
+  it("falls back to /notes when neither signal is usable", () => {
+    expect(resolveBuildTimeBase(undefined, undefined)).toBe("/notes");
+    expect(resolveBuildTimeBase("", "")).toBe("/notes");
   });
 });
 
