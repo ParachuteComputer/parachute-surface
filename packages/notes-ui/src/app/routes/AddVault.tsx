@@ -121,17 +121,20 @@ export function AddVault() {
     }
 
     // Already connected to this vault? Switch to it instead of running a
-    // second OAuth dance.
+    // second OAuth dance. Honour the sanitized `redirect` companion the same
+    // way the fresh-connect path does (OAuthCallback) — the cloud console's
+    // "Import notes" door arrives as `?add=…&redirect=/import` and must land
+    // on /import whether or not the vault is already connected.
     const store = useVaultStore.getState();
     const existing = store.vaults[vaultIdFromUrl(normalized)];
     if (existing) {
       store.setActiveVault(existing.id);
-      navigate("/", { replace: true });
+      navigate(redirect ?? "/", { replace: true });
       return;
     }
 
     void connect(normalized);
-  }, [addUrl, addUrlIsHttp, queryUrl, searchParams, setSearchParams, navigate, connect]);
+  }, [addUrl, addUrlIsHttp, queryUrl, redirect, searchParams, setSearchParams, navigate, connect]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
