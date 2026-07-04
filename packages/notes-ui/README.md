@@ -14,7 +14,7 @@ The Parachute Notes UI bundle, packaged for installation under [parachute-surfac
 parachute-surface add @openparachute/notes-ui --name notes --path /surface/notes
 ```
 
-parachute-surface fetches this package from npm, unpacks `dist/`, and serves it under the declared mount path. OAuth DCR + hub-issued bearers + the standard scopes wiring all flow through parachute-surface's bootstrap. See [`parachute-patterns/patterns/runtime-tenancy-contract.md`](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/runtime-tenancy-contract.md) for how the host hands runtime config to the bundle.
+parachute-surface fetches this package from npm, unpacks `dist/`, and serves it under the declared mount path. OAuth DCR + hub-issued bearers + the standard scopes wiring all flow through parachute-surface's bootstrap. See [`docs/contracts/runtime-tenancy-contract.md`](../../docs/contracts/runtime-tenancy-contract.md) for how the host hands runtime config to the bundle.
 
 ## History
 

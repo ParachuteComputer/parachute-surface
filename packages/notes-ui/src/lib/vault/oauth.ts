@@ -54,8 +54,9 @@ import { normalizeVaultUrl } from "./url";
 export { PendingApprovalError, RefreshHttpError, clearCachedClientId, storedFromTokenResponse };
 
 const REDIRECT_PATH = "/oauth/callback";
-// Default scope vocabulary. `vault:read vault:write` per
-// `parachute-patterns/oauth-scopes.md`. The legacy `"full"` synonym is still
+// Default scope vocabulary. `vault:read vault:write` per the hub's
+// oauth-scopes contract (https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/oauth-scopes.md).
+// The legacy `"full"` synonym is still
 // honoured by vault for one release cycle, but new connects request the new
 // vocabulary so the hub can render an accurate consent screen.
 export const DEFAULT_SCOPE: TokenScope = "vault:read vault:write";

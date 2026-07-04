@@ -179,7 +179,7 @@ export { vaultIdFromUrl, normalizeVaultUrl } from "./vault-id.js";
 // host injects into every served `index.html`. Apps get typed accessors
 // for mount path, tenant id, hub origin, and bound vault URL instead of
 // regex-parsing the DOM themselves. See
-// `parachute-patterns/patterns/runtime-tenancy-contract.md`.
+// `../../../docs/contracts/runtime-tenancy-contract.md`.
 export { getMountBase, getTenantId, getHubOrigin, getVaultUrl } from "./mount.js";
 
 // Common OAuth + storage types.

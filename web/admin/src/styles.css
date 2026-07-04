@@ -2,7 +2,9 @@
  * parachute-surface admin SPA styles.
  *
  * Conforms to the canonical Parachute design system
- * (parachute-patterns/patterns/design-system.md). Tokens (palette, type,
+ * (parachute-hub/docs/contracts/design-system.md —
+ * https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/design-system.md).
+ * Tokens (palette, type,
  * radii, component shapes) are lifted verbatim from the source-of-truth —
  * keep this file in lockstep with `parachute-hub/web/ui/src/styles.css`
  * (the closest peer admin SPA). Drift here is a bug.

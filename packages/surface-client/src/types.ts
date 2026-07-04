@@ -10,7 +10,8 @@
 
 /**
  * OAuth scope strings are whitespace-separated lists per RFC 6749 §3.3.
- * The vocabulary follows `parachute-patterns/oauth-scopes.md` —
+ * The vocabulary follows the hub's oauth-scopes contract
+ * (https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/oauth-scopes.md) —
  * `<service>:<verb>` (`vault:read vault:write`). Type stays open: the
  * parser is liberal; unknown scopes pass through.
  */

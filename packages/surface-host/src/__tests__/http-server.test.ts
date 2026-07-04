@@ -474,7 +474,7 @@ describe("HTTP — UI mount paths", () => {
 
 describe("HTTP — runtime tenancy contract injection", () => {
   // Verifies parachute-surface implements the producer side of
-  // `parachute-patterns/patterns/runtime-tenancy-contract.md`:
+  // `../../../../docs/contracts/runtime-tenancy-contract.md`:
   // every `index.html` served on behalf of a hosted UI gets <base href> +
   // <meta name="parachute-mount"> + <meta name="parachute-hub"> injected.
 

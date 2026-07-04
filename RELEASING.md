@@ -19,7 +19,7 @@ All six packages run on independent release cadences. Each tag pushes only the m
 
 ## Tag conventions
 
-Per [parachute-patterns governance rule 2](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/governance.md):
+Per [governance rule 2](https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md):
 
 | Tag shape | Publishes | npm `dist-tag` |
 |---|---|---|
@@ -40,7 +40,7 @@ The workflow auto-detects rc vs stable from the `-rc.` substring; jobs gate by t
 
 ## Release flow
 
-Per [governance rule 2 (updated 2026-05-24)](https://github.com/ParachuteComputer/parachute-patterns/blob/main/patterns/governance.md), PRs do NOT bump version per-commit. Bump + tag together only when you intend to ship.
+Per [governance rule 2 (updated 2026-05-24)](https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md), PRs do NOT bump version per-commit. Bump + tag together only when you intend to ship.
 
 ### Releasing `@openparachute/surface`
 
