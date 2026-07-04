@@ -17,9 +17,37 @@
  */
 export type TagExpandMode = "subtypes" | "namespace" | "both" | "exact";
 
+/**
+ * Voice-transcription capability flag — whether the vault can actually
+ * transcribe audio, which is what a surface gates its mic affordance on.
+ * Distinct from the `auto_transcribe` POLICY toggle in vault config.
+ *
+ * Where each door serves it (they differ — verified 2026-07-03):
+ *   - self-host vault: `GET /vault/<name>/api/vault` →
+ *     `{ enabled, provider? }` (parachute-vault vault#529,
+ *     `src/transcription/capability.ts`)
+ *   - cloud vault: the BARE landing `GET /vault/<name>` →
+ *     `{ enabled, minutes_remaining }` (parachute-cloud cloud#56,
+ *     `workers/vault/src/vault-do.ts`); cloud's `/api/vault` does NOT
+ *     carry it.
+ *
+ * Absent everywhere = an older vault that predates the flag — treat as
+ * "undeclared", not "disabled".
+ */
+export interface TranscriptionCapability {
+  /** True when the vault can transcribe (provider configured/plan entitled). */
+  enabled: boolean;
+  /** Self-host: the active provider's name (e.g. "scribe-http"). Omitted when disabled. */
+  provider?: string;
+  /** Cloud: monthly voice-minutes remaining on the plan meter (0 when disabled). */
+  minutes_remaining?: number;
+}
+
 export interface VaultInfo {
   name: string;
   description: string;
+  /** Present on self-host vaults ≥ vault#529; absent on older vaults and on cloud's `/api/vault`. */
+  transcription?: TranscriptionCapability;
   stats?: {
     noteCount: number;
     tagCount: number;

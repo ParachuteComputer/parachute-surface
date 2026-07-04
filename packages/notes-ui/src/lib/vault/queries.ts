@@ -53,6 +53,45 @@ export function useVaultInfo() {
   });
 }
 
+/**
+ * The vault's declared voice-transcription capability — what the mic
+ * affordance gates on (launch-audit P0-3: free-tier cloud vaults showed
+ * "Record voice memo" then landed "_Transcription unavailable._").
+ *
+ * The two doors declare it in different places (verified 2026-07-03):
+ *   - self-host: `GET /api/vault` carries `transcription: { enabled,
+ *     provider? }` (vault#529) — already fetched + cached by
+ *     `useVaultInfo`, so this leg costs nothing extra.
+ *   - cloud: the BARE landing `GET <vaultUrl>` carries `transcription:
+ *     { enabled, minutes_remaining }` (cloud#56); cloud's `/api/vault`
+ *     does NOT. The fallback probe below fires only when `/api/vault`
+ *     resolved WITHOUT the field, and is cached like the rest of vault
+ *     config — never a per-render network call.
+ *
+ * Returns `undefined` while loading or when neither door declares the
+ * capability (older self-host vaults) — callers must treat that as
+ * "undeclared" and keep the mic (absent ≠ disabled; back-compat).
+ */
+export function useTranscriptionCapability() {
+  const client = useActiveVaultClient();
+  const activeId = useVaultStore((s) => s.activeVaultId);
+  const info = useVaultInfo();
+
+  // Only probe the bare landing once /api/vault has answered without the
+  // field. Older vaults 404/answer without it — `retry: false` keeps the
+  // probe to a single attempt per cache window.
+  const needsLandingProbe = !!client && info.isSuccess && info.data?.transcription === undefined;
+  const landing = useQuery({
+    queryKey: ["vaultLanding", activeId],
+    enabled: needsLandingProbe,
+    queryFn: () => client!.vaultLanding(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  return info.data?.transcription ?? landing.data?.transcription;
+}
+
 export function useNotes(queryState: NoteQueryState) {
   const client = useActiveVaultClient();
   const activeId = useVaultStore((s) => s.activeVaultId);

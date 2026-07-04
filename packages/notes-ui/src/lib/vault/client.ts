@@ -51,6 +51,7 @@ import type {
   StorageUploadResult,
   UpdateNotePayload,
   UploadProgress,
+  VaultLandingInfo,
 } from "./types";
 
 // Error classes + payload types are re-exports from app-client — Phase 2
@@ -157,6 +158,21 @@ export class VaultClient extends BaseVaultClient {
   override setAccessToken(token: string): void {
     super.setAccessToken(token);
     this.currentToken = token;
+  }
+
+  // ---------- Notes-only vault-landing probe ----------
+
+  /**
+   * Bare vault landing — `GET <vaultUrl>` with no `/api` suffix. Cloud
+   * vaults surface the voice-transcription capability HERE
+   * (`transcription: { enabled, minutes_remaining }`, cloud#56) while
+   * their `/api/vault` does not; self-host vaults answer the bare landing
+   * without `transcription` (theirs rides `/api/vault`, vault#529). Used
+   * only as the fallback leg of `useTranscriptionCapability` — never
+   * called when `/api/vault` already declared the capability.
+   */
+  async vaultLanding(): Promise<VaultLandingInfo> {
+    return this.request<VaultLandingInfo>("");
   }
 
   // ---------- Notes-only tag-curation endpoints ----------

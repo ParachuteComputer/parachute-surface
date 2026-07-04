@@ -770,6 +770,39 @@ describe("NoteNew — voice affordance", () => {
     expect(seeded?.id.startsWith("local-")).toBe(true);
   });
 
+  it("field absent on BOTH doors (older vault) → mic stays (back-compat pinned)", async () => {
+    // Old self-host vault: /api/vault answers 200 WITHOUT `transcription`
+    // and the bare landing answers 200 without it either. Absent ≠ disabled
+    // — the mic must render exactly as today (do NOT regress existing
+    // self-host voice users).
+    const bare = "http://localhost:1940";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const jsonRes = (body: unknown) =>
+        ({ ok: true, status: 200, json: async () => body, text: async () => "" }) as Response;
+      if (url.includes("/api/vault")) return jsonRes({ name: "dev", description: "" });
+      if (url === bare || url === `${bare}/`) {
+        return jsonRes({ name: "dev", description: "", createdAt: "2026-01-01", stats: {} });
+      }
+      return { ok: false, status: 404, json: async () => null, text: async () => "" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    renderAt("/new");
+
+    // Wait until the fallback landing probe has fired and settled…
+    await waitFor(() => {
+      expect(
+        fetchImpl.mock.calls.some(([input]) => {
+          const u = typeof input === "string" ? input : input.toString();
+          return u === bare || u === `${bare}/`;
+        }),
+      ).toBe(true);
+    });
+    // …then the mic is still there and no gate copy rendered.
+    expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("voice-unavailable")).toBeNull();
+  });
+
   it("discard audio reverts the panel to idle", async () => {
     installFetch({});
     renderAt("/new");
@@ -791,5 +824,123 @@ describe("NoteNew — voice affordance", () => {
     });
     expect(screen.queryByText(/recorded\s+/i)).toBeNull();
     expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+  });
+});
+
+// Launch-audit P0-3: the mic gates on the vault's DECLARED transcription
+// capability. Explicit `enabled: false` hides the recorder (free cloud tier,
+// self-host without a provider); `enabled: true` or an ABSENT field keeps it
+// (absent = older vault that predates the flag — back-compat, pinned above).
+// The two doors declare the flag in different places: self-host on
+// `GET /api/vault` (vault#529), cloud on the bare landing `GET <vaultUrl>`
+// (cloud#56) — both are exercised here.
+describe("NoteNew — transcription capability gate", () => {
+  beforeEach(async () => {
+    const db = await freshDb();
+    db.close();
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    useToastStore.setState({ toasts: [] });
+    seedStore();
+    fakeState.controller = null;
+    fakeState.pickResult = "audio/webm;codecs=opus";
+    fakeState.requestMic = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const BARE = "http://localhost:1940";
+
+  /** Fetch stub with exact control over /api/vault vs the bare landing —
+   *  installFetch's substring matcher can't express "the bare URL only"
+   *  (every request URL contains it as a prefix). */
+  function installDoorFetch(opts: {
+    apiVault: Record<string, unknown>;
+    landing?: Record<string, unknown>;
+  }) {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const jsonRes = (body: unknown) =>
+        ({ ok: true, status: 200, json: async () => body, text: async () => "" }) as Response;
+      if (url.includes("/api/vault")) return jsonRes(opts.apiVault);
+      if (url === BARE || url === `${BARE}/`) {
+        if (opts.landing) return jsonRes(opts.landing);
+        return { ok: false, status: 404, json: async () => null, text: async () => "" } as Response;
+      }
+      return { ok: false, status: 404, json: async () => null, text: async () => "" } as Response;
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    return fetchImpl;
+  }
+
+  function landingCalls(fetchImpl: ReturnType<typeof installDoorFetch>) {
+    return fetchImpl.mock.calls.filter(([input]) => {
+      const u = typeof input === "string" ? input : String(input);
+      return u === BARE || u === `${BARE}/`;
+    });
+  }
+
+  it("self-host door: /api/vault declares enabled:false → recorder hidden, quiet line shown", async () => {
+    const fetchImpl = installDoorFetch({
+      apiVault: { name: "dev", description: "", transcription: { enabled: false } },
+    });
+    renderAt("/new");
+
+    const note = await screen.findByTestId("voice-unavailable");
+    // Self-host shape has no minutes meter → the neutral copy, not plan copy.
+    expect(note).toHaveTextContent(/isn't enabled on this vault/i);
+    expect(screen.queryByRole("button", { name: /record voice memo/i })).toBeNull();
+    // /api/vault answered the question — the landing probe must not fire.
+    expect(landingCalls(fetchImpl).length).toBe(0);
+  });
+
+  it("cloud door: /api/vault lacks the field, bare landing declares enabled:false → recorder hidden, Voice-plan line", async () => {
+    installDoorFetch({
+      apiVault: { name: "dev", description: "" },
+      landing: { name: "dev", transcription: { enabled: false, minutes_remaining: 0 } },
+    });
+    renderAt("/new");
+
+    const note = await screen.findByTestId("voice-unavailable");
+    // Metered shape (minutes_remaining present) = the cloud plan gate.
+    expect(note).toHaveTextContent(/comes with the voice plan/i);
+    expect(screen.queryByRole("button", { name: /record voice memo/i })).toBeNull();
+  });
+
+  it("enabled:true on /api/vault → recorder shows, no gate copy, no landing probe", async () => {
+    const fetchImpl = installDoorFetch({
+      apiVault: {
+        name: "dev",
+        description: "",
+        transcription: { enabled: true, provider: "scribe-http" },
+      },
+    });
+    renderAt("/new");
+
+    expect(await screen.findByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+    // Give the queries a beat to settle, then pin: no gate copy, no probe.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByTestId("voice-unavailable")).toBeNull();
+    expect(landingCalls(fetchImpl).length).toBe(0);
+  });
+
+  it("cloud Voice tier: landing declares enabled:true → recorder shows", async () => {
+    const fetchImpl = installDoorFetch({
+      apiVault: { name: "dev", description: "" },
+      landing: { name: "dev", transcription: { enabled: true, minutes_remaining: 600 } },
+    });
+    renderAt("/new");
+
+    // Wait for the landing probe to resolve so the assertion is post-gate.
+    await waitFor(() => {
+      expect(landingCalls(fetchImpl).length).toBeGreaterThan(0);
+    });
+    expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("voice-unavailable")).toBeNull();
   });
 });

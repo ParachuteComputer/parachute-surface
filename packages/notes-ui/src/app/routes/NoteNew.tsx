@@ -14,9 +14,13 @@ import { blobRef, enqueue, newBlobId, newLocalId } from "@/lib/sync";
 import { useToastStore } from "@/lib/toast/store";
 import { useCreateNote, useLinkAttachment, useTagRoles, useVaultStore } from "@/lib/vault";
 import { type CreateNotePayload, VaultAuthError } from "@/lib/vault/client";
-import { optimisticCreatedNote, useActiveVaultClient } from "@/lib/vault/queries";
+import {
+  optimisticCreatedNote,
+  useActiveVaultClient,
+  useTranscriptionCapability,
+} from "@/lib/vault/queries";
 import { ensureNotesSchema } from "@/lib/vault/schema-ensure";
-import type { Note } from "@/lib/vault/types";
+import type { Note, TranscriptionCapability } from "@/lib/vault/types";
 import { useSync } from "@/providers/SyncProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -87,6 +91,20 @@ export function NoteNew() {
   const [isSavingAudio, setIsSavingAudio] = useState(false);
   const editorRef = useRef<CodeMirrorEditorHandle>(null);
   const voice = useVoiceCapture();
+  // Voice-transcription capability gate (launch-audit P0-3). Hide the mic
+  // ONLY when the vault EXPLICITLY declares transcription disabled —
+  // recording would land "_Transcription unavailable._", which reads as
+  // the product failing. Absent/undeclared (older self-host vaults) keeps
+  // the mic exactly as today. Never yank the panel out from under an
+  // in-flight capture (requesting/recording/have-audio) — the sub-second
+  // race where the capability resolves after Record was pressed finishes
+  // honestly instead of stranding armed audio behind a hidden panel.
+  const transcription = useTranscriptionCapability();
+  const captureInFlight =
+    voice.phase.kind === "requesting" ||
+    voice.phase.kind === "recording" ||
+    voice.phase.kind === "have-audio";
+  const voiceGated = transcription?.enabled === false && !captureInFlight;
 
   const uploader = useAttachmentUploader({
     noteId: null,
@@ -413,7 +431,11 @@ export function NoteNew() {
           </div>
         ) : null}
 
-        <VoicePanel voice={voice} />
+        {voiceGated ? (
+          <VoiceUnavailableNote capability={transcription} />
+        ) : (
+          <VoicePanel voice={voice} />
+        )}
 
         <div className="grid min-h-[60vh] gap-4 lg:grid-cols-2">
           <AttachmentDropZone
@@ -484,6 +506,28 @@ export function NoteNew() {
         </section>
       </article>
     </div>
+  );
+}
+
+// Rendered in the VoicePanel's slot when the vault explicitly declared
+// transcription disabled (launch-audit P0-3). One quiet line, matching the
+// muted-copy styling elsewhere on this screen — honest, not salesy. The
+// copy differentiates the two doors by the capability's shape: a metered
+// capability (`minutes_remaining` present) is the cloud plan gate, so name
+// the Voice plan; otherwise it's a self-host vault without a configured
+// transcription provider, where plan language would be wrong.
+function VoiceUnavailableNote({
+  capability,
+}: {
+  capability: TranscriptionCapability | undefined;
+}) {
+  const metered = typeof capability?.minutes_remaining === "number";
+  return (
+    <p className="mb-4 text-xs text-fg-dim" data-testid="voice-unavailable">
+      {metered
+        ? "Voice transcription comes with the Voice plan."
+        : "Voice transcription isn't enabled on this vault."}
+    </p>
   );
 }
 
