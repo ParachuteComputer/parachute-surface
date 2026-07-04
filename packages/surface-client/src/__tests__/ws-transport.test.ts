@@ -331,6 +331,26 @@ describe("ws transport — close-code map", () => {
     expect(FakeSocket.instances).toHaveLength(1);
   });
 
+  test("4408 auth-timeout reconnects (non-terminal), then reaches live", async () => {
+    const statuses: string[] = [];
+    const snapshots: number[] = [];
+    const unsub = startWsSubscription(
+      makeTransport(),
+      noopHandlers({ onStatus: (s) => statuses.push(s), onSnapshot: (n) => snapshots.push(n.length) }),
+      { initialBackoffMs: 5, maxBackoffMs: 20 },
+    );
+    const ws0 = await socketAt(0);
+    ws0.open();
+    ws0.serverClose(4408); // accepted socket never authed in time → reconnect, NOT terminal
+    const ws1 = await socketAt(1, "reconnect after 4408");
+    expect(statuses).not.toContain("closed"); // auth-timeout is not terminal
+    ws1.open();
+    ws1.message(SNAP([{ id: "a" }]));
+    await waitFor(() => statuses.includes("open"), 2_000, "live after 4408 reconnect");
+    expect(snapshots).toEqual([1]);
+    unsub();
+  });
+
   test("4401 refreshes once, then reconnects with the fresh token", async () => {
     let current = "tok-1";
     let refreshCalls = 0;

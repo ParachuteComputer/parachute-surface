@@ -329,13 +329,18 @@ export function startWsSubscription(
       ws.onmessage = (ev: unknown) => {
         const data = isRecord(ev) ? (ev as { data?: unknown }).data : undefined;
         markActivity();
+        // A `pong` is liveness only — it must NOT count as "auth succeeded".
+        // Check it BEFORE the open flip so the "open only after a real (post-
+        // auth) data frame" invariant holds regardless of ping cadence (a pong
+        // can precede the snapshot when pingInterval < the server's auth
+        // deadline — not at the 30s/10s defaults, but possible in tests).
+        if (typeof data === "string" && data === "pong") return; // liveness ack
         if (!gotMessage) {
-          // First frame confirms auth passed + the socket works. This is the
-          // WS analog of the SSE "open" (auth already validated by then).
+          // First real frame confirms auth passed + the socket works. This is
+          // the analog of the old SSE "open" (auth already validated by then).
           gotMessage = true;
           emitStatus("open");
         }
-        if (typeof data === "string" && data === "pong") return; // liveness ack
         dispatch(data);
       };
 
