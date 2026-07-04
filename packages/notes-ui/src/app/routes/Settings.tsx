@@ -18,6 +18,13 @@ import {
   useTags,
   useVaultStore,
 } from "@/lib/vault";
+import {
+  useAudioRetention,
+  useRetentionChoiceMade,
+  useSetAudioRetention,
+} from "@/lib/vault/audio-retention";
+import { useTranscriptionCapability } from "@/lib/vault/queries";
+import type { AudioRetention } from "@/lib/vault/types";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router";
 
@@ -42,6 +49,7 @@ export function Settings() {
       </header>
 
       <ImportSection />
+      <VoiceRetentionSection vaultId={activeVault.id} />
       <TextSizeSection />
       <PathTreeSection vaultId={activeVault.id} />
       <TagRolesSection vaultId={activeVault.id} />
@@ -75,6 +83,113 @@ function ImportSection() {
 // retired in the 2026-07 one-tag simplification: the single `capture` tag
 // is now lazily ensured on first capture (schema-ensure.ts), so there is
 // nothing for the operator to review or fix.
+
+// Voice-retention transparency: what happens to the audio file after a voice
+// note is transcribed. The dial is SERVER-side vault config
+// (`config.audio_retention` on GET/PATCH /api/vault — identical contract on
+// the self-host and cloud doors), so unlike the sections around it this one
+// applies to the vault for every connected device, not just this browser.
+// One honest line per option; changing PATCHes immediately; errors surface
+// as a toast and the radios stay on the server truth (controlled inputs off
+// the cached /api/vault read — a failed PATCH never lies about state).
+const RETENTION_OPTIONS: { value: AudioRetention; title: string; help: string }[] = [
+  {
+    value: "keep",
+    title: "Keep",
+    help: "Recordings are stored with your notes; included wherever attachments are included.",
+  },
+  {
+    value: "until_transcribed",
+    title: "Delete after transcribing",
+    help: "Your words stay; the audio file is removed once the transcript lands.",
+  },
+  {
+    value: "never",
+    title: "Never store",
+    help: "Audio is removed even if transcription fails — the transcript is your only copy; failed transcriptions lose the audio.",
+  },
+];
+
+function VoiceRetentionSection({ vaultId }: { vaultId: string }) {
+  // Same gate as the mic itself (#167): a vault that EXPLICITLY declares
+  // transcription disabled has no recorder, so a retention dial would be
+  // noise. Absent/undeclared keeps the section (absent ≠ disabled — the mic
+  // renders there too). Both reads are cached queries; no new network.
+  const transcription = useTranscriptionCapability();
+  const retention = useAudioRetention();
+  const setRetention = useSetAudioRetention();
+  const { markMade } = useRetentionChoiceMade(vaultId);
+  const pushToast = useToastStore((s) => s.push);
+
+  if (transcription?.enabled === false) return null;
+
+  const onChange = (value: AudioRetention) => {
+    if (value === retention.value || setRetention.isPending) return;
+    setRetention.mutate(value, {
+      onSuccess: () => {
+        // Also settles the first-capture prompt — an operator who set the
+        // dial here has made their choice; don't re-ask at the recorder.
+        markMade();
+        pushToast("Voice recording setting saved.", "success");
+      },
+      onError: (err) => {
+        pushToast(
+          err instanceof Error && err.message
+            ? `Couldn't save: ${err.message}`
+            : "Couldn't save the voice recording setting.",
+          "error",
+        );
+      },
+    });
+  };
+
+  return (
+    <section className="card mt-6 space-y-4 rounded-xl p-6">
+      <div>
+        <h2 className="font-serif text-xl text-fg">Voice recordings</h2>
+        <p className="mt-1 text-xs text-fg-dim">
+          What happens to the audio file after a voice note is transcribed. Applies to this vault,
+          from every device connected to it.
+        </p>
+      </div>
+      {retention.isLoading ? (
+        <p className="text-sm text-fg-dim">Loading…</p>
+      ) : retention.isError ? (
+        <p className="text-sm text-fg-dim" data-testid="retention-load-error">
+          Couldn't load this setting — check the vault connection.
+        </p>
+      ) : (
+        <>
+          <fieldset className="space-y-2" disabled={!retention.supported || setRetention.isPending}>
+            <legend className="sr-only">Voice recording retention</legend>
+            {RETENTION_OPTIONS.map((o) => (
+              <label key={o.value} className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="audio-retention"
+                  value={o.value}
+                  checked={retention.value === o.value}
+                  onChange={() => onChange(o.value)}
+                  className="mt-1 accent-accent"
+                />
+                <span>
+                  <span className="text-fg">{o.title}</span>
+                  <span className="ml-2 text-xs text-fg-dim">{o.help}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {!retention.supported ? (
+            <p className="text-xs text-fg-dim" data-testid="retention-unsupported">
+              This vault doesn't support changing this yet — recordings are kept. Update the vault
+              to choose.
+            </p>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
 
 // View-level text-size knob — per-device because eye-days vary independently
 // of vault. The dropdown applies + persists in one motion via the helpers in

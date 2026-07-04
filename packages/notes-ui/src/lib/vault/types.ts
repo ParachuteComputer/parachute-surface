@@ -51,7 +51,58 @@ export type {
   VaultInfo,
 } from "@openparachute/surface-client";
 
-import type { TranscriptionCapability as TranscriptionCapabilityShape } from "@openparachute/surface-client";
+import type {
+  TranscriptionCapability as TranscriptionCapabilityShape,
+  VaultInfo as VaultInfoShape,
+} from "@openparachute/surface-client";
+
+/**
+ * The vault's audio-retention dial — what happens to a voice recording's
+ * audio file after transcription. Identical wire contract on BOTH doors
+ * (verified 2026-07-04): self-host `GET/PATCH /api/vault`
+ * (parachute-vault `src/routes.ts:handleVault`) and cloud
+ * (parachute-cloud `workers/vault/src/rest/vault.ts`) both carry
+ * `config.audio_retention` with these values, defaulting to `"keep"`.
+ *
+ *   - `keep` (server default) — audio stored forever with the note.
+ *   - `until_transcribed` — audio file deleted once the transcript lands;
+ *     the note + transcript stay, the attachment row stays for history.
+ *   - `never` — same deletion, and untranscribed audio is removed too
+ *     (a failed transcription loses the audio).
+ */
+export const AUDIO_RETENTION_VALUES = ["keep", "until_transcribed", "never"] as const;
+export type AudioRetention = (typeof AUDIO_RETENTION_VALUES)[number];
+
+export function isAudioRetention(v: unknown): v is AudioRetention {
+  return typeof v === "string" && (AUDIO_RETENTION_VALUES as readonly string[]).includes(v);
+}
+
+/**
+ * The `config` block on `GET /api/vault` (both doors). Absent entirely on
+ * older self-host vaults that predate the dial — absence means the vault
+ * can't change retention (treat as `keep`, and don't offer a control that
+ * would silently no-op).
+ */
+export interface VaultConfigInfo {
+  audio_retention?: AudioRetention;
+  auto_transcribe?: { enabled?: boolean };
+}
+
+/**
+ * surface-client's `VaultInfo` plus the `config` block both doors already
+ * return on `GET /api/vault` (surface-client's type predates it). Notes'
+ * `VaultClient.vaultInfo` override narrows to this shape so `useVaultInfo`
+ * consumers read `config` without casts.
+ */
+export interface VaultInfoWithConfig extends VaultInfoShape {
+  config?: VaultConfigInfo;
+}
+
+/** Body for `PATCH /api/vault` — only the fields Notes actually writes. */
+export interface PatchVaultPayload {
+  description?: string;
+  config?: { audio_retention?: AudioRetention };
+}
 
 /**
  * Bare vault landing (`GET <vaultUrl>`, no `/api` suffix) — the minimal

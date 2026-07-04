@@ -47,10 +47,12 @@ import {
 import type {
   CreateNotePayload,
   NoteAttachment,
+  PatchVaultPayload,
   ReachabilitySignal,
   StorageUploadResult,
   UpdateNotePayload,
   UploadProgress,
+  VaultInfoWithConfig,
   VaultLandingInfo,
 } from "./types";
 
@@ -158,6 +160,36 @@ export class VaultClient extends BaseVaultClient {
   override setAccessToken(token: string): void {
     super.setAccessToken(token);
     this.currentToken = token;
+  }
+
+  // ---------- Notes-only vault config (GET/PATCH /api/vault) ----------
+
+  /**
+   * Same wire call as the base's `vaultInfo`, narrowed to the shape both
+   * doors actually return: `/api/vault` carries a `config` block
+   * (`audio_retention` + `auto_transcribe`) that surface-client's
+   * `VaultInfo` type predates. Older self-host vaults answer without
+   * `config` — the optional field models that honestly.
+   */
+  override async vaultInfo(includeStats = true): Promise<VaultInfoWithConfig> {
+    return (await super.vaultInfo(includeStats)) as VaultInfoWithConfig;
+  }
+
+  /**
+   * `PATCH /api/vault` — write vault config (Notes uses it for the
+   * voice-retention dial, `config.audio_retention`). Requires write scope
+   * on both doors (self-host: `vault:write` via the method→verb gate in
+   * `routing.ts`; cloud: `verbForMethod(PATCH) = write` in `vault-do.ts`) —
+   * the Notes token carries it. The response echoes `{ name, description,
+   * config }`; older vaults that predate the dial accept the PATCH but
+   * ignore `config` and echo nothing back — callers detect support by the
+   * echo (see `useSetAudioRetention`).
+   */
+  async patchVault(body: PatchVaultPayload): Promise<VaultInfoWithConfig> {
+    return this.request<VaultInfoWithConfig>("/api/vault", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   }
 
   // ---------- Notes-only vault-landing probe ----------

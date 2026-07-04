@@ -13,6 +13,11 @@ import { useVoiceCapture } from "@/lib/capture/use-voice-capture";
 import { blobRef, enqueue, newBlobId, newLocalId } from "@/lib/sync";
 import { useToastStore } from "@/lib/toast/store";
 import { useCreateNote, useLinkAttachment, useTagRoles, useVaultStore } from "@/lib/vault";
+import {
+  useAudioRetention,
+  useRetentionChoiceMade,
+  useSetAudioRetention,
+} from "@/lib/vault/audio-retention";
 import { type CreateNotePayload, VaultAuthError } from "@/lib/vault/client";
 import {
   optimisticCreatedNote,
@@ -434,7 +439,10 @@ export function NoteNew() {
         {voiceGated ? (
           <VoiceUnavailableNote capability={transcription} />
         ) : (
-          <VoicePanel voice={voice} />
+          <>
+            <VoicePanel voice={voice} />
+            <RetentionChoice vaultId={activeVault.id} captureEngaged={captureInFlight} />
+          </>
         )}
 
         <div className="grid min-h-[60vh] gap-4 lg:grid-cols-2">
@@ -528,6 +536,87 @@ function VoiceUnavailableNote({
         ? "Voice transcription comes with the Voice plan."
         : "Voice transcription isn't enabled on this vault."}
     </p>
+  );
+}
+
+// First-voice-capture retention choice (voice-retention transparency).
+// The first time a user records in a vault whose `audio_retention` has
+// never been explicitly chosen, offer a one-time inline choice near the
+// recorder: keep the audio, or keep just the words. Selection PATCHes the
+// vault config (`config.audio_retention`, same contract on both doors) and
+// records the choice per-vault in localStorage so it never re-renders once
+// answered. Never blocks a capture:
+//   - it renders only alongside the recorder (the #167 capability gate
+//     already decided the mic renders), and only once the mic is engaged;
+//   - a failed PATCH shows one quiet line, the capture proceeds under the
+//     server default (keep), and the choice re-offers next time;
+//   - it's not offered at all when the vault predates the dial (`config`
+//     absent on /api/vault — a PATCH there would silently no-op) or when
+//     someone already dialed it away from the default via another door.
+// Reads ride the SAME cached /api/vault response as `useVaultInfo` — no
+// new network call per render.
+function RetentionChoice({
+  vaultId,
+  captureEngaged,
+}: {
+  vaultId: string;
+  captureEngaged: boolean;
+}) {
+  const retention = useAudioRetention();
+  const setRetention = useSetAudioRetention();
+  const { made, markMade } = useRetentionChoiceMade(vaultId);
+  const [error, setError] = useState<string | null>(null);
+
+  const show = captureEngaged && !made && retention.supported && retention.value === "keep";
+  if (!show) return null;
+
+  const choose = (value: "keep" | "until_transcribed") => {
+    setError(null);
+    setRetention.mutate(value, {
+      onSuccess: () => markMade(),
+      onError: () =>
+        setError(
+          "Couldn't save that choice — this recording is kept (the vault default). We'll ask again next time; you can also set it in Settings.",
+        ),
+    });
+  };
+
+  return (
+    <div
+      data-testid="retention-choice"
+      className="mb-4 flex flex-col gap-2 rounded-md border border-border bg-card/60 p-3"
+    >
+      <p className="text-xs text-fg-muted">
+        First voice note here — should this vault keep your audio files after transcribing?
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => choose("keep")}
+          disabled={setRetention.isPending}
+          className="min-h-11 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg-muted hover:text-accent disabled:opacity-40"
+        >
+          Keep my recordings
+        </button>
+        <button
+          type="button"
+          onClick={() => choose("until_transcribed")}
+          disabled={setRetention.isPending}
+          className="min-h-11 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-fg-muted hover:text-accent disabled:opacity-40"
+        >
+          Just keep the words
+        </button>
+        <span className="text-xs text-fg-dim">(audio deleted after transcribing)</span>
+      </div>
+      <p className="text-xs text-fg-dim">
+        Either way your capture saves now. Change this anytime in Settings.
+      </p>
+      {error ? (
+        <p className="text-xs text-red-400" data-testid="retention-choice-error">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
