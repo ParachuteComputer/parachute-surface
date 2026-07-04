@@ -20,7 +20,7 @@
 # file. Jobs gate on the tag prefix so only one package publishes per tag
 # push. Independent release cadences.
 #
-# Tag conventions (matches parachute-patterns governance rule 2):
+# Tag conventions (matches governance rule 2, https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md):
 #   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.2.0-rc.10)
 #                                          (client-v0.1.0-rc.4)
 #                                          (notes-ui-v0.1.4-rc.1)

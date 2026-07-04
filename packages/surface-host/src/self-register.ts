@@ -43,8 +43,9 @@ import { type ServiceEntry, readServiceEntry, upsertService } from "./services-m
  * services.json by `manifestName` (vault + scribe use this convention), so
  * self-registering under the short name "app" would create a duplicate row
  * alongside the hub-installed `parachute-surface` row and trip hub's
- * duplicate-port detector on re-read. See parachute-patterns or the
- * `manifestName` field on .parachute/module.json files. */
+ * duplicate-port detector on re-read. See the hub's row conventions
+ * (https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/services-json-row-conventions.md)
+ * or the `manifestName` field on .parachute/module.json files. */
 const ROW_NAME = resolveManifestName();
 
 function resolveManifestName(): string {

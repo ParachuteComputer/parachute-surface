@@ -1,7 +1,8 @@
 /**
  * Canonical Parachute brand mark.
  *
- * SVG dotted-grid glyph from parachute-patterns/patterns/design-system.md §2
+ * SVG dotted-grid glyph from the hub's design-system contract §2
+ * (https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/design-system.md)
  * (source-of-truth: parachute.computer/assets/parachute-logo.svg).
  * Paint via `currentColor` so the mark inherits the surrounding text color
  * (sage on cream surfaces, light sage on dark). aria-hidden because the mark

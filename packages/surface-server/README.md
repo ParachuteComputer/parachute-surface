@@ -6,8 +6,8 @@ inside `createBackend(ctx)`. Never a host object: the host
 `SurfaceHostContext`; this kit builds the trust machinery on top of it.
 
 Part of the [Surface Runtime design](../../design/2026-06-10-surface-runtime-primitives.md)
-(R4: P7–P9; R6 foundation: P10). Companion pattern:
-`parachute-patterns/patterns/backed-surface.md`.
+(R4: P7–P9; R6 foundation: P10). Companion contract:
+[`docs/contracts/backed-surface.md`](../../docs/contracts/backed-surface.md).
 
 > **Bun required.** This package publishes raw TypeScript source (no compiled
 > `dist/`) — it runs where backed surfaces run: inside the Bun-native surface

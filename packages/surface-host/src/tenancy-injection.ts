@@ -1,6 +1,6 @@
 /**
  * Runtime tenancy contract injection — implements the host side of
- * `parachute-patterns/patterns/runtime-tenancy-contract.md`.
+ * `../../../docs/contracts/runtime-tenancy-contract.md`.
  *
  * For every `index.html` parachute-surface serves on behalf of a hosted UI we
  * inject a small block of structured environment metadata into `<head>`:

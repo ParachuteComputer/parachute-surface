@@ -3,7 +3,7 @@
  *
  * Reads the structured environment metadata that parachute-surface's host
  * injects into every served `index.html` (see
- * `parachute-patterns/patterns/runtime-tenancy-contract.md` and the
+ * `../../../docs/contracts/runtime-tenancy-contract.md` and the
  * producer-side reference at
  * `parachute-surface/packages/app-host/src/tenancy-injection.ts`). Apps that
  * depend on `@openparachute/surface-client` get typed accessors instead of

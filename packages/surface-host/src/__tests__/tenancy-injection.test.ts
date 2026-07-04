@@ -2,7 +2,7 @@
  * Tests for `src/tenancy-injection.ts` — runtime tenancy contract injection.
  *
  * The contract lives in
- * `parachute-patterns/patterns/runtime-tenancy-contract.md`. parachute-surface
+ * `../../../../docs/contracts/runtime-tenancy-contract.md`. parachute-surface
  * implements the producer side (this module); `@openparachute/surface-client`
  * (parachute-app#22) consumes via typed helpers.
  *
