@@ -1,5 +1,29 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.15-rc.1] - 2026-07-04
+
+### Changed — live queries ride WebSockets; the fallback is polling (no SSE)
+
+Bumps `@openparachute/surface-client` to `^0.3.4-rc.1`, which makes the
+live-query transport **WebSocket-only** (Phase 2 of the SSE →
+Hibernatable-WebSockets migration). Notes' live view (`useLiveNotesQuery` →
+`createLiveList` → `VaultClient.subscribe`) sits above the transport seam, so
+the live path is a **zero-code-change** pickup: against a vault that speaks the
+WebSocket binding, the list runs over a hibernatable socket (idle-open tabs stop
+pinning the cloud vault DO awake).
+
+- **Polling is the floor** (there's no SSE fallback — the fallback IS polling).
+  When the live socket is unavailable — an old server without the WS binding, a
+  WS-blocked network, or a drop — the list degrades cleanly to react-query
+  polling with **no error state and no hang**, and re-establishes live the
+  moment WS is reachable again.
+- **Polling-floor hardening (`queries.ts`):** the note-list queries (`useNotes`,
+  `useNotesForDateViews`) now poll on a background interval (30s / 60s) AND
+  refetch on window-focus **whenever the live stream is down** — so a user with
+  WS blocked still sees changes within a sane window, not just on mount. Both
+  are disabled while live (the stream keeps the cache fresher than any interval)
+  and re-enable automatically when `isLive` flips false.
+
 ## [0.1.14] - 2026-07-04
 
 ### Added — voice-retention transparency: know (and choose) whether recordings are kept

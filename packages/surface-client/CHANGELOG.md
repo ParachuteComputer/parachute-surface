@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.3.4-rc.1] - 2026-07-04
+
+### Changed — live-query is now WebSocket-only (no SSE; the fallback is polling)
+
+Phase 2 of the SSE → Hibernatable-WebSockets migration (team-vault
+`Decisions/2026-07-04-live-query-ws-hibernation`; wire contract
+`parachute-cloud/workers/vault/docs/live-query-ws.md`). A held-open SSE stream
+pins the per-vault Cloudflare Durable Object awake and bills duration; a
+Hibernatable WebSocket lets an idle-but-open socket evict the DO → ~$0 idle.
+**SSE is being retired, so the client no longer speaks it** — the model is
+two-state: **WebSocket-or-polling**, where polling (the consumer's react-query
+cadence) is the floor and a live socket is a fresher-than-polling augmentation
+on top.
+
+- **`VaultClient.subscribe()` is WebSocket-only** (`ws-transport.ts`). The
+  previous fetch-stream SSE transport (`startSubscription` / `parseSSEStream`)
+  is removed. `createLiveList`, the reconcilers, and consumers (notes-ui) are
+  untouched — they sit above the transport seam.
+- **Graceful degradation to polling (never an error, never a hang).** When WS
+  can't be established — an old server without the binding, a WS-blocked
+  network, or a drop — the subscription stays in a non-`live` status (so the
+  consumer keeps polling) and runs a **capped-backoff reconnect in the
+  background**, re-establishing the live augmentation the moment WS is reachable
+  again. A runtime with no `WebSocket` signals "live unavailable" once and the
+  consumer polls. Only a protocol bug (4400), a scope denial (4403), or
+  exhausted auth stop the reconnect loop — and even those just leave the
+  consumer on polling.
+- **First-message auth handshake.** Browsers can't set headers on a WebSocket,
+  so auth is the first frame (`{"type":"auth","token":"…"}`); the token is
+  re-sent on the OPEN socket when it rotates (no reconnect, no re-snapshot).
+- **Wire parity.** Payloads are byte-identical to what the SSE `data:` bodies
+  carried (`upsert` / `remove`); the snapshot is chunked and accumulated until
+  `done:true`, then emitted as the single `onSnapshot` the consumer expects.
+- **Liveness.** Client-driven raw `"ping"` every ~30s, expecting `"pong"` (the
+  DO's no-wake auto-response) or any frame within ~10s, else the socket is
+  terminated and reconnected (fresh snapshot — the no-replay self-healing is
+  preserved).
+- **Close-code map:** 4400 protocol → terminal; 4401 unauthorized →
+  refresh-once-then-reconnect; 4403 forbidden → terminal
+  (`VaultPermissionError`); 4408 auth-timeout → reconnect.
+
+BREAKING (pre-1.0, live-query API only): the `parseSSEStream`,
+`startSubscription`, and `SSEEvent` exports are gone; `VaultClient.subscribe`'s
+consumer surface (`onSnapshot`/`onUpsert`/`onRemove`/`onStatus`) is unchanged.
+
 ## [0.3.3-rc.1] - 2026-06-24
 
 ### Fixed

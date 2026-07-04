@@ -41,10 +41,12 @@
 import { toNotesSearchParams, type NotesQueryInput } from "./notes-query.js";
 import {
   assertSubscribableQuery,
-  startSubscription,
   type SubscribeHandlers,
   type SubscribeOptions,
+  type SubscribeTransport,
+  type WebSocketCtor,
 } from "./subscribe.js";
+import { startWsSubscription } from "./ws-transport.js";
 import type {
   CreateNotePayload,
   FindPathResult,
@@ -265,6 +267,13 @@ export interface VaultClientOptions {
   onAuthRevoked?: (status: number, detail?: { errorType?: string; message?: string }) => void;
   /** Coarse reachability signal — fires on every fetch outcome. */
   onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
+  /**
+   * WebSocket constructor for {@link VaultClient.subscribe}'s live transport.
+   * Defaults to the runtime global `WebSocket`; when neither exists the
+   * subscription signals "live unavailable" and the consumer keeps polling.
+   * Primarily a test seam.
+   */
+  webSocketImpl?: WebSocketCtor;
 }
 
 export class VaultClient {
@@ -286,6 +295,7 @@ export class VaultClient {
     detail?: { errorType?: string; message?: string },
   ) => void;
   private readonly onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
+  private readonly webSocketImpl?: WebSocketCtor;
 
   constructor(opts: VaultClientOptions) {
     if (opts.accessToken === undefined && opts.tokenProvider === undefined) {
@@ -311,6 +321,7 @@ export class VaultClient {
     if (opts.onAuthError !== undefined) this.onAuthError = opts.onAuthError;
     if (opts.onAuthRevoked !== undefined) this.onAuthRevoked = opts.onAuthRevoked;
     if (opts.onReachability !== undefined) this.onReachability = opts.onReachability;
+    if (opts.webSocketImpl !== undefined) this.webSocketImpl = opts.webSocketImpl;
   }
 
   /**
@@ -637,30 +648,38 @@ export class VaultClient {
   }
 
   /**
-   * Live-query subscription over vault's `GET /api/subscribe` SSE endpoint
-   * (vault's live-query SSE design, 2026-06-08). Delivers one
-   * `onSnapshot(notes)` — the complete matching set — then `onUpsert(note)` /
-   * `onRemove(id)` as notes enter/change/leave the set. Returns the
-   * unsubscribe function.
+   * Live-query subscription over vault's `GET /api/subscribe` endpoint.
+   * Delivers one `onSnapshot(notes)` — the complete matching set — then
+   * `onUpsert(note)` / `onRemove(id)` as notes enter/change/leave the set.
+   * Returns the unsubscribe function.
    *
+   * - **Transport is WebSocket-only** (`ws-transport.ts`). A Hibernatable
+   *   WebSocket lets an idle-but-open socket evict the cloud vault DO → ~$0
+   *   idle. There is **no SSE fallback** — SSE is being retired; when WS is
+   *   unavailable (an old server without the binding, a WS-blocked network, or
+   *   a drop) the subscription degrades to the consumer's **polling floor**
+   *   (`isLive` stays false, no error UI, no hang) while a capped-backoff
+   *   reconnect keeps trying in the background and re-establishes live the
+   *   moment WS is reachable again.
    * - **Query grammar** is the same as `queryNotes` (same server-side
    *   parser), except `search`, `near`, and `cursor` are not
    *   live-evaluable — this method throws on them synchronously (the
    *   vault would 400).
-   * - **Transport is fetch-stream, not EventSource** — the bearer rides
-   *   the `Authorization` header instead of a `?key=` query param
-   *   (no token in proxy logs / browser history), and the method works
-   *   server-side (Bun/Node) where `EventSource` may not exist.
+   * - **Auth rides a first-message handshake, never a `?key=` query param** —
+   *   browsers can't header-auth a socket, so the client sends
+   *   `{type:"auth",token}` as the first frame and re-auths on the open socket
+   *   when the token rotates (no reconnect, no re-snapshot). No token in proxy
+   *   logs.
    * - **Reconnects are self-correcting**: vault has no event replay, so a
    *   reconnect re-delivers a *fresh snapshot* that replaces the
    *   consumer's set — anything missed while disconnected is reconciled
    *   wholesale. Backoff is exponential and capped (see
    *   {@link SubscribeOptions}).
-   * - **Auth expiry**: a 401/403 on (re)connect drives the client's
-   *   `onAuthError` refresh seam once, then resubscribes with the fresh
-   *   token (also rotated into the client). Unrecoverable auth → the
-   *   subscription terminates with `onError(VaultAuthError)` +
-   *   `onStatus("closed")`.
+   * - **Auth expiry**: a WS close 4401 (expired/revoked) drives the client's
+   *   `onAuthError` refresh seam once, then reconnects with the fresh token
+   *   (also rotated into the client). Unrecoverable auth → the subscription
+   *   terminates with `onError(VaultAuthError)` + `onStatus("closed")` (and the
+   *   consumer falls back to polling).
    *
    * @example
    * ```ts
@@ -684,24 +703,21 @@ export class VaultClient {
     const qs = toNotesSearchParams(query);
     assertSubscribableQuery(qs);
     const s = qs.toString();
-    return startSubscription(
-      {
-        url: `${this.baseUrl}/api/subscribe${s ? `?${s}` : ""}`,
-        resolveToken: () => this.resolveToken(),
-        // Reuse the request path's refresh-on-401 seam; rotate the cached
-        // token the same way `requestWithRetry` does on a successful refresh.
-        refreshToken: this.onAuthError
-          ? async () => {
-              const fresh = await this.onAuthError?.();
-              if (fresh) this.token = fresh;
-              return fresh ?? null;
-            }
-          : undefined,
-        fetchImpl: this.fetchImpl,
-      },
-      handlers,
-      opts,
-    );
+    const transport: SubscribeTransport = {
+      url: `${this.baseUrl}/api/subscribe${s ? `?${s}` : ""}`,
+      resolveToken: () => this.resolveToken(),
+      // Reuse the request path's refresh-on-auth-failure seam; rotate the
+      // cached token the same way `requestWithRetry` does on a refresh.
+      refreshToken: this.onAuthError
+        ? async () => {
+            const fresh = await this.onAuthError?.();
+            if (fresh) this.token = fresh;
+            return fresh ?? null;
+          }
+        : undefined,
+      webSocketImpl: this.webSocketImpl,
+    };
+    return startWsSubscription(transport, handlers, opts);
   }
 
   async getNote(

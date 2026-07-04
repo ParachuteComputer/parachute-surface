@@ -104,7 +104,7 @@
     },
     "packages/notes-ui": {
       "name": "@openparachute/notes-ui",
-      "version": "0.1.14",
+      "version": "0.1.15-rc.1",
       "dependencies": {
         "@codemirror/commands": "^6.10.3",
         "@codemirror/lang-markdown": "^6.5.0",
@@ -166,7 +166,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.3",
+      "version": "0.3.4-rc.1",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
@@ -2076,6 +2076,12 @@
     "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
+
+    "@openparachute/surface/@openparachute/surface-client": ["@openparachute/surface-client@0.3.3", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-ywW7onU6hE/thXPgsT59ZUrYtTCDxveNYWvRgCT2y6LpHorq8AosT2DLlTFDzE1z5VWQ3OQgP1fuOkybZMTS9w=="],
+
+    "@openparachute/surface-render/@openparachute/surface-client": ["@openparachute/surface-client@0.3.3", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-ywW7onU6hE/thXPgsT59ZUrYtTCDxveNYWvRgCT2y6LpHorq8AosT2DLlTFDzE1z5VWQ3OQgP1fuOkybZMTS9w=="],
+
+    "@openparachute/surface-server/@openparachute/surface-client": ["@openparachute/surface-client@0.3.3", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-ywW7onU6hE/thXPgsT59ZUrYtTCDxveNYWvRgCT2y6LpHorq8AosT2DLlTFDzE1z5VWQ3OQgP1fuOkybZMTS9w=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 
