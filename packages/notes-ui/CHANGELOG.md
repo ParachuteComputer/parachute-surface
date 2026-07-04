@@ -26,6 +26,9 @@ which reads as the product failing on a flagship feature.
   without the field.
 - An in-flight capture (requesting/recording/have-audio) is never interrupted
   by a late-resolving gate — it finishes honestly.
+- **Fail-open pinned by test**: a failing bare-landing probe (network error,
+  500, 401 scope-mismatch, malformed JSON) leaves the capability undefined
+  and keeps the mic — failure never masquerades as "disabled".
 
 ## [0.1.12] - 2026-07-03
 

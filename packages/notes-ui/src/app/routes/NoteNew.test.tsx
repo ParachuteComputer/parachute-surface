@@ -2,6 +2,7 @@ import { NoteNew } from "@/app/routes/NoteNew";
 import { type LensDB, openLensDB } from "@/lib/sync/db";
 import { listPending } from "@/lib/sync/queue";
 import { useToastStore } from "@/lib/toast/store";
+import { useVaultReachabilityStore } from "@/lib/vault/reachability-store";
 import { useVaultStore } from "@/lib/vault/store";
 import type { Note } from "@/lib/vault/types";
 import { SyncProvider } from "@/providers/SyncProvider";
@@ -841,6 +842,9 @@ describe("NoteNew — transcription capability gate", () => {
     localStorage.clear();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     useToastStore.setState({ toasts: [] });
+    // The failure-mode cases below report `unreachable` into the module-level
+    // reachability store — reset so cases don't leak state into each other.
+    useVaultReachabilityStore.setState({ byVault: {} });
     seedStore();
     fakeState.controller = null;
     fakeState.pickResult = "audio/webm;codecs=opus";
@@ -856,10 +860,12 @@ describe("NoteNew — transcription capability gate", () => {
 
   /** Fetch stub with exact control over /api/vault vs the bare landing —
    *  installFetch's substring matcher can't express "the bare URL only"
-   *  (every request URL contains it as a prefix). */
+   *  (every request URL contains it as a prefix). `landingFailure` makes the
+   *  bare-landing probe fail in a specific way (fail-open pinning). */
   function installDoorFetch(opts: {
     apiVault: Record<string, unknown>;
     landing?: Record<string, unknown>;
+    landingFailure?: "reject" | "malformed" | number;
   }) {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -867,6 +873,26 @@ describe("NoteNew — transcription capability gate", () => {
         ({ ok: true, status: 200, json: async () => body, text: async () => "" }) as Response;
       if (url.includes("/api/vault")) return jsonRes(opts.apiVault);
       if (url === BARE || url === `${BARE}/`) {
+        if (opts.landingFailure === "reject") throw new TypeError("network down");
+        if (opts.landingFailure === "malformed") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => {
+              throw new SyntaxError("Unexpected token < in JSON");
+            },
+            text: async () => "<html>not json</html>",
+          } as unknown as Response;
+        }
+        if (typeof opts.landingFailure === "number") {
+          const status = opts.landingFailure;
+          return {
+            ok: status < 400,
+            status,
+            json: async () => ({ error: "nope" }),
+            text: async () => JSON.stringify({ error: "nope" }),
+          } as Response;
+        }
         if (opts.landing) return jsonRes(opts.landing);
         return { ok: false, status: 404, json: async () => null, text: async () => "" } as Response;
       }
@@ -943,4 +969,39 @@ describe("NoteNew — transcription capability gate", () => {
     expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
     expect(screen.queryByTestId("voice-unavailable")).toBeNull();
   });
+
+  // Fail-open pin (launch-safety posture): when /api/vault answers WITHOUT
+  // the field and the bare-landing probe then FAILS — for any reason — the
+  // capability stays undefined and the mic must render exactly as today.
+  // Failure must never masquerade as "disabled". The 401 case specifically
+  // pins that a scope-mismatched token can't hide the mic (the client's
+  // single refresh-and-retry resolves null here — seeded token has no
+  // refreshToken — then throws VaultAuthError, which react-query absorbs).
+  it.each([
+    ["network error (fetch rejects)", "reject"],
+    ["server error (500)", 500],
+    ["auth mismatch (401)", 401],
+    ["malformed JSON (200 non-JSON body)", "malformed"],
+  ] as const)(
+    "landing probe fails — %s → fail-open: recorder stays, no gate copy, no crash",
+    async (_label, failure) => {
+      const fetchImpl = installDoorFetch({
+        apiVault: { name: "dev", description: "" },
+        landingFailure: failure,
+      });
+      renderAt("/new");
+
+      // The probe must have actually fired (a vacuous pass here would just
+      // be the loading state) and settled…
+      await waitFor(() => {
+        expect(landingCalls(fetchImpl).length).toBeGreaterThan(0);
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      // …and the mic is still there, with no gate copy.
+      expect(screen.getByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
+      expect(screen.queryByTestId("voice-unavailable")).toBeNull();
+    },
+  );
 });
