@@ -6,7 +6,7 @@
 
 > A *surface* is any UI that talks to a vault — a daily-capture inbox, a project dashboard, a graph explorer. Surface is the host that runs them. To build one, reach for [`@openparachute/surface-client`](./packages/surface-client) (browser auth + typed vault client) and [`@openparachute/surface-render`](./packages/surface-render) (note rendering); you don't hand-roll OAuth or the vault REST layer.
 
-Surface aligns with its sibling modules (naming, brand, ports, OAuth scopes, the module protocol) per the hub-enforced contract docs at [`parachute-hub/docs/contracts/`](https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/README.md). The contracts Surface itself enforces (runtime tenancy, backed surfaces) live in [`docs/contracts/`](./docs/contracts); broader ecosystem conventions live in the team vault's Canon.
+Surface aligns with its sibling modules (naming, brand, ports, OAuth scopes, the module protocol) per the hub-enforced contract docs at [`parachute-hub/docs/contracts/`](https://github.com/ParachuteComputer/parachute-hub/blob/main/docs/contracts/README.md). The contracts Surface itself enforces (runtime tenancy, backed surfaces) live in [`docs/contracts/`](./docs/contracts); broader ecosystem conventions live in the team vault's Canon (team-internal — outside contributors: each repo's `docs/` carries what you need).
 
 ## Quick start
 
