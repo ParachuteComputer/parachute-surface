@@ -1,5 +1,51 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.14] - 2026-07-04
+
+### Added — voice-retention transparency: know (and choose) whether recordings are kept
+
+The vault has always had an `audio_retention` dial (`keep` /
+`until_transcribed` / `never` on `GET/PATCH /api/vault` — identical
+contract on the self-host and cloud doors), but nothing surfaced it:
+users recorded voice notes without knowing whether the audio file was
+kept forever or deleted after transcription. This release is the pure
+surfacing — no backend changes.
+
+- **First-voice-capture choice (the consent moment).** The first time a
+  user records in a vault whose retention has never been explicitly
+  chosen, a one-time inline choice appears near the recorder — "Keep my
+  recordings" / "Just keep the words (audio deleted after transcribing)".
+  Selection PATCHes `config.audio_retention` and remembers the choice
+  per-vault (localStorage, the `lens:path-tree:` pattern). Never blocks a
+  capture: a failed PATCH shows one quiet line, the capture proceeds
+  under the server default (keep), and the choice re-offers next time.
+  Not offered where it can't work: vaults that predate the dial (no
+  `config` block on `/api/vault` — a PATCH would silently no-op) and
+  vaults already dialed away from the default via another door.
+- **Settings → "Voice recordings".** Shows the CURRENT server value with
+  one honest line per option: Keep ("stored with your notes; included
+  wherever attachments are included"), Delete after transcribing ("your
+  words stay; the audio file is removed once the transcript lands"),
+  Never store ("audio is removed even if transcription fails — the
+  transcript is your only copy"). Changing PATCHes immediately; errors
+  surface as a toast and the radios stay on the server truth. Older
+  vaults show the value read-only with an honest "can't change this yet"
+  line. Setting the dial here also settles the recorder's first-capture
+  prompt.
+- **Respects the existing gates, adds no network.** Everything renders
+  only where the mic itself renders (the 0.1.13 transcription-capability
+  gate); reads ride the SAME cached `/api/vault` response as
+  `useVaultInfo` — zero new requests per render. Writes go through the
+  new `VaultClient.patchVault` (`PATCH /api/vault`, write-scoped on both
+  doors — the Notes token carries it), and the mutation verifies the
+  config ECHO so an old vault's accept-and-ignore 200 can't masquerade
+  as success.
+
+Tests: 985 (was 964) — choice renders once + persists + PATCHes
+correctly; PATCH-failure path (capture unblocked, choice re-offered);
+settings row reflects + updates + errors honestly; absent-config
+back-compat (old vault → treated as keep, no dead control).
+
 ## [0.1.13] - 2026-07-03
 
 ### Fixed — mic gates on the vault's declared transcription capability (launch-audit P0-3)

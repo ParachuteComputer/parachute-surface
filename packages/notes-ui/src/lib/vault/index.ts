@@ -1,3 +1,4 @@
+export * from "./audio-retention";
 export * from "./auth-halt-store";
 export * from "./client";
 export * from "./cross-tab-sync";

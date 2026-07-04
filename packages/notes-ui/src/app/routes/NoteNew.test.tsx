@@ -1005,3 +1005,262 @@ describe("NoteNew — transcription capability gate", () => {
     },
   );
 });
+
+// Voice-retention transparency: the first time a user records in a vault
+// whose `audio_retention` has never been explicitly chosen, a one-time
+// inline choice appears near the recorder — keep the audio, or keep just
+// the words. Selection PATCHes `config.audio_retention` (identical wire
+// contract on both doors) and records the choice per-vault in localStorage.
+// A failed PATCH never blocks the capture (server default `keep` applies)
+// and the choice re-offers next time.
+describe("NoteNew — first-voice-capture retention choice", () => {
+  let restoreOnline: (() => void) | null = null;
+
+  beforeEach(async () => {
+    const db = await freshDb();
+    db.close();
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    useToastStore.setState({ toasts: [] });
+    useVaultReachabilityStore.setState({ byVault: {} });
+    seedStore();
+    fakeState.controller = null;
+    fakeState.pickResult = "audio/webm;codecs=opus";
+    fakeState.requestMic = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
+    vi.spyOn(window, "confirm").mockImplementation(() => true);
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => "blob:fake"),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
+    // Audio saves ride the sync queue (offline path) — force offline so the
+    // route never attempts a live create POST. The retention PATCH is a plain
+    // react-query mutation and goes through the fetch stub regardless.
+    const desc = Object.getOwnPropertyDescriptor(Navigator.prototype, "onLine");
+    Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });
+    restoreOnline = () => {
+      if (desc) Object.defineProperty(navigator, "onLine", desc);
+    };
+  });
+
+  afterEach(() => {
+    restoreOnline?.();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function releasePointer() {
+    window.dispatchEvent(new Event("pointerup"));
+  }
+
+  /** GET /api/vault body for a modern vault on the server default (unchosen). */
+  const UNCHOSEN_VAULT = {
+    name: "dev",
+    description: "",
+    transcription: { enabled: true, provider: "scribe-http" },
+    config: { audio_retention: "keep", auto_transcribe: { enabled: true } },
+  };
+
+  function patchEcho(value: string) {
+    return {
+      name: "dev",
+      description: null,
+      config: { audio_retention: value, auto_transcribe: { enabled: true } },
+    };
+  }
+
+  function patchBodies(fetchImpl: ReturnType<typeof installFetch>): unknown[] {
+    return fetchImpl.mock.calls
+      .filter(([, init]) => (init?.method ?? "GET").toUpperCase() === "PATCH")
+      .map(([, init]) => JSON.parse(String(init?.body)));
+  }
+
+  async function engageRecorder() {
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.pointerDown(recordBtn);
+      await Promise.resolve();
+    });
+  }
+
+  async function stopRecorder() {
+    await act(async () => {
+      releasePointer();
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/recorded\s+/i)).toBeInTheDocument();
+    });
+  }
+
+  it("no choice before the mic is engaged; engaging the recorder reveals it", async () => {
+    installFetch({ "GET /api/vault": { body: UNCHOSEN_VAULT } });
+    renderAt("/new");
+
+    // Recorder idle → no prompt, even once /api/vault has answered.
+    await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByTestId("retention-choice")).toBeNull();
+
+    await engageRecorder();
+    expect(await screen.findByTestId("retention-choice")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /keep my recordings/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /just keep the words/i })).toBeInTheDocument();
+  });
+
+  it("choosing 'Just keep the words' PATCHes until_transcribed, hides the prompt, and persists per-vault", async () => {
+    const fetchImpl = installFetch({
+      "GET /api/vault": { body: UNCHOSEN_VAULT },
+      "PATCH /api/vault": { body: patchEcho("until_transcribed") },
+    });
+    renderAt("/new");
+
+    await engageRecorder();
+    await screen.findByTestId("retention-choice");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /just keep the words/i }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(patchBodies(fetchImpl)).toEqual([{ config: { audio_retention: "until_transcribed" } }]);
+    await waitFor(() => {
+      expect(screen.queryByTestId("retention-choice")).toBeNull();
+    });
+    // The per-vault flag landed — the prompt never re-renders in this vault.
+    expect(localStorage.getItem("lens:audio-retention-choice:dev")).not.toBeNull();
+    // …and the capture is untouched: recording continues (Stop still live).
+    expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+  });
+
+  it("choosing 'Keep my recordings' PATCHes keep explicitly and settles the choice", async () => {
+    const fetchImpl = installFetch({
+      "GET /api/vault": { body: UNCHOSEN_VAULT },
+      "PATCH /api/vault": { body: patchEcho("keep") },
+    });
+    renderAt("/new");
+
+    await engageRecorder();
+    await screen.findByTestId("retention-choice");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /keep my recordings/i }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(patchBodies(fetchImpl)).toEqual([{ config: { audio_retention: "keep" } }]);
+    await waitFor(() => {
+      expect(screen.queryByTestId("retention-choice")).toBeNull();
+    });
+    expect(localStorage.getItem("lens:audio-retention-choice:dev")).not.toBeNull();
+  });
+
+  it("choice already made in this vault → recording does not re-offer (one-time pinned)", async () => {
+    localStorage.setItem(
+      "lens:audio-retention-choice:dev",
+      JSON.stringify({ chosenAt: "2026-07-01T00:00:00.000Z" }),
+    );
+    installFetch({ "GET /api/vault": { body: UNCHOSEN_VAULT } });
+    renderAt("/new");
+
+    await engageRecorder();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByTestId("retention-choice")).toBeNull();
+  });
+
+  it("PATCH failure: honest error, capture saves under the server default, choice re-offers next time", async () => {
+    installFetch({
+      "GET /api/vault": { body: UNCHOSEN_VAULT },
+      "PATCH /api/vault": { status: 500, body: { error: "boom" } },
+    });
+    const first = renderAt("/new");
+
+    await engageRecorder();
+    await screen.findByTestId("retention-choice");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /just keep the words/i }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Honest failure line; flag NOT set.
+    expect(await screen.findByTestId("retention-choice-error")).toHaveTextContent(/couldn't save/i);
+    expect(localStorage.getItem("lens:audio-retention-choice:dev")).toBeNull();
+
+    // The capture is never blocked on the choice: stop + Create still land
+    // the full voice enqueue and navigate to the note.
+    await stopRecorder();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage")).toBeInTheDocument();
+    });
+    const db = await openLensDB();
+    const pending = await listPending(db, "dev");
+    db.close();
+    expect(pending.map((p) => p.mutation.kind).sort()).toEqual([
+      "create-note",
+      "link-attachment",
+      "upload-attachment",
+    ]);
+
+    // Fresh visit, same vault: the un-answered choice re-offers.
+    first.unmount();
+    renderAt("/new");
+    await engageRecorder();
+    expect(await screen.findByTestId("retention-choice")).toBeInTheDocument();
+  });
+
+  it("old vault without the config block → no choice offered (PATCH would silently no-op)", async () => {
+    installFetch({
+      "GET /api/vault": {
+        body: { name: "dev", description: "" }, // no config, no transcription — pre-dial vault
+      },
+    });
+    renderAt("/new");
+
+    await engageRecorder();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Mic renders (absent capability = back-compat), but no retention prompt.
+    expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("retention-choice")).toBeNull();
+  });
+
+  it("retention already dialed away from the default (another door) → no choice offered", async () => {
+    installFetch({
+      "GET /api/vault": {
+        body: {
+          ...UNCHOSEN_VAULT,
+          config: { audio_retention: "until_transcribed", auto_transcribe: { enabled: true } },
+        },
+      },
+    });
+    renderAt("/new");
+
+    await engageRecorder();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByTestId("retention-choice")).toBeNull();
+  });
+
+  it("transcription explicitly disabled → recorder gated (#167) and no retention prompt either", async () => {
+    installFetch({
+      "GET /api/vault": {
+        body: { ...UNCHOSEN_VAULT, transcription: { enabled: false } },
+      },
+    });
+    renderAt("/new");
+
+    await screen.findByTestId("voice-unavailable");
+    expect(screen.queryByRole("button", { name: /record voice memo/i })).toBeNull();
+    expect(screen.queryByTestId("retention-choice")).toBeNull();
+  });
+});
