@@ -99,18 +99,23 @@ export {
   type RawNotesQuery,
 } from "./notes-query.js";
 
-// Live-query SSE subscription — `VaultClient.subscribe()` is the consumer
-// API; the parser + loop primitives are exported for advanced/raw use.
+// Live-query subscription contract — `VaultClient.subscribe()` is the consumer
+// API. The transport is WebSocket-only; these are the shared types + the
+// client-side query guard.
 export {
-  parseSSEStream,
-  startSubscription,
   assertSubscribableQuery,
-  type SSEEvent,
   type SubscribeHandlers,
   type SubscribeOptions,
   type SubscribeStatus,
   type SubscribeTransport,
+  type WebSocketLike,
+  type WebSocketCtor,
 } from "./subscribe.js";
+
+// Live-query WebSocket transport — the WS-only subscription loop behind
+// `VaultClient.subscribe`. When WS is unavailable it degrades to the consumer's
+// polling floor (never SSE). Exported for advanced/raw use.
+export { startWsSubscription } from "./ws-transport.js";
 
 // Live-list — framework-light reconciler over `VaultClient.subscribe()`.
 // `createLiveList` maintains an ordered note list from the snapshot + delta

@@ -99,12 +99,12 @@ export function useNotes(queryState: NoteQueryState) {
   const queryKey = useMemo(() => ["notes", activeId, queryState], [activeId, queryState]);
   const params = useMemo(() => buildNoteQueryParams(queryState), [queryState]);
 
-  // Live layer: open an SSE subscription for this exact query and reconcile
-  // events into the same cache key. When the stream is open + healthy we
-  // relax the aggressive 10s staleTime (the stream keeps the cache fresh);
-  // on any non-open state we revert to polling. The hook is a no-op for
-  // unsubscribable queries (e.g. `search`) — those stay on polling. See
-  // `live-query.ts` for the full fallback guarantee.
+  // Live layer: open a live subscription (WebSocket) for this exact query and
+  // reconcile events into the same cache key. When the stream is open + healthy
+  // we relax the aggressive 10s staleTime (the stream keeps the cache fresh);
+  // on any non-open state we revert to the polling floor below. The hook is a
+  // no-op for unsubscribable queries (e.g. `search`) — those stay on polling.
+  // See `live-query.ts` for the full fallback guarantee.
   const { isLive } = useLiveNotesQuery({ queryKey, params, client });
 
   return useQuery({
@@ -112,6 +112,14 @@ export function useNotes(queryState: NoteQueryState) {
     enabled: !!client,
     queryFn: () => client!.queryNotes(params),
     staleTime: isLive ? Number.POSITIVE_INFINITY : 10_000,
+    // The polling FLOOR (live is WebSocket-only; there's no SSE fallback — the
+    // fallback IS polling). When the live stream is down (old server without
+    // the WS binding, WS-blocked network, or a drop) a background interval +
+    // refetch-on-focus keep the list fresh within a sane window — not just on
+    // mount. Disabled while live: the stream keeps the cache fresher than any
+    // interval, and re-enables automatically the moment `isLive` flips false.
+    refetchInterval: isLive ? false : 30_000,
+    refetchOnWindowFocus: !isLive,
     placeholderData: keepPreviousData,
   });
 }
@@ -159,7 +167,8 @@ export function useNotesForDateViews() {
 
   // Live layer for Today / Activity / Calendar — same reconcile-into-cache
   // pattern as `useNotes`. The capped recent-notes window is a plain
-  // sort+limit query (subscribable). When live, relax the 60s staleTime.
+  // sort+limit query (subscribable). When live, relax the 60s staleTime; when
+  // not, the same polling floor as `useNotes` (interval + focus refetch).
   const { isLive } = useLiveNotesQuery({ queryKey, params, client });
 
   return useQuery({
@@ -167,6 +176,8 @@ export function useNotesForDateViews() {
     enabled: !!client,
     queryFn: () => client!.queryNotes(params),
     staleTime: isLive ? Number.POSITIVE_INFINITY : 60_000,
+    refetchInterval: isLive ? false : 60_000,
+    refetchOnWindowFocus: !isLive,
   });
 }
 

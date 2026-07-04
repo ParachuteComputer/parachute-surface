@@ -1,7 +1,8 @@
 /**
  * Live-query layer — makes a react-query-cached note list update in real
- * time off vault's live-query SSE, with a graceful fallback to the existing
- * polling when a live stream isn't available.
+ * time off vault's live-query WebSocket, with a graceful fallback to the
+ * existing polling when a live stream isn't available (WS is the only live
+ * transport — there is no SSE fallback; the fallback IS polling).
  *
  * ## Delegation to the SDK (dogfood)
  *
