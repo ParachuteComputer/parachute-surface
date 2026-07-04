@@ -133,6 +133,7 @@ export {
 // Vault REST resource types.
 export type {
   TagExpandMode,
+  TranscriptionCapability,
   VaultInfo,
   Note,
   NoteSummary,

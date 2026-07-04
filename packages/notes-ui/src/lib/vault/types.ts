@@ -45,10 +45,26 @@ export type {
   TagUpsertPayload,
   TokenResponse,
   TokenScope,
+  TranscriptionCapability,
   UpdateNotePayload,
   UploadProgress,
   VaultInfo,
 } from "@openparachute/surface-client";
+
+import type { TranscriptionCapability as TranscriptionCapabilityShape } from "@openparachute/surface-client";
+
+/**
+ * Bare vault landing (`GET <vaultUrl>`, no `/api` suffix) — the minimal
+ * shape Notes reads from it. Cloud vaults carry the voice-transcription
+ * capability HERE (not on `/api/vault`); self-host vaults answer the bare
+ * landing too but without `transcription` (theirs lives on `/api/vault`).
+ * See `useTranscriptionCapability` in `queries.ts` for the two-door read.
+ */
+export interface VaultLandingInfo {
+  name?: string;
+  description?: string | null;
+  transcription?: TranscriptionCapabilityShape;
+}
 
 export interface VaultRecord {
   id: string;

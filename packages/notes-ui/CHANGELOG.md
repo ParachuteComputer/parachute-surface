@@ -1,5 +1,35 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.13] - 2026-07-03
+
+### Fixed — mic gates on the vault's declared transcription capability (launch-audit P0-3)
+
+On free-tier cloud vaults the create screen showed "Record voice memo"
+("Audio gets transcribed and appended") while the vault had transcription
+disabled — the user recorded, waited, and got "_Transcription unavailable._",
+which reads as the product failing on a flagship feature.
+
+- **The recorder now hides when the vault EXPLICITLY declares
+  `transcription.enabled === false`** (Aaron's ratified tier design: free =
+  mic hidden, honest), replaced by a single quiet line — "Voice transcription
+  comes with the Voice plan." on plan-metered (cloud) vaults, "Voice
+  transcription isn't enabled on this vault." on self-host vaults without a
+  configured provider.
+- **Back-compat pinned: an ABSENT capability keeps the mic exactly as
+  today.** Older self-host vaults that predate the flag (vault#529) declare
+  nothing — absent ≠ disabled, existing self-host voice users see no change.
+- **Two-door capability read, no per-render network.** Self-host declares the
+  flag on `GET /api/vault` (already fetched + cached by `useVaultInfo`);
+  cloud declares it on the bare landing `GET /vault/<name>` (cloud#56) and
+  NOT on `/api/vault`, so `useTranscriptionCapability` adds a cached fallback
+  probe of the bare landing that fires only when `/api/vault` answered
+  without the field.
+- An in-flight capture (requesting/recording/have-audio) is never interrupted
+  by a late-resolving gate — it finishes honestly.
+- **Fail-open pinned by test**: a failing bare-landing probe (network error,
+  500, 401 scope-mismatch, malformed JSON) leaves the capability undefined
+  and keeps the mic — failure never masquerades as "disabled".
+
 ## [0.1.12] - 2026-07-03
 
 ### Fixed — Stage-0 offline trust (three phone-first PWA fixes)
