@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.4-rc.1] - 2026-07-04
+## [0.3.4] - 2026-07-05
 
 ### Changed — live-query is now WebSocket-only (no SSE; the fallback is polling)
 
