@@ -1,10 +1,10 @@
 # Changelog — @openparachute/notes-ui
 
-## [0.1.15-rc.1] - 2026-07-04
+## [0.1.15] - 2026-07-05
 
 ### Changed — live queries ride WebSockets; the fallback is polling (no SSE)
 
-Bumps `@openparachute/surface-client` to `^0.3.4-rc.1`, which makes the
+Bumps `@openparachute/surface-client` to `^0.3.4`, which makes the
 live-query transport **WebSocket-only** (Phase 2 of the SSE →
 Hibernatable-WebSockets migration). Notes' live view (`useLiveNotesQuery` →
 `createLiveList` → `VaultClient.subscribe`) sits above the transport seam, so
