@@ -622,8 +622,8 @@ function RetentionChoice({
 
 // Inline voice affordance. Sits above the editor so the operator sees it
 // at a glance — Aaron's "voice-capture affordance at the top of the content
-// area." Idle: a single "Record" button. Recording: live elapsed + stop
-// button (also stops on global pointerup if the user is hold-pressing).
+// area." Idle: a single "Record" button. Recording: live elapsed + a "Stop"
+// button (tap-toggle — tap Record to start, tap Stop to finish).
 // Have-audio: preview + discard. Denied: error message inline.
 function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
   const { phase, elapsedMs, startRecording, stopRecording, discardAudio } = voice;
@@ -659,7 +659,7 @@ function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card/60 p-3">
       <div className="text-xs text-fg-dim">
         {isRecording
-          ? "Recording — release or click Stop to finish."
+          ? "Recording — tap Stop to finish."
           : isRequesting
             ? "Requesting microphone…"
             : "Add a voice memo to this note. Audio gets transcribed and appended."}
@@ -667,15 +667,11 @@ function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
       {isRecording ? (
         <button
           type="button"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            void stopRecording();
-          }}
+          // TAP-TOGGLE: onClick only — works for touch, mouse, AND keyboard.
+          // A previous onPointerDown+onClick pair double-fired across the
+          // Record↔Stop button swap (pointerdown started, the same tap's click
+          // hit the swapped Stop button) → instant 0-second stop.
           onClick={() => void stopRecording()}
-          // Both handlers are intentional: onPointerDown for touch responsiveness
-          // (fires before the synthetic click), onClick for keyboard activation
-          // (Space/Enter on a <button> dispatches click only, no pointer events).
-          // useVoiceCapture's phase-guard makes the duplicate call a no-op.
           aria-label={`Recording — ${formatElapsed(elapsedMs)} — stop`}
           aria-pressed="true"
           className="flex min-h-11 items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400"
@@ -688,10 +684,7 @@ function VoicePanel({ voice }: { voice: ReturnType<typeof useVoiceCapture> }) {
       ) : (
         <button
           type="button"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            void startRecording();
-          }}
+          // TAP-TOGGLE: onClick only (see the Stop button + use-voice-capture.ts).
           onClick={() => void startRecording()}
           aria-label="Record voice memo"
           disabled={isRequesting}
