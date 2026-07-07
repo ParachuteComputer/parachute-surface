@@ -609,8 +609,10 @@ describe("NoteNew — voice affordance", () => {
     vi.restoreAllMocks();
   });
 
-  function releasePointer() {
-    window.dispatchEvent(new Event("pointerup"));
+  // Tap-toggle: finishing a recording = clicking the Stop button (the old
+  // "release the pointer to stop" hold-press flow was removed 2026-07-07).
+  function tapStop() {
+    fireEvent.click(screen.getByRole("button", { name: /stop/i }));
   }
 
   it("shows a Record button on the unified surface", async () => {
@@ -619,13 +621,13 @@ describe("NoteNew — voice affordance", () => {
     expect(await screen.findByRole("button", { name: /record voice memo/i })).toBeInTheDocument();
   });
 
-  it("hold-press → release captures audio and enables Save", async () => {
+  it("tap Record → tap Stop captures audio and enables Save", async () => {
     installFetch({});
     renderAt("/new");
 
     const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
     await act(async () => {
-      fireEvent.pointerDown(recordBtn);
+      fireEvent.click(recordBtn);
       await Promise.resolve();
     });
     // Mid-recording: a Stop button shows up.
@@ -633,7 +635,7 @@ describe("NoteNew — voice affordance", () => {
       expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
     });
     await act(async () => {
-      releasePointer();
+      tapStop();
       await Promise.resolve();
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -644,6 +646,31 @@ describe("NoteNew — voice affordance", () => {
     // Create button enables even without typed content because audio
     // satisfies the "body" half of the validity check.
     expect(screen.getByRole("button", { name: /^create$/i })).not.toBeDisabled();
+  });
+
+  it("a stray pointerup does NOT stop recording (regression: the 0-second-clip bug)", async () => {
+    // Tapping Record used to instantly stop: a quick tap is pointerdown+pointerup,
+    // and a global pointerup listener stopped on release (2026-07-07 fix).
+    // Recording must now persist through any pointerup and only end on Stop.
+    installFetch({});
+    renderAt("/new");
+    const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
+    await act(async () => {
+      fireEvent.click(recordBtn);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+    });
+    // A stray pointerup anywhere (the tap's own release, a click elsewhere) must NOT end it.
+    await act(async () => {
+      window.dispatchEvent(new Event("pointerup"));
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Still recording: Stop is present, no audio staged.
+    expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+    expect(screen.queryByText(/recorded\s+/i)).toBeNull();
   });
 
   it("keyboard activation (click) on Stop ends recording — no-pointer path", async () => {
@@ -677,11 +704,11 @@ describe("NoteNew — voice affordance", () => {
 
     const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
     await act(async () => {
-      fireEvent.pointerDown(recordBtn);
+      fireEvent.click(recordBtn);
       await Promise.resolve();
     });
     await act(async () => {
-      releasePointer();
+      tapStop();
       await Promise.resolve();
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -741,11 +768,11 @@ describe("NoteNew — voice affordance", () => {
 
     const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
     await act(async () => {
-      fireEvent.pointerDown(recordBtn);
+      fireEvent.click(recordBtn);
       await Promise.resolve();
     });
     await act(async () => {
-      releasePointer();
+      tapStop();
       await new Promise((r) => setTimeout(r, 0));
     });
     await waitFor(() => {
@@ -810,11 +837,11 @@ describe("NoteNew — voice affordance", () => {
 
     const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
     await act(async () => {
-      fireEvent.pointerDown(recordBtn);
+      fireEvent.click(recordBtn);
       await Promise.resolve();
     });
     await act(async () => {
-      releasePointer();
+      tapStop();
       await new Promise((r) => setTimeout(r, 0));
     });
     await waitFor(() => {
@@ -1051,8 +1078,10 @@ describe("NoteNew — first-voice-capture retention choice", () => {
     vi.restoreAllMocks();
   });
 
-  function releasePointer() {
-    window.dispatchEvent(new Event("pointerup"));
+  // Tap-toggle: finishing a recording = clicking the Stop button (the old
+  // "release the pointer to stop" hold-press flow was removed 2026-07-07).
+  function tapStop() {
+    fireEvent.click(screen.getByRole("button", { name: /stop/i }));
   }
 
   /** GET /api/vault body for a modern vault on the server default (unchosen). */
@@ -1080,14 +1109,14 @@ describe("NoteNew — first-voice-capture retention choice", () => {
   async function engageRecorder() {
     const recordBtn = await screen.findByRole("button", { name: /record voice memo/i });
     await act(async () => {
-      fireEvent.pointerDown(recordBtn);
+      fireEvent.click(recordBtn);
       await Promise.resolve();
     });
   }
 
   async function stopRecorder() {
     await act(async () => {
-      releasePointer();
+      tapStop();
       await Promise.resolve();
       await new Promise((r) => setTimeout(r, 0));
     });

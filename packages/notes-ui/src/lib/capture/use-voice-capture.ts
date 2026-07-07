@@ -9,10 +9,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 // Voice-capture state machine extracted from the (now removed) Capture route
 // so the unified Create screen can host an inline "Record" affordance without
-// re-rolling MediaRecorder lifecycle. Caller decides UX (button vs hold-to-
-// record, where the preview lives, when to discard); this hook owns the
-// audio bytes, the elapsed timer, the URL-object lifetime, and the global
-// pointerup release wiring.
+// re-rolling MediaRecorder lifecycle. Caller decides UX (a tap-toggle Record/
+// Stop button, where the preview lives, when to discard); this hook owns the
+// audio bytes, the elapsed timer, and the URL-object lifetime.
 //
 // Replaces parts of Capture.tsx's recording phase machine. The Phase shape
 // is preserved so existing tests that mocked `createRecorder`/`requestMic`/
@@ -133,20 +132,12 @@ export function useVoiceCapture(): UseVoiceCaptureResult {
     discardAudio();
   }, [discardAudio]);
 
-  // Watch for pointerup anywhere — if the user presses the mic and slides
-  // their finger off before releasing, we still want to stop on release.
-  useEffect(() => {
-    if (phase.kind !== "recording") return;
-    const onUp = () => {
-      void stopRecording();
-    };
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [phase, stopRecording]);
+  // NOTE: recording is a TAP-TOGGLE (tap Record to start, tap Stop to end) —
+  // NOT press-and-hold. The old global `pointerup`→stop listener was removed
+  // 2026-07-07: it stopped on the tap's own release, giving 0-second clips
+  // (a quick tap is pointerdown+pointerup). Recording now persists until the
+  // user explicitly taps Stop. (A proper press-and-hold mode, gated on a hold
+  // threshold, can be re-added later if wanted.)
 
   return { phase, elapsedMs, startRecording, stopRecording, discardAudio, reset };
 }
