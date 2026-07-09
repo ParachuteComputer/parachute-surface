@@ -77,9 +77,19 @@ function DepthControl({ depth, onChange }: { depth: number; onChange: (d: number
 
 function Body({ data, isLoading }: { data: NeighborhoodGraphData | null; isLoading: boolean }) {
   // The neighbor a click/tap selected for preview. Held here (not in the canvas)
-  // so BOTH the graph and the keyboard-accessible list feed the same preview,
-  // and so a data reload (depth change) that drops the node closes it.
+  // so BOTH the graph and the keyboard-accessible list feed the same preview.
   const [previewId, setPreviewId] = useState<string | null>(null);
+  // The element that opened the preview, so an explicit close (Esc / ✕) can
+  // return focus to it rather than dropping to <body>.
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Drop a stale selection when a depth round-trip removes the node from the
+  // graph — otherwise raising the depth back would re-open the card unbidden.
+  useEffect(() => {
+    if (previewId && data && !data.nodes.some((n) => n.id === previewId)) {
+      setPreviewId(null);
+    }
+  }, [data, previewId]);
 
   if (!data && isLoading) {
     return <GraphSkeleton />;
@@ -96,17 +106,24 @@ function Body({ data, isLoading }: { data: NeighborhoodGraphData | null; isLoadi
   const neighbors = data.nodes.filter((n) => !n.isAnchor);
   const previewNode = previewId ? (data.nodes.find((n) => n.id === previewId) ?? null) : null;
 
+  const select = (id: string) => {
+    // Remember what to restore focus to (the graph node-click leaves focus on
+    // the canvas/body — fine; a list button leaves it on that button).
+    triggerRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    setPreviewId(id);
+  };
+  const close = (opts?: { restoreFocus?: boolean }) => {
+    setPreviewId(null);
+    if (opts?.restoreFocus) triggerRef.current?.focus?.();
+  };
+
   return (
     <>
-      <GraphCanvas data={data} onSelect={setPreviewId} />
+      <GraphCanvas data={data} onSelect={select} />
       {previewNode ? (
-        <NeighborPreview
-          key={previewNode.id}
-          node={previewNode}
-          onClose={() => setPreviewId(null)}
-        />
+        <NeighborPreview key={previewNode.id} node={previewNode} onClose={close} />
       ) : null}
-      <NeighborList neighbors={neighbors} selectedId={previewId} onSelect={setPreviewId} />
+      <NeighborList neighbors={neighbors} selectedId={previewId} onSelect={select} />
     </>
   );
 }
@@ -156,7 +173,13 @@ function NeighborList({
 // the snippet is fetched lazily (one note, via the shared query cache — never
 // the whole graph) on open. Non-modal dialog: focus lands on it, Esc closes,
 // blurring away (Tab out / click elsewhere) closes, and "Open note" navigates.
-function NeighborPreview({ node, onClose }: { node: GraphNode; onClose: () => void }) {
+function NeighborPreview({
+  node,
+  onClose,
+}: {
+  node: GraphNode;
+  onClose: (opts?: { restoreFocus?: boolean }) => void;
+}) {
   const note = useNote(node.id);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -176,11 +199,13 @@ function NeighborPreview({ node, onClose }: { node: GraphNode; onClose: () => vo
       tabIndex={-1}
       data-testid="neighbor-preview"
       onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
+        // Explicit close → hand focus back to whatever opened the card.
+        if (e.key === "Escape") onClose({ restoreFocus: true });
       }}
       onBlur={(e) => {
         // Close when focus leaves the card entirely (keyboard Tab-out / click
-        // away), but not when it moves to a child (the close button / link).
+        // away), but not when it moves to a child (the close button / link). No
+        // focus restore here — the user is already moving focus themselves.
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose();
       }}
       className="focus-ring card mt-3 p-4"
@@ -189,7 +214,7 @@ function NeighborPreview({ node, onClose }: { node: GraphNode; onClose: () => vo
         <h3 className="min-w-0 truncate font-serif text-lg text-fg">{title}</h3>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => onClose({ restoreFocus: true })}
           aria-label="Close preview"
           className="shrink-0 text-fg-dim hover:text-accent"
         >
@@ -205,13 +230,12 @@ function NeighborPreview({ node, onClose }: { node: GraphNode; onClose: () => vo
           ))}
         </div>
       ) : null}
-      {note.isPending ? (
-        <p className="mt-2 text-sm text-fg-dim">Loading preview…</p>
-      ) : snippet ? (
-        <p className="mt-2 text-sm text-fg-muted">{snippet}</p>
-      ) : (
-        <p className="mt-2 text-sm text-fg-dim">No preview text.</p>
-      )}
+      <PreviewSnippet
+        isPaused={note.fetchStatus === "paused"}
+        isPending={note.isPending}
+        isError={note.isError}
+        snippet={snippet}
+      />
       <div className="mt-3">
         <Link to={`/n/${encodeURIComponent(node.id)}`} className="btn btn-primary btn-touch">
           Open note
@@ -219,6 +243,36 @@ function NeighborPreview({ node, onClose }: { node: GraphNode; onClose: () => vo
       </div>
     </div>
   );
+}
+
+// The snippet line's states. Offline (query paused with no data) and error get
+// honest lines instead of a permanent "Loading…" / "No preview text.".
+function PreviewSnippet({
+  isPaused,
+  isPending,
+  isError,
+  snippet,
+}: {
+  isPaused: boolean;
+  isPending: boolean;
+  isError: boolean;
+  snippet: string | null;
+}) {
+  // Paused-while-pending = offline with nothing cached; check it before the
+  // generic pending state so we don't spin "Loading…" forever.
+  if (isPaused && isPending) {
+    return <p className="mt-2 text-sm text-fg-dim">Preview unavailable offline.</p>;
+  }
+  if (isPending) {
+    return <p className="mt-2 text-sm text-fg-dim">Loading preview…</p>;
+  }
+  if (isError) {
+    return <p className="mt-2 text-sm text-fg-dim">Couldn't load preview.</p>;
+  }
+  if (snippet) {
+    return <p className="mt-2 text-sm text-fg-muted">{snippet}</p>;
+  }
+  return <p className="mt-2 text-sm text-fg-dim">No preview text.</p>;
 }
 
 // A short plain-text snippet for the preview: prefer the server's list preview,

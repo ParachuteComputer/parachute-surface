@@ -325,4 +325,126 @@ describe("NeighborhoodGraph", () => {
     // not per-render.
     expect(bCalls()).toBe(afterLoad + 1);
   });
+
+  it("closes the preview when a depth change drops the node, and doesn't resurrect it", async () => {
+    seedActiveVault();
+    mockFetchReturning({
+      B: {
+        id: "B",
+        path: "notes/B",
+        createdAt: "2026-04-18T00:00:00.000Z",
+        links: [{ sourceId: "B", targetId: "D", relationship: "wikilink" }],
+      },
+      C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
+      D: {
+        id: "D",
+        path: "notes/D",
+        content: "# Note D\n\nBody of D.",
+        createdAt: "2026-04-18T00:00:00.000Z",
+      },
+    });
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    await waitFor(() => expect(screen.getByTestId("node-count").textContent).toBe("3"));
+
+    // Raise to depth 2 so the 2-hop node D exists, then preview it.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "2" }));
+    });
+    await waitFor(() => expect(screen.getByTestId("node-count").textContent).toBe("4"));
+    const dNode = await screen.findByRole("button", { name: /^D$/ });
+    await act(async () => {
+      fireEvent.click(dNode);
+    });
+    expect(await screen.findByRole("dialog", { name: /note preview/i })).toBeInTheDocument();
+
+    // Lower depth → D drops out → the preview closes.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "1" }));
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /note preview/i })).not.toBeInTheDocument(),
+    );
+
+    // Raise depth back → D returns, but the stale selection was cleared, so the
+    // card does NOT re-open unbidden.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "2" }));
+    });
+    await waitFor(() => expect(screen.getByTestId("node-count").textContent).toBe("4"));
+    expect(screen.queryByRole("dialog", { name: /note preview/i })).not.toBeInTheDocument();
+  });
+
+  it("returns focus to the opening neighbor button on Escape", async () => {
+    seedActiveVault();
+    mockFetchReturning({
+      B: { id: "B", path: "notes/B", createdAt: "2026-04-18T00:00:00.000Z" },
+      C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
+    });
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    const listBtn = await screen.findByRole("button", { name: /^preview b$/i });
+    listBtn.focus();
+    await act(async () => {
+      fireEvent.click(listBtn);
+    });
+    const preview = await screen.findByRole("dialog", { name: /note preview/i });
+    fireEvent.keyDown(preview, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /note preview/i })).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).toBe(listBtn);
+  });
+
+  it("shows an honest error line when the preview note fails to load", async () => {
+    seedActiveVault();
+    // B loads for the neighborhood expansion, but the preview's own fetch (the
+    // second GET for B) fails.
+    let bCalls = 0;
+    const impl = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      const id = new URL(url).searchParams.get("id") ?? "";
+      if (id === "B") {
+        bCalls += 1;
+        if (bCalls === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "B", path: "notes/B", createdAt: "2026-04-18T00:00:00.000Z" }),
+            text: async () => "",
+          } as Response;
+        }
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: "boom" }),
+          text: async () => "",
+        } as Response;
+      }
+      const body =
+        id === "C" ? { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" } : [];
+      return { ok: true, status: 200, json: async () => body, text: async () => "" } as Response;
+    });
+    vi.stubGlobal("fetch", impl);
+
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    const btn = await screen.findByRole("button", { name: /^B$/ });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    const preview = await screen.findByRole("dialog", { name: /note preview/i });
+    await waitFor(() =>
+      expect(within(preview).getByText(/couldn't load preview/i)).toBeInTheDocument(),
+    );
+  });
 });
