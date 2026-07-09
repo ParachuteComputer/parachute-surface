@@ -27,6 +27,16 @@ export function parseDateKey(s: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// Shift a "YYYY-MM-DD" day key by whole days (calendar-correct across month
+// and DST boundaries via Date arithmetic). Returns the key unchanged if it
+// doesn't parse.
+export function shiftDay(key: string, delta: number): string {
+  const d = parseDateKey(key);
+  if (!d) return key;
+  d.setDate(d.getDate() + delta);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 export function currentMonthKey(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
 }

@@ -1,5 +1,54 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.18] - 2026-07-09
+
+### Added — the guided home: welcome, quick actions, connect-your-AI, setup checklist
+
+The front door (`/`) becomes a guided home when a vault is connected — the
+place a fresh vault feels alive and gets set up, without getting in a returning
+user's way. Structure + flow only; the visual language is unchanged (a
+brand-token pass is separate).
+
+- **Home (`/`).** The index dispatcher now renders a guided `Home` (vault
+  connected) or the renamed `Landing` (no vault). Home leads with an adaptive
+  welcome (warm for a fresh vault; a quiet "Home" once a real note exists),
+  quick actions (Write · Connect your AI · Bring your notes over · Install),
+  the setup checklist, a search box, and the recent-notes timeline. The pure
+  day-grouped timeline (+ single-day drill-in) stays at `/today`; the shared
+  list lives in one `RecentTimeline` component.
+- **Connect your AI (`/connect`).** The vault's MCP endpoint (`<vaultUrl>/mcp`)
+  with copy-to-clipboard, plus stepped Claude (Settings → Connectors → Add
+  custom connector) and ChatGPT walkthroughs and the Claude Code one-liner —
+  mirroring the cloud console's copy. Connecting isn't client-detectable, so
+  completion is a manual "I've connected my AI" tick, never faked.
+- **Setup checklist.** Persisted per-vault in localStorage (no cloud-only API —
+  serves both doors). Auto-completes only what's honestly detectable: *write a
+  note* when a user-authored non-seed note exists (seed guides carry `#guide`;
+  system notes live under `.parachute/`), *install* when running standalone.
+  *Connect* and *import* are manual ticks. Dismissible as a whole; collapsed by
+  default for returning users; never modal-walled.
+- **Install affordance.** A shared, module-scope `useInstallAffordance` captures
+  the one-shot `beforeinstallprompt` once so every consumer (home card, header
+  button) sees it regardless of mount order; the install action hides where the
+  platform can't install.
+
+## [0.1.17] - 2026-07-09
+
+### Fixed — honest offline-cache label + save lands on the note view
+
+- The offline-cache indicator now states what's actually cached rather than
+  overclaiming.
+- Saving a note from the editor lands the user on the note view (not back on a
+  list), and the "save to view" flow behaves consistently.
+
+## [0.1.16] - 2026-07-07
+
+### Fixed — voice record is a tap-toggle (kills the 0-second-clip bug)
+
+Voice capture is a tap-to-start / tap-to-stop toggle. This removes the
+press-and-hold race that could end a recording immediately and produce a
+0-second clip.
+
 ## [0.1.15] - 2026-07-05
 
 ### Changed — live queries ride WebSockets; the fallback is polling (no SSE)

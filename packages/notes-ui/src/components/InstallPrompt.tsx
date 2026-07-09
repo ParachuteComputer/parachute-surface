@@ -1,45 +1,18 @@
-import { type BeforeInstallPromptEvent, isIOS, isStandalone } from "@/lib/pwa";
-import { useEffect, useState } from "react";
+import { useInstallAffordance } from "@/lib/pwa-install";
+import { useState } from "react";
 
 export function InstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [standalone, setStandalone] = useState(true);
-  const [iosDevice, setIosDevice] = useState(false);
+  const { state, isIOSDevice, promptInstall } = useInstallAffordance();
   const [iosHintOpen, setIosHintOpen] = useState(false);
 
-  useEffect(() => {
-    setStandalone(isStandalone());
-    setIosDevice(isIOS());
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setDeferred(null);
-      setStandalone(true);
-    };
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
-
-  if (standalone) return null;
+  if (state !== "available") return null;
 
   const handleInstall = async () => {
-    if (deferred) {
-      await deferred.prompt();
-      const choice = await deferred.userChoice;
-      if (choice.outcome === "accepted") setDeferred(null);
-      return;
-    }
-    if (iosDevice) setIosHintOpen(true);
+    const outcome = await promptInstall();
+    // No deferred prompt (iOS Safari) — fall back to the manual
+    // Add-to-Home-Screen instructions.
+    if (outcome === "unavailable" && isIOSDevice) setIosHintOpen(true);
   };
-
-  const showButton = deferred !== null || iosDevice;
-  if (!showButton) return null;
 
   return (
     <>
