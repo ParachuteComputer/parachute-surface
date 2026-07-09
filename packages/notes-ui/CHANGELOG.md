@@ -1,6 +1,21 @@
 # Changelog — @openparachute/notes-ui
 
-## [0.1.19] - 2026-07-09
+## [0.1.20] - 2026-07-09
+
+### Added — neighborhood preview + navigation (#177)
+
+The note view's neighborhood graph is now a way to MOVE through the graph, not
+just look at it.
+
+- **Click/tap a neighbor → a mini preview card** — the note's title and tags
+  render instantly (from what the graph already loaded); the snippet is fetched
+  lazily on demand through the shared query cache (one note, never the whole
+  graph, fetched once). "Open note" navigates into it. Node-click no longer
+  hard-navigates — you look before you move.
+- **Keyboard + touch accessible** — a focusable "Neighbors" list sits beside the
+  canvas (which has no focusable nodes), so a neighbor is reachable without a
+  mouse. The preview takes focus on open, closes on Escape, and closes when
+  focus leaves it. Buttons are full tap targets; nothing is hover-only.
 
 ### Added — draft safety, install-friction preempt, and a plan backlink
 
