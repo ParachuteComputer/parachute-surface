@@ -1,5 +1,28 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.21] - 2026-07-09
+
+### Changed — new-brand pass: system fonts, coral accent, warm paper
+
+Aligns notes-ui with the ratified brand tokens (parachute.computer/design/brand-tokens.md).
+
+- **System font stacks — Google Fonts dropped.** Instrument Serif / DM Sans /
+  JetBrains Mono webfonts are gone; `--font-serif`/`--font-sans`/`--font-mono`
+  now carry the brand's system stacks, plus a new `--font-round` UI-chrome stack
+  applied to buttons and eyebrows. Removes a third-party network fetch — the PWA
+  now renders offline with zero webfont download and no font-swap flash.
+- **Accent: forest-green → coral.** `--color-accent` is the coral button hue
+  `#bf4a2a` (white-on 4.97:1, on-paper 4.77:1); the bright display coral
+  `#e05d3c` moves to `--color-accent-light` (large/decorative only). The dark
+  accent lightens to `#ec7a5c` with a dark-warm-ink `--color-on-accent` —
+  every dark pair AA-verified.
+- **Warm paper.** `--color-bg` `#faf8f4` → `#fdfaf4` (light theme; dark grounds
+  unchanged). PWA `theme_color`/`background_color` follow.
+- **Coral highlight family.** New `--color-coral-soft`/`--color-coral-ink`
+  tokens + a `.chip-featured` badge. Existing danger/warning/positive semantic
+  tokens are untouched; the radius ramp is unchanged.
+- Links follow the accent → coral (they've always used `text-accent`).
+
 ## [0.1.20] - 2026-07-09
 
 ### Added — neighborhood preview + navigation (#177)
