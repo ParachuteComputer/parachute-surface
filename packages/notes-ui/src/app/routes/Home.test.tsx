@@ -1,131 +1,213 @@
 import { Home } from "@/app/routes/Home";
+import { loadChecklistState } from "@/lib/home/checklist";
 import { useVaultStore } from "@/lib/vault/store";
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const validMetadata = {
-  issuer: "http://localhost:1940",
-  authorization_endpoint: "http://localhost:1940/oauth/authorize",
-  token_endpoint: "http://localhost:1940/oauth/token",
-  registration_endpoint: "http://localhost:1940/oauth/register",
-  response_types_supported: ["code"],
-  code_challenge_methods_supported: ["S256"],
-  grant_types_supported: ["authorization_code"],
-  token_endpoint_auth_methods_supported: ["none"],
-  scopes_supported: ["full", "read"],
-};
+interface Row {
+  id: string;
+  path: string;
+  createdAt: string;
+  updatedAt?: string;
+  tags?: string[];
+  preview?: string;
+}
 
-function mockFetchOnce(response: {
-  ok?: boolean;
-  status?: number;
-  json?: unknown;
-  throwNetwork?: boolean;
-}) {
+function installFetch(notes: Row[]) {
   const impl = vi.fn<typeof fetch>(async () => {
-    if (response.throwNetwork) throw new Error("network down");
-    return {
-      ok: response.ok ?? true,
-      status: response.status ?? 200,
-      json: async () => response.json,
-      text: async () => "",
-    } as Response;
+    return { ok: true, status: 200, json: async () => notes, text: async () => "" } as Response;
   });
   vi.stubGlobal("fetch", impl);
   return impl;
 }
 
-function renderHome() {
-  return render(
-    <MemoryRouter initialEntries={["/"]}>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/add" element={<div>Add form</div>} />
-      </Routes>
-    </MemoryRouter>,
+function seedStore() {
+  useVaultStore.setState({
+    vaults: {
+      v1: {
+        id: "v1",
+        url: "http://localhost:1940",
+        name: "default",
+        issuer: "http://localhost:1940",
+        clientId: "c",
+        scope: "full",
+        addedAt: "2026-07-01T00:00:00.000Z",
+        lastUsedAt: "2026-07-01T00:00:00.000Z",
+      },
+    },
+    activeVaultId: "v1",
+  });
+  localStorage.setItem(
+    "lens:token:v1",
+    JSON.stringify({ accessToken: "t", scope: "full", vault: "default" }),
   );
 }
 
-describe("Home landing probe", () => {
-  beforeEach(() => {
-    useVaultStore.setState({ vaults: {}, activeVaultId: null });
-  });
+function LocationSpy() {
+  const loc = useLocation();
+  return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
+}
 
+function Wrap({ children }: { children: ReactNode }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return (
+    <MemoryRouter initialEntries={["/"]}>
+      <QueryClientProvider client={qc}>
+        <Routes>
+          <Route path="/" element={children} />
+          <Route path="/all" element={<LocationSpy />} />
+          <Route path="/new" element={<LocationSpy />} />
+          <Route path="/connect" element={<LocationSpy />} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+}
+
+const SEED_ONLY: Row[] = [
+  {
+    id: "g1",
+    path: "Welcome to your vault 🪂",
+    tags: ["guide"],
+    createdAt: "2026-07-01T09:00:00.000Z",
+    updatedAt: "2026-07-01T09:00:00.000Z",
+  },
+];
+
+const WITH_USER_NOTE: Row[] = [
+  ...SEED_ONLY,
+  {
+    id: "u1",
+    path: "My first thought",
+    preview: "Something I wrote.",
+    tags: ["capture"],
+    createdAt: "2026-07-02T09:00:00.000Z",
+    updatedAt: "2026-07-02T09:00:00.000Z",
+  },
+];
+
+function checklistDetails(): HTMLDetailsElement {
+  const section = screen.getByRole("region", { name: /setup checklist/i });
+  const details = section.querySelector("details");
+  if (!details) throw new Error("checklist details not found");
+  return details as HTMLDetailsElement;
+}
+
+describe("Home — guided front door", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    seedStore();
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    localStorage.clear();
   });
 
-  it("offers to connect to the detected origin when the probe succeeds", async () => {
-    mockFetchOnce({ json: validMetadata });
-    renderHome();
-
-    const connect = await screen.findByRole("link", { name: /^connect$/i });
-    expect(connect).toHaveAttribute(
-      "href",
-      `/add?url=${encodeURIComponent(window.location.origin)}`,
+  it("greets a fresh vault warmly and expands the checklist", async () => {
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
     );
-    expect(screen.getByText(/looks like there's a vault at/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /or connect to a different vault/i })).toHaveAttribute(
-      "href",
-      "/add",
-    );
+    // Fresh = no user-authored note yet → warm welcome + expanded checklist.
+    expect(await screen.findByText(/welcome aboard/i)).toBeInTheDocument();
+    expect(checklistDetails().open).toBe(true);
+    // The vault name rides the eyebrow.
+    expect(screen.getByText("default")).toBeInTheDocument();
   });
 
-  it("falls back silently to the default CTA on network error", async () => {
-    mockFetchOnce({ throwNetwork: true });
-    renderHome();
+  it("goes quiet for a returning vault: no welcome fanfare, checklist collapsed", async () => {
+    installFetch(WITH_USER_NOTE);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    // Wait for the user note to land in the recent timeline, then assert the
+    // quiet header.
+    expect(await screen.findByText("My first thought")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: /^home$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/welcome aboard/i)).not.toBeInTheDocument();
+    // Checklist still present (connect/import pending) but collapsed.
+    expect(checklistDetails().open).toBe(false);
+  });
 
+  it("shows the four quick actions and recent notes (seed guides count)", async () => {
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    const quickNav = screen.getByRole("navigation", { name: /quick actions/i });
+    expect(within(quickNav).getByText(/write a note/i)).toBeInTheDocument();
+    expect(within(quickNav).getByText(/connect your ai/i)).toBeInTheDocument();
+    expect(within(quickNav).getByText(/bring your notes over/i)).toBeInTheDocument();
+    // Seed guide shows in Recent (it's a real note).
+    expect(screen.getByText(/welcome to your vault/i)).toBeInTheDocument();
+  });
+
+  it("hides the install affordance where the platform can't install", async () => {
+    // jsdom: not standalone, no beforeinstallprompt, non-iOS UA → unsupported.
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    expect(screen.queryByText(/install the app/i)).not.toBeInTheDocument();
+  });
+
+  it("persists a manual checklist tick per vault", async () => {
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    const connectBox = screen.getByLabelText(/mark "connect your ai" done/i);
+    fireEvent.click(connectBox);
+    await waitFor(() => expect(loadChecklistState("v1").overrides.connect).toBe(true));
+  });
+
+  it("dismisses the whole checklist and remembers it", async () => {
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
+      expect(screen.queryByRole("region", { name: /setup checklist/i })).not.toBeInTheDocument(),
     );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
+    expect(loadChecklistState("v1").dismissed).toBe(true);
   });
 
-  it("falls back silently on 404", async () => {
-    mockFetchOnce({ ok: false, status: 404 });
-    renderHome();
-
-    await waitFor(() =>
-      expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
+  it("search deep-links into the full notes list", async () => {
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
     );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
-  });
-
-  it("falls back silently when metadata is invalid", async () => {
-    mockFetchOnce({
-      json: { ...validMetadata, code_challenge_methods_supported: ["plain"] },
+    await screen.findByText(/welcome aboard/i);
+    fireEvent.change(screen.getByLabelText(/search your notes/i), {
+      target: { value: "budget" },
     });
-    renderHome();
-
+    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
+      expect(screen.getByTestId("location").textContent).toBe("/all?search=budget"),
     );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
-  });
-
-  it("does not probe when vaults are already in storage", async () => {
-    const fetchImpl = mockFetchOnce({ json: validMetadata });
-    useVaultStore.setState({
-      vaults: {
-        existing: {
-          id: "existing",
-          url: "http://localhost:1940",
-          name: "default",
-          issuer: "http://localhost:1940",
-          clientId: "c",
-          scope: "full",
-          addedAt: "2026-04-18T00:00:00.000Z",
-          lastUsedAt: "2026-04-18T00:00:00.000Z",
-        },
-      },
-      activeVaultId: "existing",
-    });
-    renderHome();
-    // Home no longer redirects — App.tsx's NotesIndex dispatches to Notes
-    // when a vault is active and mounts Home only when none is. Home's job
-    // here is just: don't probe if there's already a vault.
-    await waitFor(() => expect(fetchImpl).not.toHaveBeenCalled());
   });
 });
