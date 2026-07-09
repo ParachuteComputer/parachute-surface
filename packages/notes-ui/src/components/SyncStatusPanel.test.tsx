@@ -340,8 +340,8 @@ describe("SyncStatusPanel storage bar", () => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
   });
 
-  it("does not show a warning below the 80% threshold", async () => {
-    // 40% full
+  it("shows the offline-cache usage without a misleading plan denominator", async () => {
+    // 40% full — below the warn threshold.
     estimateMock.mockResolvedValue({
       supported: true,
       persisted: true,
@@ -350,8 +350,12 @@ describe("SyncStatusPanel storage bar", () => {
     });
     renderPanel();
     await waitFor(() => {
-      expect(screen.getByText(/storage/i)).toBeInTheDocument();
+      expect(screen.getByText(/offline cache/i)).toBeInTheDocument();
     });
+    // The real usage number shows…
+    expect(screen.getByText("400 B")).toBeInTheDocument();
+    // …but the browser origin quota (the old "/ 1000 B" denominator) does not.
+    expect(screen.queryByText(/1000 B/)).not.toBeInTheDocument();
     expect(screen.queryByText(/nearly full/i)).not.toBeInTheDocument();
   });
 

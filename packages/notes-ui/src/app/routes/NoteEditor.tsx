@@ -106,40 +106,67 @@ function EditorSurface({ note }: { note: Note }) {
     draft.path !== baseline.path ||
     !setEquals(draft.tags, baseline.tags);
 
-  const handleSave = useCallback(() => {
-    if (!isDirty || mutation.isPending) return;
-    const payload: UpdateNotePayload = {};
-    if (draft.content !== baseline.content) payload.content = draft.content;
-    if (draft.path !== baseline.path) payload.path = draft.path;
-    const tagDiff = diffTags(baseline.tags, draft.tags);
-    if (tagDiff.add.length || tagDiff.remove.length) payload.tags = tagDiff;
+  // Block saving while an attachment is still uploading (or linking). The
+  // embed markdown only lands in `draft.content` once the upload resolves
+  // (uploader.onInsert); saving before that — especially the Save button,
+  // which then unmounts this editor — would drop the embed on the floor.
+  const uploadsActive = uploader.uploads.some(
+    (u) => u.status === "uploading" || u.status === "linking",
+  );
 
-    // Optimistic concurrency: always send the last-known updatedAt (fall back
-    // to createdAt for never-edited notes). A stale value surfaces 409 so we
-    // can prompt the user to reload rather than silently clobbering a
-    // concurrent write from another client.
-    const ifUpdatedAt = lastServerNote.current.updatedAt ?? lastServerNote.current.createdAt;
-    if (ifUpdatedAt) payload.if_updated_at = ifUpdatedAt;
+  // Two save shapes on purpose:
+  //   - the Save BUTTON commits and returns to the read view (finish editing);
+  //   - ⌘S / CodeMirror's onSave is a checkpoint save that STAYS in the editor
+  //     (writer muscle memory — save often, keep typing).
+  const saveNote = useCallback(
+    ({ navigateToView }: { navigateToView: boolean }) => {
+      if (!isDirty || mutation.isPending || uploadsActive) return;
+      const payload: UpdateNotePayload = {};
+      if (draft.content !== baseline.content) payload.content = draft.content;
+      if (draft.path !== baseline.path) payload.path = draft.path;
+      const tagDiff = diffTags(baseline.tags, draft.tags);
+      if (tagDiff.add.length || tagDiff.remove.length) payload.tags = tagDiff;
 
-    setSaveError(null);
-    setConflict(null);
-    mutation.mutate(payload, {
-      onSuccess: (updated) => {
-        setBaseline(toEditorState(updated));
-        setDraft(toEditorState(updated));
-        lastServerNote.current = updated;
-        // If path change moved the note to a new id, land on the new URL.
-        if (updated.id !== note.id) {
-          navigate(`/n/${encodeURIComponent(updated.id)}/edit`, { replace: true });
-        }
-      },
-      onError: (err) => {
-        if (err instanceof VaultConflictError) setConflict(err);
-        else if (err instanceof VaultAuthError) setSaveError("Session expired. Reconnect to save.");
-        else setSaveError(err instanceof Error ? err.message : "Save failed");
-      },
-    });
-  }, [baseline, draft, isDirty, mutation, navigate, note.id]);
+      // Optimistic concurrency: always send the last-known updatedAt (fall back
+      // to createdAt for never-edited notes). A stale value surfaces 409 so we
+      // can prompt the user to reload rather than silently clobbering a
+      // concurrent write from another client.
+      const ifUpdatedAt = lastServerNote.current.updatedAt ?? lastServerNote.current.createdAt;
+      if (ifUpdatedAt) payload.if_updated_at = ifUpdatedAt;
+
+      setSaveError(null);
+      setConflict(null);
+      mutation.mutate(payload, {
+        onSuccess: (updated) => {
+          setBaseline(toEditorState(updated));
+          setDraft(toEditorState(updated));
+          lastServerNote.current = updated;
+          if (navigateToView) {
+            // Finish editing: return to the note's read view. `replace` keeps
+            // "back" from dropping the user into the editor they just left.
+            // The id may have changed if a path edit moved the note.
+            navigate(`/n/${encodeURIComponent(updated.id)}`, { replace: true });
+          } else if (updated.id !== note.id) {
+            // Checkpoint save that stays put — but if a path edit renamed the
+            // note (new id), follow it so the editor URL stays valid.
+            navigate(`/n/${encodeURIComponent(updated.id)}/edit`, { replace: true });
+          }
+        },
+        onError: (err) => {
+          if (err instanceof VaultConflictError) setConflict(err);
+          else if (err instanceof VaultAuthError)
+            setSaveError("Session expired. Reconnect to save.");
+          else setSaveError(err instanceof Error ? err.message : "Save failed");
+        },
+      });
+    },
+    [baseline, draft, isDirty, mutation, navigate, note.id, uploadsActive],
+  );
+
+  // Save button → commit and leave for the read view.
+  const handleSaveAndView = useCallback(() => saveNote({ navigateToView: true }), [saveNote]);
+  // ⌘S → checkpoint save, stay in the editor.
+  const handleCheckpointSave = useCallback(() => saveNote({ navigateToView: false }), [saveNote]);
 
   const handleRevert = useCallback(() => {
     if (!isDirty) return;
@@ -221,10 +248,11 @@ function EditorSurface({ note }: { note: Note }) {
             </button>
             <button
               type="button"
-              onClick={handleSave}
-              disabled={!isDirty || mutation.isPending}
+              onClick={handleSaveAndView}
+              disabled={!isDirty || mutation.isPending || uploadsActive}
               className="min-h-11 rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-[--color-on-accent] hover:bg-accent-hover disabled:opacity-40"
-              title="Save (⌘S)"
+              title={uploadsActive ? "Waiting for upload…" : "Save (⌘S)"}
+              aria-label={uploadsActive ? "Save — waiting for upload…" : "Save"}
             >
               {mutation.isPending ? "Saving…" : "Save"}
             </button>
@@ -306,7 +334,7 @@ function EditorSurface({ note }: { note: Note }) {
             ref={editorRef}
             value={draft.content}
             onChange={(content) => setDraft((d) => ({ ...d, content }))}
-            onSave={handleSave}
+            onSave={handleCheckpointSave}
             onCancel={handleCancel}
             onPasteFile={(files) => {
               uploader.start(files);

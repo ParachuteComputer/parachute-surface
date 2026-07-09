@@ -4,7 +4,7 @@ import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Swap CodeMirror out for a plain textarea so tests can drive onChange without
@@ -22,7 +22,7 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
       },
       ref: React.Ref<{ insertAtCursor(s: string): void; focus(): void }>,
     ) {
-      const { value, onChange, onPasteFile } = props;
+      const { value, onChange, onSave, onPasteFile } = props;
       React.useImperativeHandle(
         ref,
         () => ({
@@ -40,6 +40,12 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
+          {/* Stand-in for the ⌘S keybinding — CodeMirror wires it to onSave.
+              Label deliberately avoids the word "save" so it doesn't collide
+              with getByRole({ name: /save/i }) lookups for the real button. */}
+          <button type="button" data-testid="cm-save" onClick={() => onSave?.()}>
+            mock keyboard commit
+          </button>
           <button
             type="button"
             data-testid="cm-paste-image"
@@ -168,12 +174,19 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+// The read-view stand-in echoes its id so tests can assert *which* note we
+// landed on after a save (the id shifts when a path edit renames the note).
+function NoteViewProbe() {
+  const { id } = useParams<{ id: string }>();
+  return <div>NoteViewPage:{id}</div>;
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/n/:id/edit" element={<NoteEditor />} />
-        <Route path="/n/:id" element={<div>NoteViewPage</div>} />
+        <Route path="/n/:id" element={<NoteViewProbe />} />
         <Route path="/" element={<div>NotesListPage</div>} />
       </Routes>
     </MemoryRouter>,
@@ -248,9 +261,11 @@ describe("NoteEditor route", () => {
       fireEvent.click(save);
     });
 
+    // A successful save leaves the editor and lands on the note's read view.
     await waitFor(() => {
-      expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
+      expect(screen.getByText("NoteViewPage:abc-123")).toBeInTheDocument();
     });
+    expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
 
     const patchCall = fetchImpl.mock.calls.find(
       ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
@@ -261,6 +276,124 @@ describe("NoteEditor route", () => {
     expect(body.if_updated_at).toBe(baseNote.updatedAt);
     expect(body.tags).toEqual({ add: ["draft"], remove: [] });
     expect(body.path).toBeUndefined();
+  });
+
+  it("after a rename save, lands on the new note id's view", async () => {
+    const renamed = {
+      ...baseNote,
+      id: "canon-aaron-v2",
+      path: "Canon/Aaron-v2",
+      updatedAt: "2026-04-18T09:00:00Z",
+    };
+    installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": { body: renamed },
+    });
+
+    renderAt("/n/abc-123/edit");
+    const pathInput = (await screen.findByLabelText(/note path/i)) as HTMLInputElement;
+    fireEvent.change(pathInput, { target: { value: "Canon/Aaron-v2" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage:canon-aaron-v2")).toBeInTheDocument();
+    });
+  });
+
+  it("⌘S is a checkpoint save — commits but stays in the editor", async () => {
+    const updated = {
+      ...baseNote,
+      content: "# hi\n\nbody more",
+      updatedAt: "2026-04-18T09:00:00Z",
+    };
+    const fetchImpl = installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": { body: updated },
+    });
+
+    renderAt("/n/abc-123/edit");
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    fireEvent.change(cm, { target: { value: "# hi\n\nbody more" } });
+    expect(screen.getByText(/unsaved/i)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("cm-save"));
+    });
+
+    // The save committed (dirty cleared)…
+    await waitFor(() => {
+      expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
+    });
+    const patchCall = fetchImpl.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    // …but we're still in the editor, NOT bounced to the read view.
+    expect(screen.getByTestId("cm-editor")).toBeInTheDocument();
+    expect(screen.queryByText(/NoteViewPage/)).not.toBeInTheDocument();
+  });
+
+  it("disables Save (button + ⌘S) while an attachment upload is in flight", async () => {
+    const fetchImpl = installFetch({
+      "GET /api/notes": { body: baseNote },
+      "POST /api/notes/abc-123/attachments": {
+        status: 201,
+        body: {
+          id: "att-1",
+          noteId: "abc-123",
+          path: "2026-04-18/shot.png",
+          mimeType: "image/png",
+        },
+      },
+      "PATCH /api/notes/": { body: { ...baseNote, content: "# hi\n\nbody typed" } },
+    });
+    const xhrs = installXhr();
+    renderAt("/n/abc-123/edit");
+
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    // Dirty the note so Save would be enabled on its own merits.
+    fireEvent.change(cm, { target: { value: "# hi\n\nbody typed" } });
+    expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
+
+    // Kick off an upload — it stays "uploading" until we resolve the xhr.
+    const dropZone = cm.closest("div.relative");
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    fireEvent.drop(dropZone!, {
+      dataTransfer: {
+        files: [file],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      } as unknown as DataTransfer,
+    });
+    await waitFor(() => expect(xhrs.length).toBe(1));
+
+    // Button is disabled with an explanatory label…
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /waiting for upload/i })).toBeDisabled();
+    });
+    // …and the ⌘S path is guarded too — firing it fires no PATCH.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("cm-save"));
+    });
+    expect(
+      fetchImpl.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+      ),
+    ).toBe(false);
+
+    // Once the upload (and its link) complete, Save frees up again.
+    await act(async () => {
+      xhrs[0]!.resolve(
+        201,
+        JSON.stringify({ path: "2026-04-18/shot.png", size: 3, mimeType: "image/png" }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
+    });
   });
 
   it("Revert resets draft back to baseline and clears dirty", async () => {
