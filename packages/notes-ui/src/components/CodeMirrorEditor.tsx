@@ -45,8 +45,12 @@ const lensTheme = EditorView.theme({
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--color-fg-muted)" },
   "&.cm-focused": { outline: "none" },
   ".cm-selectionBackground, ::selection": {
-    backgroundColor: "var(--color-accent-light) !important",
-    opacity: 0.3,
+    // `opacity` is invalid on ::selection (and drawSelection isn't loaded, so
+    // ::selection is what actually paints) — bake the 30% into the color via an
+    // alpha background-color, which IS honored on ::selection. Selected text
+    // then sits on a light-coral wash (9.6:1 in both themes) instead of a solid
+    // accent-light fill.
+    backgroundColor: "color-mix(in srgb, var(--color-accent-light) 30%, transparent) !important",
   },
 });
 
