@@ -10,6 +10,8 @@ import { PinArchiveButtons } from "@/components/PinArchiveButtons";
 import { RemoveAttachmentButton } from "@/components/RemoveAttachmentButton";
 import { TagEditor, normalizeTag } from "@/components/TagEditor";
 import { useAttachmentUploader } from "@/components/useAttachmentUploader";
+import { type StoredDraft, bodyEquals, clearDraft, loadDraft } from "@/lib/drafts/store";
+import { useDraftAutosave } from "@/lib/drafts/use-draft-autosave";
 import { relativeTime } from "@/lib/time";
 import { useToastStore } from "@/lib/toast/store";
 import { useNote, useUpdateNote, useVaultStore } from "@/lib/vault";
@@ -68,9 +70,24 @@ type EditorPane = "edit" | "preview";
 function EditorSurface({ note }: { note: Note }) {
   const navigate = useNavigate();
   const pushToast = useToastStore((s) => s.push);
+  // Pin the note's vault at MOUNT. The header vault switcher can change the
+  // active vault mid-edit; keying the draft to the live active vault would move
+  // this note's draft under a different vault's key. The draft belongs to the
+  // vault the note lives in (notes#175 F1).
+  const vaultId = useRef(useVaultStore.getState().activeVaultId).current;
   const resolver = useMemo(() => buildWikilinkResolver(note), [note]);
   const [baseline, setBaseline] = useState<EditorState>(() => toEditorState(note));
   const [draft, setDraft] = useState<EditorState>(() => toEditorState(note));
+  // A locally-persisted draft (notes#175) may hold edits from a prior session
+  // that never reached the server. For an EXISTING note the server copy is
+  // authoritative, so we don't silently overwrite it — we OFFER to restore only
+  // when the draft actually differs from the server note.
+  const [offeredDraft, setOfferedDraft] = useState<StoredDraft | null>(() => {
+    if (!vaultId) return null;
+    const stored = loadDraft(vaultId, note.id);
+    if (!stored || bodyEquals(stored.body, toEditorState(note))) return null;
+    return stored;
+  });
   const [tagInput, setTagInput] = useState("");
   const [conflict, setConflict] = useState<VaultConflictError | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -105,6 +122,10 @@ function EditorSurface({ note }: { note: Note }) {
     draft.content !== baseline.content ||
     draft.path !== baseline.path ||
     !setEquals(draft.tags, baseline.tags);
+
+  // Persist the draft locally while there are unsaved edits (crash / navigation
+  // protection). Clears itself when clean; explicitly cleared on save/discard.
+  useDraftAutosave(vaultId, note.id, draft, isDirty);
 
   // Block saving while an attachment is still uploading (or linking). The
   // embed markdown only lands in `draft.content` once the upload resolves
@@ -141,6 +162,9 @@ function EditorSurface({ note }: { note: Note }) {
           setBaseline(toEditorState(updated));
           setDraft(toEditorState(updated));
           lastServerNote.current = updated;
+          // The edits are now on the server — drop the local draft so it can't
+          // later masquerade as unsaved work.
+          if (vaultId) clearDraft(vaultId, note.id);
           if (navigateToView) {
             // Finish editing: return to the note's read view. `replace` keeps
             // "back" from dropping the user into the editor they just left.
@@ -160,8 +184,18 @@ function EditorSurface({ note }: { note: Note }) {
         },
       });
     },
-    [baseline, draft, isDirty, mutation, navigate, note.id, uploadsActive],
+    [baseline, draft, isDirty, mutation, navigate, note.id, uploadsActive, vaultId],
   );
+
+  // Restore the offered draft into the editor, or discard it.
+  const restoreDraft = useCallback(() => {
+    if (offeredDraft) setDraft(offeredDraft.body);
+    setOfferedDraft(null);
+  }, [offeredDraft]);
+  const discardOfferedDraft = useCallback(() => {
+    if (vaultId) clearDraft(vaultId, note.id);
+    setOfferedDraft(null);
+  }, [vaultId, note.id]);
 
   // Save button → commit and leave for the read view.
   const handleSaveAndView = useCallback(() => saveNote({ navigateToView: true }), [saveNote]);
@@ -178,8 +212,11 @@ function EditorSurface({ note }: { note: Note }) {
 
   const handleCancel = useCallback(() => {
     if (isDirty && !confirm("Discard unsaved changes?")) return;
+    // The user answered "discard" — drop the local draft too, or it would
+    // resurface as a false "restore?" offer on the next edit.
+    if (vaultId) clearDraft(vaultId, note.id);
     navigate(`/n/${encodeURIComponent(note.id)}`);
-  }, [isDirty, navigate, note.id]);
+  }, [isDirty, navigate, note.id, vaultId]);
 
   // Prevent tab close with unsaved edits.
   useEffect(() => {
@@ -284,10 +321,43 @@ function EditorSurface({ note }: { note: Note }) {
         </div>
       </header>
 
+      {offeredDraft ? (
+        // biome-ignore lint/a11y/useSemanticElements: role=status on a div — the banner holds a flex row of buttons (flow content) that <output>'s phrasing-only model disallows.
+        <div
+          role="status"
+          data-testid="draft-offer"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-sm"
+        >
+          <span className="text-fg-muted">
+            You have an unsaved draft from {relativeTime(offeredDraft.savedAt)}.
+          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={restoreDraft}
+              className="font-medium text-accent hover:underline"
+            >
+              Restore
+            </button>
+            <button
+              type="button"
+              onClick={discardOfferedDraft}
+              className="text-fg-dim hover:text-red-400"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {conflict ? (
         <ConflictBanner
           conflict={conflict}
           onReload={() => {
+            // "Reload latest (discard my edits)" — clear the draft first, or the
+            // reloaded editor would immediately offer to restore the edits the
+            // user just chose to discard.
+            if (vaultId) clearDraft(vaultId, note.id);
             window.location.reload();
           }}
           onDismiss={() => setConflict(null)}

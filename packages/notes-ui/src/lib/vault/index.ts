@@ -1,6 +1,7 @@
 export * from "./audio-retention";
 export * from "./auth-halt-store";
 export * from "./client";
+export * from "./console-url";
 export * from "./cross-tab-sync";
 export * from "./discovery";
 export * from "./graph";

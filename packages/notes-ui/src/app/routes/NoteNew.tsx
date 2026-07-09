@@ -10,7 +10,10 @@ import { useAttachmentUploader } from "@/components/useAttachmentUploader";
 import { extractHashtags } from "@/lib/capture/hashtags";
 import { memoFilename, quickPath } from "@/lib/capture/recorder";
 import { useVoiceCapture } from "@/lib/capture/use-voice-capture";
+import { NEW_NOTE_SCOPE, clearDraft, loadDraft } from "@/lib/drafts/store";
+import { useDraftAutosave } from "@/lib/drafts/use-draft-autosave";
 import { blobRef, enqueue, newBlobId, newLocalId } from "@/lib/sync";
+import { relativeTime } from "@/lib/time";
 import { useToastStore } from "@/lib/toast/store";
 import { useCreateNote, useLinkAttachment, useTagRoles, useVaultStore } from "@/lib/vault";
 import {
@@ -86,10 +89,29 @@ export function NoteNew() {
   // path-gen behaviour (see notes#126) — we never silently fall back to
   // vault-auto-assign.
   const defaultPathRef = useRef(quickPath());
-  const [draft, setDraft] = useState<DraftState>(() => ({
-    ...EMPTY_DRAFT,
-    path: defaultPathRef.current,
-  }));
+  // Pin the compose session's vault at MOUNT. The vault switcher lives in the
+  // app header, so the active vault can change while this screen stays mounted;
+  // keying the draft to the LIVE active vault would persist this session's text
+  // under the newly-selected vault's `new` key (clobbering it) and later
+  // resurrect it in that vault's compose. The draft belongs to the vault we
+  // started composing in — full stop (notes#175 F1).
+  const composeVaultId = useRef(activeVault?.id ?? null).current;
+  // Restore a locally-persisted draft (crash / navigation protection, notes#175)
+  // for THIS vault's compose session, if one exists. New notes have nothing to
+  // conflict with, so we restore the text straight into the editor and surface a
+  // dismissible "draft restored" banner rather than making the user opt in.
+  const restoredAtRef = useRef<string | null>(null);
+  const [draft, setDraft] = useState<DraftState>(() => {
+    if (composeVaultId) {
+      const stored = loadDraft(composeVaultId, NEW_NOTE_SCOPE);
+      if (stored) {
+        restoredAtRef.current = stored.savedAt;
+        return stored.body;
+      }
+    }
+    return { ...EMPTY_DRAFT, path: defaultPathRef.current };
+  });
+  const [restoredAt, setRestoredAt] = useState<string | null>(() => restoredAtRef.current);
   const [tagInput, setTagInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedUpload[]>([]);
@@ -123,6 +145,14 @@ export function NoteNew() {
     onStaged: (s) => setStaged((prev) => [...prev, s]),
     onError: (msg) => pushToast(msg, "error"),
   });
+
+  // Persist the text draft (content/path/tags — not audio blobs) whenever
+  // there's something worth keeping. Cleared on save or explicit discard.
+  const persistableDirty =
+    draft.content.trim().length > 0 ||
+    draft.tags.length > 0 ||
+    (draft.path.trim().length > 0 && draft.path !== defaultPathRef.current);
+  useDraftAutosave(composeVaultId, NEW_NOTE_SCOPE, draft, persistableDirty);
 
   if (!activeVault) return <Navigate to="/" replace />;
 
@@ -182,6 +212,7 @@ export function NoteNew() {
             pushToast(`Failed to attach ${s.filename}: ${msg}`, "error");
           }
         }
+        if (composeVaultId) clearDraft(composeVaultId, NEW_NOTE_SCOPE);
         pushToast(`Created ${created.path ?? created.id}`, "success");
         navigate(`/n/${encodeURIComponent(created.id)}`);
       },
@@ -201,6 +232,7 @@ export function NoteNew() {
     });
   }, [
     activeVault,
+    composeVaultId,
     client,
     draft,
     isValid,
@@ -306,6 +338,7 @@ export function NoteNew() {
         ["note", activeVault.id, localId],
         optimisticCreatedNote(createPayload, localId),
       );
+      if (composeVaultId) clearDraft(composeVaultId, NEW_NOTE_SCOPE);
       pushToast("Captured — syncing audio.", "success");
       voice.discardAudio();
       navigate(`/n/${encodeURIComponent(localId)}`);
@@ -317,6 +350,7 @@ export function NoteNew() {
     }
   }, [
     activeVault,
+    composeVaultId,
     blobStore,
     client,
     db,
@@ -340,9 +374,19 @@ export function NoteNew() {
 
   const handleCancel = useCallback(() => {
     if (isDirty && !confirm("Discard this draft?")) return;
+    if (composeVaultId) clearDraft(composeVaultId, NEW_NOTE_SCOPE);
     voice.discardAudio();
     navigate("/");
-  }, [isDirty, navigate, voice]);
+  }, [composeVaultId, isDirty, navigate, voice]);
+
+  // The "draft restored" banner's discard: wipe the saved draft AND reset the
+  // compose surface to a fresh, empty note.
+  const discardRestoredDraft = useCallback(() => {
+    if (composeVaultId) clearDraft(composeVaultId, NEW_NOTE_SCOPE);
+    setDraft({ ...EMPTY_DRAFT, path: defaultPathRef.current });
+    voice.discardAudio();
+    setRestoredAt(null);
+  }, [composeVaultId, voice]);
 
   // Page-leave guard. Don't pop on save-success (when we navigate
   // programmatically, isDirty drops because state was just cleared).
@@ -426,6 +470,36 @@ export function NoteNew() {
             />
           </div>
         </header>
+
+        {restoredAt ? (
+          // biome-ignore lint/a11y/useSemanticElements: role=status on a div — the banner holds a flex row of buttons (flow content) that <output>'s phrasing-only model disallows.
+          <div
+            role="status"
+            data-testid="draft-restored"
+            className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-sm"
+          >
+            <span className="text-fg-muted">
+              Unsaved draft restored from {relativeTime(restoredAt)}.
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={discardRestoredDraft}
+                className="text-fg-dim hover:text-red-400"
+              >
+                Discard draft
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestoredAt(null)}
+                aria-label="Dismiss draft-restored notice"
+                className="text-fg-dim hover:text-accent"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {saveError ? (
           <div

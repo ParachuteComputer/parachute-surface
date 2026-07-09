@@ -1,3 +1,4 @@
+import { clearVaultDrafts } from "@/lib/drafts/store";
 import { create } from "zustand";
 import {
   deleteServicesCatalog,
@@ -49,6 +50,8 @@ export const useVaultStore = create<VaultStoreState>((set, get) => ({
     saveVaults(rest);
     deleteToken(id);
     deleteServicesCatalog(id);
+    // Disconnecting a vault must not leave its plaintext note drafts behind.
+    clearVaultDrafts(id);
     const nextActive =
       get().activeVaultId === id ? (Object.keys(rest)[0] ?? null) : get().activeVaultId;
     saveActiveVaultId(nextActive);

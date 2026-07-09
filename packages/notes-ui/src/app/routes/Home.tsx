@@ -10,7 +10,7 @@ import {
 } from "@/lib/home/checklist";
 import { useHomeChecklist } from "@/lib/home/use-home-checklist";
 import { useInstallAffordance } from "@/lib/pwa-install";
-import { useNotesForDateViews, useVaultStore } from "@/lib/vault";
+import { cloudConsoleUrl, useNotesForDateViews, useVaultStore } from "@/lib/vault";
 import type { Note } from "@/lib/vault/types";
 import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
@@ -70,6 +70,8 @@ export function Home() {
       <HomeSearch />
 
       <RecentNotes isPending={notes.isPending} isError={notes.isError} notes={notes.data} />
+
+      <PlanBacklink vaultUrl={vault.url} />
     </div>
   );
 }
@@ -359,6 +361,24 @@ function RecentSkeleton() {
       {[0, 1, 2].map((i) => (
         <div key={i} className="h-14 animate-pulse rounded-md bg-border/30" />
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Plan backlink — a quiet "manage your plan" door for CLOUD vaults only.
+// ---------------------------------------------------------------------------
+
+function PlanBacklink({ vaultUrl }: { vaultUrl: string }) {
+  // Self-host vaults resolve to null → no row (no false door to a console that
+  // doesn't exist).
+  const consoleUrl = cloudConsoleUrl(vaultUrl);
+  if (!consoleUrl) return null;
+  return (
+    <div className="mt-10 border-t border-border pt-4 text-sm">
+      <a href={consoleUrl} className="text-fg-dim hover:text-accent">
+        Manage your vault plan →
+      </a>
     </div>
   );
 }

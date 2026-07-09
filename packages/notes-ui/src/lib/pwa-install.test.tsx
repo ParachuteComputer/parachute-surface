@@ -1,6 +1,7 @@
 import type { BeforeInstallPromptEvent } from "@/lib/pwa";
 import { __resetInstallAffordanceForTests, useInstallAffordance } from "@/lib/pwa-install";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 function stubMatchMedia(standalone: boolean) {
@@ -21,12 +22,17 @@ function stubUserAgent(ua: string) {
   Object.defineProperty(window.navigator, "userAgent", { configurable: true, value: ua });
 }
 
-function fireBeforeInstallPrompt() {
+function fireBeforeInstallPrompt(
+  opts: {
+    outcome?: "accepted" | "dismissed";
+    prompt?: () => Promise<void>;
+  } = {},
+) {
   const event = new Event("beforeinstallprompt") as unknown as BeforeInstallPromptEvent;
   Object.assign(event, {
     platforms: ["web"],
-    userChoice: Promise.resolve({ outcome: "accepted" as const, platform: "web" }),
-    prompt: vi.fn<() => Promise<void>>(async () => {}),
+    userChoice: Promise.resolve({ outcome: opts.outcome ?? "accepted", platform: "web" }),
+    prompt: opts.prompt ?? vi.fn<() => Promise<void>>(async () => {}),
   });
   window.dispatchEvent(event);
 }
@@ -34,6 +40,21 @@ function fireBeforeInstallPrompt() {
 function Probe() {
   const { state, isIOSDevice } = useInstallAffordance();
   return <div data-testid="state">{`${state}${isIOSDevice ? ":ios" : ""}`}</div>;
+}
+
+// Probe that also drives promptInstall and records the resolved outcome.
+function PromptProbe() {
+  const { state, promptInstall } = useInstallAffordance();
+  const [outcome, setOutcome] = useState<string>("");
+  return (
+    <div>
+      <div data-testid="state">{state}</div>
+      <div data-testid="outcome">{outcome}</div>
+      <button type="button" onClick={async () => setOutcome(await promptInstall())}>
+        prompt
+      </button>
+    </div>
+  );
 }
 
 describe("useInstallAffordance", () => {
@@ -81,5 +102,30 @@ describe("useInstallAffordance", () => {
     // Mount a fresh, independent instance now — after the event already fired.
     const second = render(<Probe />);
     expect(within(second.container).getByTestId("state").textContent).toBe("available");
+  });
+
+  it("clears the spent event after a DISMISSED prompt so a retry can't no-op", async () => {
+    render(<PromptProbe />);
+    act(() => fireBeforeInstallPrompt({ outcome: "dismissed" }));
+    expect(screen.getByTestId("state").textContent).toBe("available");
+    fireEvent.click(screen.getByRole("button", { name: "prompt" }));
+    // Dismissed is reported, and the single-use event is dropped → the
+    // affordance stops offering a prompt that can't fire again.
+    await waitFor(() => expect(screen.getByTestId("outcome").textContent).toBe("dismissed"));
+    expect(screen.getByTestId("state").textContent).toBe("unsupported");
+  });
+
+  it("swallows a throw from prompt() (spent event) and reports unavailable", async () => {
+    render(<PromptProbe />);
+    act(() =>
+      fireBeforeInstallPrompt({
+        prompt: async () => {
+          throw new Error("already used");
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "prompt" }));
+    await waitFor(() => expect(screen.getByTestId("outcome").textContent).toBe("unavailable"));
+    expect(screen.getByTestId("state").textContent).toBe("unsupported");
   });
 });

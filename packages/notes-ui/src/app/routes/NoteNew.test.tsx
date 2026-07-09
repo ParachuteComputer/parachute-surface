@@ -1,4 +1,5 @@
 import { NoteNew } from "@/app/routes/NoteNew";
+import { loadDraft, saveDraft } from "@/lib/drafts/store";
 import { type LensDB, openLensDB } from "@/lib/sync/db";
 import { listPending } from "@/lib/sync/queue";
 import { useToastStore } from "@/lib/toast/store";
@@ -1291,5 +1292,135 @@ describe("NoteNew — first-voice-capture retention choice", () => {
     await screen.findByTestId("voice-unavailable");
     expect(screen.queryByRole("button", { name: /record voice memo/i })).toBeNull();
     expect(screen.queryByTestId("retention-choice")).toBeNull();
+  });
+});
+
+describe("NoteNew — local draft persistence (notes#175)", () => {
+  beforeEach(async () => {
+    const db = await freshDb();
+    db.close();
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    useToastStore.setState({ toasts: [] });
+    seedStore();
+    fakeState.controller = null;
+    fakeState.pickResult = "audio/webm;codecs=opus";
+    fakeState.requestMic = vi.fn(async () => ({ getTracks: () => [] }) as unknown as MediaStream);
+    vi.spyOn(window, "confirm").mockImplementation(() => true);
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, {
+        createObjectURL: vi.fn(() => "blob:fake"),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("pins the compose draft to the MOUNT vault across a mid-compose vault switch (F1)", () => {
+    useVaultStore.setState({
+      vaults: {
+        dev: {
+          id: "dev",
+          url: "http://localhost:1940",
+          name: "dev",
+          issuer: "http://localhost:1940",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+        other: {
+          id: "other",
+          url: "http://localhost:1941",
+          name: "other",
+          issuer: "http://localhost:1941",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+      },
+      activeVaultId: "dev",
+    });
+    localStorage.setItem(
+      "lens:token:other",
+      JSON.stringify({ accessToken: "t", scope: "full", vault: "default" }),
+    );
+    installFetch({});
+    renderAt("/new");
+
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "belongs to A" } });
+    // pagehide forces an immediate flush (no debounce wait).
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(loadDraft("dev", "new")?.body.content).toBe("belongs to A");
+
+    // Switch the active vault WHILE the compose screen stays mounted.
+    act(() => {
+      useVaultStore.setState({ activeVaultId: "other" });
+    });
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "still A's session" } });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    // B's compose key is never touched; A keeps its session.
+    expect(loadDraft("other", "new")).toBeNull();
+    expect(loadDraft("dev", "new")?.body.content).toBe("still A's session");
+  });
+
+  it("restores a persisted compose-session draft and shows the banner", async () => {
+    saveDraft("dev", "new", { content: "in-progress note", path: "Notes/wip", tags: ["ideas"] });
+    installFetch({});
+    renderAt("/new");
+
+    expect((screen.getByTestId("cm-editor") as HTMLTextAreaElement).value).toBe("in-progress note");
+    expect((screen.getByLabelText(/note path/i) as HTMLInputElement).value).toBe("Notes/wip");
+    expect(screen.getByTestId("draft-restored")).toBeInTheDocument();
+  });
+
+  it("discards the restored draft: clears storage and resets the compose surface", async () => {
+    saveDraft("dev", "new", { content: "junk draft", path: "Notes/wip", tags: [] });
+    installFetch({});
+    renderAt("/new");
+
+    fireEvent.click(screen.getByRole("button", { name: /discard draft/i }));
+    expect(screen.queryByTestId("draft-restored")).not.toBeInTheDocument();
+    expect((screen.getByTestId("cm-editor") as HTMLTextAreaElement).value).toBe("");
+    // Path resets to a fresh default quickPath.
+    expect((screen.getByLabelText(/note path/i) as HTMLInputElement).value).toMatch(
+      /^Notes\/\d{4}\/\d{2}-\d{2}\/\d{2}-\d{2}-\d{2}$/,
+    );
+    expect(loadDraft("dev", "new")).toBeNull();
+  });
+
+  it("clears the draft on a successful create", async () => {
+    saveDraft("dev", "new", { content: "seed", path: "Notes/wip", tags: [] });
+    installFetch({
+      "POST /api/notes": {
+        status: 201,
+        body: {
+          id: "new-note-id",
+          path: "Projects/README",
+          createdAt: "2026-04-18T12:00:00Z",
+          content: "# hi",
+        },
+      },
+    });
+    renderAt("/new");
+
+    fireEvent.change(screen.getByLabelText(/note path/i), { target: { value: "Projects/README" } });
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "# hi" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    });
+    await waitFor(() => expect(screen.getByText("NoteViewPage")).toBeInTheDocument());
+    expect(loadDraft("dev", "new")).toBeNull();
   });
 });

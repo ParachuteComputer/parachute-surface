@@ -1,8 +1,8 @@
+import { CopyField } from "@/components/CopyField";
 import { claudeConnectCommand, mcpEndpoint } from "@/lib/home/connect";
 import { useHomeChecklist } from "@/lib/home/use-home-checklist";
 import { useToastStore } from "@/lib/toast/store";
 import { useVaultStore } from "@/lib/vault";
-import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 
 // The "Connect your AI" moment. A vault speaks MCP, so any assistant that
@@ -53,7 +53,7 @@ export function ConnectAI() {
           Paste this wherever an AI asks for an MCP server. The <code>/mcp</code> suffix matters —
           it's the connection endpoint, not a page to open.
         </p>
-        <CopyRow value={mcpUrl} label="vault MCP URL" />
+        <CopyField value={mcpUrl} label="vault MCP URL" />
       </section>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -73,7 +73,7 @@ export function ConnectAI() {
           That same URL works in any MCP-compatible client — Cursor, an agent you build, anywhere an
           AI asks for an MCP server. For Claude Code:
         </p>
-        <CopyRow value={cliCommand} label="Claude Code command" />
+        <CopyField value={cliCommand} label="Claude Code command" />
       </section>
 
       <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-border pt-6">
@@ -88,40 +88,6 @@ export function ConnectAI() {
           Back to home
         </Link>
       </div>
-    </div>
-  );
-}
-
-// A URL/command line with a copy button. Copy uses the async clipboard API and
-// falls back to a toast either way so the user gets feedback.
-function CopyRow({ value, label }: { value: string; label: string }) {
-  const pushToast = useToastStore((s) => s.push);
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      pushToast("Copied to clipboard.", "success");
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      pushToast("Couldn't copy — select and copy manually.", "error");
-    }
-  };
-
-  return (
-    <div className="flex items-stretch gap-2">
-      <code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-bg-soft px-3 py-2 font-mono text-sm text-fg">
-        {value}
-      </code>
-      <button
-        type="button"
-        onClick={copy}
-        className="btn btn-secondary btn-touch shrink-0"
-        aria-label={`Copy ${label}`}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
     </div>
   );
 }
