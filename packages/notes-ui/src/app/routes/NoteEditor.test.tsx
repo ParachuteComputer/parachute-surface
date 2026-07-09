@@ -4,7 +4,7 @@ import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Swap CodeMirror out for a plain textarea so tests can drive onChange without
@@ -168,12 +168,19 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+// The read-view stand-in echoes its id so tests can assert *which* note we
+// landed on after a save (the id shifts when a path edit renames the note).
+function NoteViewProbe() {
+  const { id } = useParams<{ id: string }>();
+  return <div>NoteViewPage:{id}</div>;
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/n/:id/edit" element={<NoteEditor />} />
-        <Route path="/n/:id" element={<div>NoteViewPage</div>} />
+        <Route path="/n/:id" element={<NoteViewProbe />} />
         <Route path="/" element={<div>NotesListPage</div>} />
       </Routes>
     </MemoryRouter>,
@@ -248,9 +255,11 @@ describe("NoteEditor route", () => {
       fireEvent.click(save);
     });
 
+    // A successful save leaves the editor and lands on the note's read view.
     await waitFor(() => {
-      expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
+      expect(screen.getByText("NoteViewPage:abc-123")).toBeInTheDocument();
     });
+    expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
 
     const patchCall = fetchImpl.mock.calls.find(
       ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
@@ -261,6 +270,31 @@ describe("NoteEditor route", () => {
     expect(body.if_updated_at).toBe(baseNote.updatedAt);
     expect(body.tags).toEqual({ add: ["draft"], remove: [] });
     expect(body.path).toBeUndefined();
+  });
+
+  it("after a rename save, lands on the new note id's view", async () => {
+    const renamed = {
+      ...baseNote,
+      id: "canon-aaron-v2",
+      path: "Canon/Aaron-v2",
+      updatedAt: "2026-04-18T09:00:00Z",
+    };
+    installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": { body: renamed },
+    });
+
+    renderAt("/n/abc-123/edit");
+    const pathInput = (await screen.findByLabelText(/note path/i)) as HTMLInputElement;
+    fireEvent.change(pathInput, { target: { value: "Canon/Aaron-v2" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("NoteViewPage:canon-aaron-v2")).toBeInTheDocument();
+    });
   });
 
   it("Revert resets draft back to baseline and clears dirty", async () => {

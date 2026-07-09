@@ -29,9 +29,9 @@ const KIND_LABELS: Record<string, string> = {
   "delete-attachment": "attachment removals",
 };
 
-// Trip point for the storage warning. At 80% of quota we surface a gentle
-// nudge — iOS Safari caps OPFS/IDB at roughly 50 MB, so running out while
-// offline is a real hazard worth flagging.
+// Trip point for the storage warning. At 80% of the browser's per-origin
+// budget we surface a gentle nudge — iOS Safari caps OPFS/IDB at roughly
+// 50 MB, so running out while offline is a real hazard worth flagging.
 const STORAGE_WARN_THRESHOLD = 0.8;
 
 export function SyncStatusPanel({ onDismiss }: { onDismiss?: () => void }) {
@@ -223,27 +223,35 @@ export function describeMutation(m: PendingPayload): string {
   }
 }
 
+// `quota` here is `navigator.storage.estimate().quota` — the browser's
+// per-origin storage budget (often tens of GB on desktop Chrome), NOT the
+// user's vault plan quota. Showing it as a denominator read as "you have 38
+// GB of plan storage", which is false. So we surface only the real, honest
+// number — how much this device has cached offline — and keep the quota
+// solely to drive the near-the-cap warning (meaningful on iOS Safari's ~50 MB
+// cap). The progress bar shows up only once we're actually near that cap.
 function StorageBar({ usage, quota }: { usage: number; quota: number }) {
   const pct = quota > 0 ? usage / quota : 0;
   const warn = pct >= STORAGE_WARN_THRESHOLD;
   return (
     <section className="text-xs">
-      <div className="mb-1 flex justify-between text-fg-dim">
-        <span>Storage</span>
-        <span className={warn ? "text-amber-300" : "text-fg-muted"}>
-          {formatBytes(usage)} / {formatBytes(quota)}
-        </span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/40">
-        <div
-          className={`h-full ${warn ? "bg-amber-400" : "bg-accent"}`}
-          style={{ width: `${Math.min(100, Math.round(pct * 100))}%` }}
-        />
+      <div className="flex justify-between text-fg-dim">
+        <span>Offline cache</span>
+        <span className={warn ? "text-amber-300" : "text-fg-muted"}>{formatBytes(usage)}</span>
       </div>
       {warn ? (
-        <p className="mt-1 text-amber-300">
-          Nearly full. Sync what you can and consider clearing stuck rows.
-        </p>
+        <>
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border/40">
+            <div
+              className="h-full bg-amber-400"
+              style={{ width: `${Math.min(100, Math.round(pct * 100))}%` }}
+            />
+          </div>
+          <p className="mt-1 text-amber-300">
+            This browser's offline storage is nearly full. Sync what you can and consider clearing
+            stuck rows.
+          </p>
+        </>
       ) : null}
     </section>
   );

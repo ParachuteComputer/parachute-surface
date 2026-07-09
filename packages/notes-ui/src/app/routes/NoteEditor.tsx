@@ -128,10 +128,11 @@ function EditorSurface({ note }: { note: Note }) {
         setBaseline(toEditorState(updated));
         setDraft(toEditorState(updated));
         lastServerNote.current = updated;
-        // If path change moved the note to a new id, land on the new URL.
-        if (updated.id !== note.id) {
-          navigate(`/n/${encodeURIComponent(updated.id)}/edit`, { replace: true });
-        }
+        // Return the user to the note's read view after a save — editing is a
+        // transient state, so `replace` keeps "back" from dropping them into
+        // the editor they just left. The id may have changed if a path edit
+        // moved the note, so navigate to the freshly-saved id.
+        navigate(`/n/${encodeURIComponent(updated.id)}`, { replace: true });
       },
       onError: (err) => {
         if (err instanceof VaultConflictError) setConflict(err);
@@ -139,7 +140,7 @@ function EditorSurface({ note }: { note: Note }) {
         else setSaveError(err instanceof Error ? err.message : "Save failed");
       },
     });
-  }, [baseline, draft, isDirty, mutation, navigate, note.id]);
+  }, [baseline, draft, isDirty, mutation, navigate]);
 
   const handleRevert = useCallback(() => {
     if (!isDirty) return;
