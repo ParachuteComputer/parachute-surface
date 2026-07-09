@@ -29,8 +29,9 @@ export function Home() {
   const install = useInstallAffordance();
   const { state: checklistState, setOverride, dismiss } = useHomeChecklist(vault?.id ?? null);
 
-  // Today handles the same index dispatch, but guard anyway: a vault removed
-  // mid-session should fall back to the landing, not render an empty home.
+  // NotesIndex only mounts Home when a vault is active, but guard anyway: a
+  // vault removed mid-session should fall back to the landing (via the index),
+  // not render an empty home.
   if (!vault) return <Navigate to="/" replace />;
 
   // `settled` gates the "fresh" welcome on notes having loaded, so a returning

@@ -1,6 +1,6 @@
 import type { BeforeInstallPromptEvent } from "@/lib/pwa";
-import { useInstallAffordance } from "@/lib/pwa-install";
-import { act, render, screen } from "@testing-library/react";
+import { __resetInstallAffordanceForTests, useInstallAffordance } from "@/lib/pwa-install";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 function stubMatchMedia(standalone: boolean) {
@@ -38,10 +38,12 @@ function Probe() {
 
 describe("useInstallAffordance", () => {
   beforeEach(() => {
+    __resetInstallAffordanceForTests();
     stubMatchMedia(false);
     stubUserAgent("Mozilla/5.0 (Linux; Android 13) Chrome/120");
   });
   afterEach(() => {
+    __resetInstallAffordanceForTests();
     vi.unstubAllGlobals();
   });
 
@@ -67,5 +69,17 @@ describe("useInstallAffordance", () => {
     stubUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)");
     render(<Probe />);
     expect(screen.getByTestId("state").textContent).toBe("available:ios");
+  });
+
+  it("shares the captured event with an instance mounted AFTER it fired (F1)", () => {
+    // The regression behind PR #182 F1: beforeinstallprompt is one-shot and
+    // doesn't replay. A second consumer that mounts after the event must still
+    // see it via the module-scope singleton — a per-instance listener wouldn't.
+    const first = render(<Probe />);
+    act(() => fireBeforeInstallPrompt());
+    expect(within(first.container).getByTestId("state").textContent).toBe("available");
+    // Mount a fresh, independent instance now — after the event already fired.
+    const second = render(<Probe />);
+    expect(within(second.container).getByTestId("state").textContent).toBe("available");
   });
 });

@@ -1,5 +1,6 @@
 import { InstallPrompt } from "@/components/InstallPrompt";
 import type { BeforeInstallPromptEvent } from "@/lib/pwa";
+import { __resetInstallAffordanceForTests } from "@/lib/pwa-install";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,10 +36,14 @@ function fireBeforeInstallPrompt(prompt = vi.fn<() => Promise<void>>(async () =>
 
 describe("InstallPrompt", () => {
   beforeEach(() => {
+    // The beforeinstallprompt capture is a module-scope singleton — clear it so
+    // a captured event doesn't leak between cases.
+    __resetInstallAffordanceForTests();
     stubMatchMedia(false);
     stubUserAgent("Mozilla/5.0 (Linux; Android 13) Chrome/120");
   });
   afterEach(() => {
+    __resetInstallAffordanceForTests();
     vi.unstubAllGlobals();
   });
 

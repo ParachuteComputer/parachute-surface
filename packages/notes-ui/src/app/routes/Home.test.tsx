@@ -1,8 +1,10 @@
 import { Home } from "@/app/routes/Home";
 import { loadChecklistState } from "@/lib/home/checklist";
+import type { BeforeInstallPromptEvent } from "@/lib/pwa";
+import { __resetInstallAffordanceForTests } from "@/lib/pwa-install";
 import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -96,13 +98,27 @@ function checklistDetails(): HTMLDetailsElement {
   return details as HTMLDetailsElement;
 }
 
+function fireBeforeInstallPrompt() {
+  const event = new Event("beforeinstallprompt") as unknown as BeforeInstallPromptEvent;
+  Object.assign(event, {
+    platforms: ["web"],
+    userChoice: Promise.resolve({ outcome: "accepted" as const, platform: "web" }),
+    prompt: vi.fn<() => Promise<void>>(async () => {}),
+  });
+  window.dispatchEvent(event);
+}
+
 describe("Home — guided front door", () => {
   beforeEach(() => {
     localStorage.clear();
+    // The install-affordance capture is a module-scope singleton — reset it so a
+    // beforeinstallprompt fired in one case doesn't leak into another.
+    __resetInstallAffordanceForTests();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     seedStore();
   });
   afterEach(() => {
+    __resetInstallAffordanceForTests();
     vi.unstubAllGlobals();
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     localStorage.clear();
@@ -164,6 +180,27 @@ describe("Home — guided front door", () => {
     );
     await screen.findByText(/welcome aboard/i);
     expect(screen.queryByText(/install the app/i)).not.toBeInTheDocument();
+  });
+
+  it("surfaces the install button when beforeinstallprompt fired BEFORE Home mounted (F1)", async () => {
+    installFetch(SEED_ONLY);
+    // The event fires first — captured by the module singleton — THEN Home
+    // mounts. Home's gate and the nested InstallPrompt are separate hook
+    // instances; both must see the one-shot event via the shared store, or the
+    // card shows "Install the app" with no button (the F1 defect).
+    act(() => fireBeforeInstallPrompt());
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    // The install button is unique to the quick-action card (the checklist's
+    // install row is a status marker, no button) — its presence is the proof
+    // the nested InstallPrompt's separate hook instance saw the pre-mount event.
+    const btn = await screen.findByRole("button", { name: /install app/i });
+    const quickNav = screen.getByRole("navigation", { name: /quick actions/i });
+    expect(within(quickNav).getByText(/install the app/i)).toBeInTheDocument();
+    expect(quickNav).toContainElement(btn);
   });
 
   it("persists a manual checklist tick per vault", async () => {
