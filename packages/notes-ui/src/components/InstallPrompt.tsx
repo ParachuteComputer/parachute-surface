@@ -1,8 +1,15 @@
+import { CopyField } from "@/components/CopyField";
 import { useInstallAffordance } from "@/lib/pwa-install";
+import { useVaultStore } from "@/lib/vault";
 import { useState } from "react";
 
 export function InstallPrompt() {
   const { state, isIOSDevice, promptInstall } = useInstallAffordance();
+  // For the iOS add-to-home-screen path: an installed PWA on iOS gets a
+  // separate storage partition from Safari, so the vault connection doesn't
+  // carry over and the app asks for the address again (notes#176). Preempt it —
+  // show the connected vault's address, copy-ably, right where they install.
+  const activeVaultUrl = useVaultStore((s) => s.getActiveVault()?.url ?? null);
   const [iosHintOpen, setIosHintOpen] = useState(false);
 
   if (state !== "available") return null;
@@ -39,6 +46,14 @@ export function InstallPrompt() {
             </li>
             <li>Tap Add. Parachute Notes will open standalone from your home screen.</li>
           </ol>
+          {activeVaultUrl ? (
+            <div className="mb-5 rounded-md border border-border bg-bg-soft/60 p-3">
+              <p className="mb-2 text-sm text-fg-muted">
+                The installed app may ask for your vault address — here it is, ready to paste:
+              </p>
+              <CopyField value={activeVaultUrl} label="vault address" />
+            </div>
+          ) : null}
           <div className="flex justify-end">
             <button
               type="button"

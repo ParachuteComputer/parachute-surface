@@ -1,5 +1,37 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.19] - 2026-07-09
+
+### Added — draft safety, install-friction preempt, and a plan backlink
+
+- **Local draft persistence (#175).** Both editors (new note + existing note)
+  now mirror what you're typing to localStorage a beat after you stop — so an
+  accidental navigation, tab close, or crash before an explicit save doesn't
+  lose it. It is NEVER written to the vault on its own (⌘S stays the only
+  server-commit path, so no surprise versions and the conflict machinery is
+  untouched). Keyed per vault + per note (new-note drafts key to the compose
+  session). A returning new note restores its text with a dismissible "draft
+  restored" banner; an existing note OFFERS to restore only when the draft
+  differs from the server copy (the server stays authoritative). Cleared on a
+  successful save or an explicit discard; also flushed on tab background /
+  page-hide (where a PWA never runs unmount).
+- **PWA install-friction preempt (#176).** Installing the app on iOS gets a
+  storage partition separate from Safari, so the vault connection doesn't carry
+  over and the app asks for the address again. The Add-to-Home-Screen dialog now
+  shows your vault's address, copy-ably, right where you install — with a note
+  that the app may ask for it. (Android/desktop share storage and are
+  unaffected.)
+- **"Manage your vault plan" backlink (#99).** A quiet row on the home links
+  cloud vaults to their console (`cloud.parachute.computer/console`). Self-host
+  vaults show no row — no false door.
+
+### Fixed
+
+- **Install prompt is single-use (PR #182 follow-up).** The deferred
+  `beforeinstallprompt` event is now cleared after ANY outcome (accepted or
+  dismissed) with the prompt call wrapped in try/catch — a retry after a
+  dismiss can no longer silently no-op against a spent event.
+
 ## [0.1.18] - 2026-07-09
 
 ### Added — the guided home: welcome, quick actions, connect-your-AI, setup checklist

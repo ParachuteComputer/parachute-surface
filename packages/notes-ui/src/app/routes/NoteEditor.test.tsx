@@ -1,4 +1,5 @@
 import { NoteEditor } from "@/app/routes/NoteEditor";
+import { loadDraft, saveDraft } from "@/lib/drafts/store";
 import { useToastStore } from "@/lib/toast/store";
 import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -529,5 +530,82 @@ describe("NoteEditor route", () => {
       const toasts = useToastStore.getState().toasts;
       expect(toasts.some((t) => /too large/i.test(t.message))).toBe(true);
     });
+  });
+});
+
+describe("NoteEditor — local draft persistence (notes#175)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    useToastStore.setState({ toasts: [] });
+    seedStore();
+    vi.spyOn(window, "confirm").mockImplementation(() => true);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("offers to restore a draft that differs from the server note (without auto-applying)", async () => {
+    saveDraft("dev", "abc-123", {
+      content: "MY UNSAVED EDITS",
+      path: baseNote.path,
+      tags: baseNote.tags,
+    });
+    installFetch({ "/api/notes": { body: baseNote } });
+    renderAt("/n/abc-123/edit");
+
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    // Server copy is authoritative — the editor shows it, not the draft.
+    expect(cm.value).toBe(baseNote.content);
+    expect(screen.getByTestId("draft-offer")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^restore$/i }));
+    expect((screen.getByTestId("cm-editor") as HTMLTextAreaElement).value).toBe("MY UNSAVED EDITS");
+    expect(screen.queryByTestId("draft-offer")).not.toBeInTheDocument();
+  });
+
+  it("does not offer a draft identical to the server note", async () => {
+    saveDraft("dev", "abc-123", {
+      content: baseNote.content,
+      path: baseNote.path,
+      tags: baseNote.tags,
+    });
+    installFetch({ "/api/notes": { body: baseNote } });
+    renderAt("/n/abc-123/edit");
+
+    await screen.findByTestId("cm-editor");
+    expect(screen.queryByTestId("draft-offer")).not.toBeInTheDocument();
+  });
+
+  it("discards the offered draft, clearing it from storage", async () => {
+    saveDraft("dev", "abc-123", { content: "junk", path: baseNote.path, tags: baseNote.tags });
+    installFetch({ "/api/notes": { body: baseNote } });
+    renderAt("/n/abc-123/edit");
+
+    await screen.findByTestId("cm-editor");
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    expect(screen.queryByTestId("draft-offer")).not.toBeInTheDocument();
+    expect(loadDraft("dev", "abc-123")).toBeNull();
+  });
+
+  it("clears the draft on a successful save", async () => {
+    // Seed a pre-existing draft, then make a real edit and save.
+    saveDraft("dev", "abc-123", { content: "old", path: baseNote.path, tags: baseNote.tags });
+    const updated = { ...baseNote, content: "# hi\n\nedited", updatedAt: "2026-04-18T09:00:00Z" };
+    installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": { body: updated },
+    });
+    renderAt("/n/abc-123/edit");
+
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    fireEvent.change(cm, { target: { value: "# hi\n\nedited" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+    await waitFor(() => expect(screen.getByText("NoteViewPage:abc-123")).toBeInTheDocument());
+    expect(loadDraft("dev", "abc-123")).toBeNull();
   });
 });

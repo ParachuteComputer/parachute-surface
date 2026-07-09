@@ -247,4 +247,45 @@ describe("Home — guided front door", () => {
       expect(screen.getByTestId("location").textContent).toBe("/all?search=budget"),
     );
   });
+
+  it("hides the manage-plan backlink for a self-host vault", async () => {
+    // Default seed vault is http://localhost:1940 → no cloud console → no row.
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    expect(screen.queryByRole("link", { name: /manage your vault plan/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the manage-plan backlink for a cloud vault", async () => {
+    useVaultStore.setState({
+      vaults: {
+        v1: {
+          id: "v1",
+          url: "https://u.parachute.computer/vault/aaron",
+          name: "aaron",
+          issuer: "https://u.parachute.computer",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+      },
+      activeVaultId: "v1",
+    });
+    installFetch(SEED_ONLY);
+    render(
+      <Wrap>
+        <Home />
+      </Wrap>,
+    );
+    await screen.findByText(/welcome aboard/i);
+    expect(screen.getByRole("link", { name: /manage your vault plan/i })).toHaveAttribute(
+      "href",
+      "https://cloud.parachute.computer/console",
+    );
+  });
 });

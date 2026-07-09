@@ -122,16 +122,29 @@ export function useInstallAffordance(): InstallAffordance {
 
   const promptInstall = useCallback(async (): Promise<"accepted" | "dismissed" | "unavailable"> => {
     // Read the live singleton (not the render snapshot) so the most recent
-    // event is used, and clear it on accept so no sibling instance re-fires the
-    // now-consumed prompt.
-    if (!deferredPrompt) return "unavailable";
-    await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    if (choice.outcome === "accepted") {
-      deferredPrompt = null;
-      notify();
+    // event is used.
+    const evt = deferredPrompt;
+    if (!evt) return "unavailable";
+    try {
+      await evt.prompt();
+      const choice = await evt.userChoice;
+      return choice.outcome;
+    } catch {
+      // A beforeinstallprompt event's prompt() is single-use — a second call
+      // (e.g. a double click, or a stale copy in a sibling instance) rejects.
+      // Swallow it; the finally below drops the spent event so the UI stops
+      // offering a prompt that can't fire.
+      return "unavailable";
+    } finally {
+      // Clear on ANY outcome (accepted OR dismissed) — the event is spent once
+      // prompt() has been called, so keeping it around would let a retry
+      // silently no-op against a used event. A fresh beforeinstallprompt
+      // re-arms the affordance if the browser offers again.
+      if (deferredPrompt === evt) {
+        deferredPrompt = null;
+        notify();
+      }
     }
-    return choice.outcome;
   }, []);
 
   return { state, isIOSDevice: platform.ios, promptInstall };
