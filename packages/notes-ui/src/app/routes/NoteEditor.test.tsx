@@ -22,7 +22,7 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
       },
       ref: React.Ref<{ insertAtCursor(s: string): void; focus(): void }>,
     ) {
-      const { value, onChange, onPasteFile } = props;
+      const { value, onChange, onSave, onPasteFile } = props;
       React.useImperativeHandle(
         ref,
         () => ({
@@ -40,6 +40,12 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
+          {/* Stand-in for the ⌘S keybinding — CodeMirror wires it to onSave.
+              Label deliberately avoids the word "save" so it doesn't collide
+              with getByRole({ name: /save/i }) lookups for the real button. */}
+          <button type="button" data-testid="cm-save" onClick={() => onSave?.()}>
+            mock keyboard commit
+          </button>
           <button
             type="button"
             data-testid="cm-paste-image"
@@ -294,6 +300,99 @@ describe("NoteEditor route", () => {
 
     await waitFor(() => {
       expect(screen.getByText("NoteViewPage:canon-aaron-v2")).toBeInTheDocument();
+    });
+  });
+
+  it("⌘S is a checkpoint save — commits but stays in the editor", async () => {
+    const updated = {
+      ...baseNote,
+      content: "# hi\n\nbody more",
+      updatedAt: "2026-04-18T09:00:00Z",
+    };
+    const fetchImpl = installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": { body: updated },
+    });
+
+    renderAt("/n/abc-123/edit");
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    fireEvent.change(cm, { target: { value: "# hi\n\nbody more" } });
+    expect(screen.getByText(/unsaved/i)).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("cm-save"));
+    });
+
+    // The save committed (dirty cleared)…
+    await waitFor(() => {
+      expect(screen.queryByText(/unsaved/i)).not.toBeInTheDocument();
+    });
+    const patchCall = fetchImpl.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+    );
+    expect(patchCall).toBeDefined();
+    // …but we're still in the editor, NOT bounced to the read view.
+    expect(screen.getByTestId("cm-editor")).toBeInTheDocument();
+    expect(screen.queryByText(/NoteViewPage/)).not.toBeInTheDocument();
+  });
+
+  it("disables Save (button + ⌘S) while an attachment upload is in flight", async () => {
+    const fetchImpl = installFetch({
+      "GET /api/notes": { body: baseNote },
+      "POST /api/notes/abc-123/attachments": {
+        status: 201,
+        body: {
+          id: "att-1",
+          noteId: "abc-123",
+          path: "2026-04-18/shot.png",
+          mimeType: "image/png",
+        },
+      },
+      "PATCH /api/notes/": { body: { ...baseNote, content: "# hi\n\nbody typed" } },
+    });
+    const xhrs = installXhr();
+    renderAt("/n/abc-123/edit");
+
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    // Dirty the note so Save would be enabled on its own merits.
+    fireEvent.change(cm, { target: { value: "# hi\n\nbody typed" } });
+    expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
+
+    // Kick off an upload — it stays "uploading" until we resolve the xhr.
+    const dropZone = cm.closest("div.relative");
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    fireEvent.drop(dropZone!, {
+      dataTransfer: {
+        files: [file],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      } as unknown as DataTransfer,
+    });
+    await waitFor(() => expect(xhrs.length).toBe(1));
+
+    // Button is disabled with an explanatory label…
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /waiting for upload/i })).toBeDisabled();
+    });
+    // …and the ⌘S path is guarded too — firing it fires no PATCH.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("cm-save"));
+    });
+    expect(
+      fetchImpl.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+      ),
+    ).toBe(false);
+
+    // Once the upload (and its link) complete, Save frees up again.
+    await act(async () => {
+      xhrs[0]!.resolve(
+        201,
+        JSON.stringify({ path: "2026-04-18/shot.png", size: 3, mimeType: "image/png" }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^save$/i })).not.toBeDisabled();
     });
   });
 
