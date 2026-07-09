@@ -11,8 +11,10 @@ export function buildPwaManifest(base = "/"): Partial<ManifestOptions> {
     short_name: "Notes",
     description:
       "The default frontend for Parachute. Browse, edit, and capture in any Parachute Vault.",
-    theme_color: "#4a7c59",
-    background_color: "#faf8f4",
+    // New-brand pass (0.1.21): coral accent + warm paper, mirroring the CSS
+    // token values (--color-accent / --color-bg light theme).
+    theme_color: "#bf4a2a",
+    background_color: "#fdfaf4",
     display: "standalone",
     orientation: "any",
     start_url: normalized,

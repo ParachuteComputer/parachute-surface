@@ -121,17 +121,8 @@ export default defineConfig({
         // Keep vault API + OAuth off the nav fallback so they error cleanly offline.
         navigateFallbackDenylist: [/^\/api\//, /^\/oauth\//, /^\/\.well-known\//],
         globPatterns: ["**/*.{js,css,html,svg,png,ico,webmanifest}"],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
-            handler: "StaleWhileRevalidate",
-            options: {
-              cacheName: "google-fonts",
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
+        // No runtimeCaching: fonts are system stacks now (0.1.21 brand pass), so
+        // there's nothing external to cache. The old google-fonts rule was dead.
       },
       devOptions: { enabled: false },
     }),

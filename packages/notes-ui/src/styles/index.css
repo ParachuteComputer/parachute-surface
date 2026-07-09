@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @import "highlight.js/styles/github.css";
 
@@ -6,9 +5,16 @@
    Parachute Notes — design system / token contract
    ---------------------------------------------------------------------------
    This stylesheet is the CANONICAL starting point other Parachute surface
-   authors copy. It codifies the warm-paper / forest-green / serif identity
-   into a token + component-class system so a generic notes surface stays
+   authors copy. It codifies the warm-paper / coral / serif identity into a
+   token + component-class system so a generic notes surface stays
    Linear/Things-tier consistent without re-deriving the look per file.
+
+   Brand source of truth: parachute.computer/design/brand-tokens.md (§1 palette,
+   §2 type). This file is the new-brand pass of that reference: SYSTEM font
+   stacks (no webfont download — Google Fonts retired, matching the brand
+   pilot's own decision) and the coral accent family. Fonts: --font-serif
+   (display), --font-sans (body, the brand's font-body stack), --font-round (UI
+   chrome — buttons, eyebrows), --font-mono. Keep it in step with the brand doc.
 
    Layers (in cascade order):
      1. @theme            — design tokens (colors, type scale, radii, shadows,
@@ -26,10 +32,13 @@
    color literals like red-500 / text-white):
      --color-bg / -soft           page + recessed surfaces
      --color-fg / -muted / -dim   primary / secondary / tertiary text
-     --color-accent / -hover      forest-green brand action color
+     --color-accent / -hover      coral brand action color
+     --color-accent-light         BRIGHT coral (#e05d3c) — large/decorative
+                                  ONLY (3.5:1 on paper); never small body text.
      --color-on-accent            text that sits ON an accent surface.
                                   WHITE in light, DARK in dark — this is the
                                   load-bearing WCAG-AA fix (see note below).
+     --color-coral-soft/-ink      tinted-coral "featured/highlight" badge family
      --color-danger / -hover / -soft / -border    destructive / error
      --color-warning / -soft                       caution
      --color-positive             success (== accent)
@@ -40,29 +49,38 @@
      --shadow-sm / -md / -lg      warm-tinted elevation
      --w-prose / -page / -narrow  container widths
 
-   WCAG-AA note (the dark-accent fix): the dark-mode accent is a LIGHT green
-   (#7ab087); white text on it is ~2.5:1 and FAILS AA. `--color-on-accent`
-   flips to a dark ink (#15211a) in dark mode → ~6.6:1, passes AA. Every
-   accent-surfaced label uses `.btn-primary` or `text-[--color-on-accent]`,
-   never a hardcoded `text-white`.
+   WCAG-AA note (the dark-accent fix): the accent is the coral button hue
+   (#bf4a2a): white-on-accent is 4.97:1, accent-on-paper 4.77:1 — both pass AA.
+   The dark-mode accent LIGHTENS to a coral (#ec7a5c, 6.28:1 on the dark
+   ground), so `--color-on-accent` flips to a dark warm ink (#2a1710 → 6.11:1
+   on the dark accent) instead of white. Every accent-surfaced label uses
+   `.btn-primary` or `text-[--color-on-accent]`, never a hardcoded `text-white`.
+   Ratios computed in the 0.1.21 brand pass; see the PR for the full table.
    =========================================================================== */
 
 @theme {
-  --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-serif: "Instrument Serif", Georgia, serif;
-  --font-mono: "JetBrains Mono", "SF Mono", Monaco, monospace;
+  /* Brand system-font stacks (parachute.computer/design/brand-tokens.md §2),
+     verbatim. No webfont download. --font-sans carries the brand's font-body
+     stack (Tailwind names the body token `sans`); --font-round is UI-chrome. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-round: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN",
+    Quicksand, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, "Cascadia Code", monospace;
 
   /* --- Surfaces + text (light) --- */
-  --color-bg: #faf8f4;
+  --color-bg: #fdfaf4;
   --color-bg-soft: #f3f0ea;
   --color-fg: #2c2a26;
   --color-fg-muted: #6b6860;
   --color-fg-dim: #9a9690;
 
-  /* --- Brand accent (light) --- */
-  --color-accent: #4a7c59;
-  --color-accent-hover: #3d6849;
-  --color-accent-light: #6a9b77;
+  /* --- Brand accent (light) — coral (brand-tokens §1) ---
+     accent = the button hue #bf4a2a (4.97:1 on white, 4.77:1 on paper);
+     -light = the bright display coral #e05d3c (LARGE / decorative only). */
+  --color-accent: #bf4a2a;
+  --color-accent-hover: #a63f23;
+  --color-accent-light: #e05d3c;
   --color-sky: #5b8fa8;
 
   /* --- Hairlines + raised surfaces (light) --- */
@@ -85,6 +103,13 @@
   --color-warning-soft: color-mix(in srgb, var(--color-warning) 12%, transparent);
   --color-positive: var(--color-accent);
   --color-positive-soft: color-mix(in srgb, var(--color-accent) 12%, transparent);
+
+  /* --- Coral "featured / highlight" family (brand-tokens §1) ---
+     A tinted-coral badge treatment (soft bg + ink-on-soft, 6.44:1) distinct
+     from the interactive accent — for "featured"/highlight chips. Separate
+     from the semantic danger/warning/positive tokens, which are unchanged. */
+  --color-coral-soft: #fbe4d9;
+  --color-coral-ink: #8f3417;
 
   /* --- Type scale (ONE ramp for chrome + prose) ---
      ~1.2 ratio anchored at the existing chrome base (16px = 1rem root) and the
@@ -187,16 +212,24 @@
   --_d-fg: #e8e5de;
   --_d-fg-muted: #a8a49b;
   --_d-fg-dim: #706c64;
-  --_d-accent: #7ab087;
-  --_d-accent-hover: #8bc098;
-  --_d-accent-light: #5b8c6a;
+  /* Coral, lightened for the dark ground (brand-tokens §1 proposed direction,
+     ratios computed + adjusted for AA in the 0.1.21 pass):
+       accent #ec7a5c → 6.28:1 on --_d-bg, 5.69:1 on --_d-card
+       accent-hover #f08d70 → 7.32:1 on --_d-bg
+       on-accent #2a1710 → 6.11:1 on accent, 7.12:1 on accent-hover */
+  --_d-accent: #ec7a5c;
+  --_d-accent-hover: #f08d70;
+  --_d-accent-light: #c95f40;
   --_d-sky: #7fb3cc;
   --_d-border: #33312d;
   --_d-border-light: #2a2926;
   --_d-card: #23221f;
   --_d-card-hover: #2a2926;
   /* The WCAG-AA fix lives here: dark accent is light, so on-accent is a dark ink. */
-  --_d-on-accent: #15211a;
+  --_d-on-accent: #2a1710;
+  /* Dark coral "featured" badge family — ink-on-soft 7.79:1. */
+  --_d-coral-soft: #3a221b;
+  --_d-coral-ink: #f2ac92;
   --_d-danger: #e8836b;
   --_d-danger-hover: #ef9982;
   --_d-warning: #fcd34d;
@@ -229,6 +262,8 @@
     --color-card: var(--_d-card);
     --color-card-hover: var(--_d-card-hover);
     --color-on-accent: var(--_d-on-accent);
+    --color-coral-soft: var(--_d-coral-soft);
+    --color-coral-ink: var(--_d-coral-ink);
     --color-danger: var(--_d-danger);
     --color-danger-hover: var(--_d-danger-hover);
     --color-warning: var(--_d-warning);
@@ -254,6 +289,8 @@
   --color-card: var(--_d-card);
   --color-card-hover: var(--_d-card-hover);
   --color-on-accent: var(--_d-on-accent);
+  --color-coral-soft: var(--_d-coral-soft);
+  --color-coral-ink: var(--_d-coral-ink);
   --color-danger: var(--_d-danger);
   --color-danger-hover: var(--_d-danger-hover);
   --color-warning: var(--_d-warning);
@@ -497,6 +534,8 @@ body {
     min-height: 2.25rem; /* min-h-9 — comfortable tap target on desktop */
     padding: 0.375rem 0.875rem;
     border-radius: var(--radius-md);
+    /* UI chrome rides the brand round stack (brand-tokens §2). */
+    font-family: var(--font-round);
     font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1.2;
@@ -675,6 +714,13 @@ body {
     background-color: var(--color-accent);
     color: var(--color-on-accent);
   }
+  /* Featured / highlight chip — the coral-soft badge family (brand-tokens §1),
+     distinct from the interactive accent. ink-on-soft passes AA in both themes. */
+  .chip-featured {
+    border-color: color-mix(in srgb, var(--color-coral-ink) 25%, transparent);
+    background-color: var(--color-coral-soft);
+    color: var(--color-coral-ink);
+  }
 
   /* --- Dialogs --- */
   .dialog-overlay {
@@ -724,8 +770,10 @@ body {
   }
 
   /* --- Micro typography helpers --- */
-  /* The uppercase micro-label used as section eyebrows everywhere. */
+  /* The uppercase micro-label used as section eyebrows everywhere. Rides the
+     brand round stack (brand-tokens §2: eyebrows are font-round). */
   .eyebrow {
+    font-family: var(--font-round);
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
