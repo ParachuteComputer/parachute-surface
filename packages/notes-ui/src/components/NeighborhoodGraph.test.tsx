@@ -1,7 +1,7 @@
 import { NeighborhoodGraph } from "@/components/NeighborhoodGraph";
 import { useVaultStore } from "@/lib/vault/store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -152,10 +152,16 @@ describe("NeighborhoodGraph", () => {
     expect(screen.queryByTestId("mock-force-graph")).not.toBeInTheDocument();
   });
 
-  it("clicking a node navigates to that note", async () => {
+  it("clicking a graph node opens a preview (not a hard navigation), and Open note navigates", async () => {
     seedActiveVault();
     mockFetchReturning({
-      B: { id: "B", path: "notes/B", createdAt: "2026-04-18T00:00:00.000Z" },
+      B: {
+        id: "B",
+        path: "notes/B",
+        content: "# B\n\nBody of note B here.",
+        tags: ["topic"],
+        createdAt: "2026-04-18T00:00:00.000Z",
+      },
       C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
     });
     render(
@@ -166,6 +172,18 @@ describe("NeighborhoodGraph", () => {
     const btn = await screen.findByRole("button", { name: /^B$/ });
     await act(async () => {
       fireEvent.click(btn);
+    });
+
+    // A preview appears (no navigation yet), with the lazily-fetched snippet.
+    const preview = await screen.findByRole("dialog", { name: /note preview/i });
+    expect(screen.queryByTestId("note-route")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(preview).getByText(/body of note b here/i)).toBeInTheDocument(),
+    );
+
+    // "Open note" is the navigation.
+    await act(async () => {
+      fireEvent.click(within(preview).getByRole("link", { name: /open note/i }));
     });
     await waitFor(() => expect(screen.getByTestId("note-route")).toBeInTheDocument());
   });
@@ -214,5 +232,97 @@ describe("NeighborhoodGraph", () => {
     });
     expect(screen.queryByTestId("mock-force-graph")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: /hops/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the preview from the keyboard-accessible neighbor list", async () => {
+    seedActiveVault();
+    mockFetchReturning({
+      B: {
+        id: "B",
+        path: "notes/B",
+        content: "Snippet for B.",
+        createdAt: "2026-04-18T00:00:00.000Z",
+      },
+      C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
+    });
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    // The list button carries a distinct "Preview <leaf>" name (the graph node
+    // button is just "B") — this is the no-mouse path into the preview.
+    const listBtn = await screen.findByRole("button", { name: /^preview b$/i });
+    await act(async () => {
+      fireEvent.click(listBtn);
+    });
+    expect(await screen.findByRole("dialog", { name: /note preview/i })).toBeInTheDocument();
+  });
+
+  it("dismisses the preview on Escape", async () => {
+    seedActiveVault();
+    mockFetchReturning({
+      B: {
+        id: "B",
+        path: "notes/B",
+        content: "Snippet for B.",
+        createdAt: "2026-04-18T00:00:00.000Z",
+      },
+      C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
+    });
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    const btn = await screen.findByRole("button", { name: /^B$/ });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    const preview = await screen.findByRole("dialog", { name: /note preview/i });
+    fireEvent.keyDown(preview, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /note preview/i })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("lazily fetches the preview note once, on demand", async () => {
+    seedActiveVault();
+    const fetchImpl = mockFetchReturning({
+      // Distinct H1 title vs body so the snippet text is unambiguous.
+      B: {
+        id: "B",
+        path: "notes/B",
+        content: "# Note B\n\nThe body of B here.",
+        createdAt: "2026-04-18T00:00:00.000Z",
+      },
+      C: { id: "C", path: "notes/C", createdAt: "2026-04-18T00:00:00.000Z" },
+    });
+    const idOf = (call: unknown[]) => {
+      const input = call[0];
+      const url = typeof input === "string" ? input : (input as Request).url;
+      return new URL(url).searchParams.get("id");
+    };
+    const bCalls = () => fetchImpl.mock.calls.filter((c) => idOf(c) === "B").length;
+
+    render(
+      <Wrap>
+        <NeighborhoodGraph anchor={anchor} />
+      </Wrap>,
+    );
+    const btn = await screen.findByRole("button", { name: /^B$/ });
+    const afterLoad = bCalls(); // the neighborhood expansion fetched B once
+
+    // The snippet is NOT fetched until the preview opens (lazy).
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    const preview = await screen.findByRole("dialog", { name: /note preview/i });
+    await waitFor(() =>
+      expect(within(preview).getByText(/the body of b here/i)).toBeInTheDocument(),
+    );
+    // Exactly one on-demand fetch for the snippet — not the whole graph, and
+    // not per-render.
+    expect(bCalls()).toBe(afterLoad + 1);
   });
 });
