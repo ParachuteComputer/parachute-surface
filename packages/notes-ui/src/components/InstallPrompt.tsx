@@ -34,7 +34,10 @@ export function InstallPrompt() {
         <dialog
           open
           aria-labelledby="ios-install-title"
-          className="fixed inset-0 z-50 m-auto max-w-sm rounded-md border border-border bg-card p-6 text-fg shadow-lg backdrop:bg-black/40"
+          // `open` (non-modal) never renders ::backdrop — that needs
+          // showModal(), which jsdom doesn't implement. Keep it declarative and
+          // drop the dead backdrop utility rather than ship a class that no-ops.
+          className="fixed inset-0 z-50 m-auto max-w-sm rounded-md border border-border bg-card p-6 text-fg shadow-lg"
         >
           <h2 id="ios-install-title" className="mb-3 font-serif text-xl">
             Add Parachute Notes to your home screen

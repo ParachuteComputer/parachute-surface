@@ -27,10 +27,23 @@
 
 ### Fixed
 
+- **Drafts are pinned to their vault.** The draft of a note (or a new-note
+  compose session) now keys to the vault it started in, captured at mount — so
+  switching the active vault mid-edit via the header switcher can't move or
+  clobber a draft under a different vault's key.
+- **Disconnecting a vault clears its drafts.** `removeVault` now wipes every
+  `notes:draft:<vaultId>:*` entry, so no plaintext note content lingers after a
+  vault (and its token) are gone.
+- **Explicit discards clear the draft.** Cancelling with "discard unsaved
+  changes", and the conflict banner's "Reload latest (discard my edits)", both
+  clear the local draft — so a discarded edit can't resurface as a false
+  "restore?" offer.
 - **Install prompt is single-use (PR #182 follow-up).** The deferred
   `beforeinstallprompt` event is now cleared after ANY outcome (accepted or
   dismissed) with the prompt call wrapped in try/catch — a retry after a
   dismiss can no longer silently no-op against a spent event.
+- The iOS install dialog drops a dead `::backdrop` utility that a non-modal
+  `<dialog open>` never renders.
 
 ## [0.1.18] - 2026-07-09
 

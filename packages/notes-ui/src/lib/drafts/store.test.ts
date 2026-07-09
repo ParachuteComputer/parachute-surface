@@ -1,5 +1,14 @@
+import { useVaultStore } from "@/lib/vault/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type DraftBody, bodyEquals, clearDraft, draftKey, loadDraft, saveDraft } from "./store";
+import {
+  type DraftBody,
+  bodyEquals,
+  clearDraft,
+  clearVaultDrafts,
+  draftKey,
+  loadDraft,
+  saveDraft,
+} from "./store";
 
 const body = (over: Partial<DraftBody> = {}): DraftBody => ({
   content: "hello",
@@ -41,6 +50,40 @@ describe("draft store", () => {
     saveDraft("v1", "new", body());
     clearDraft("v1", "new");
     expect(loadDraft("v1", "new")).toBeNull();
+  });
+
+  it("clearVaultDrafts removes every scope for a vault, leaving others intact", () => {
+    saveDraft("v1", "new", body({ content: "a" }));
+    saveDraft("v1", "note-7", body({ content: "b" }));
+    saveDraft("v2", "new", body({ content: "keep" }));
+    clearVaultDrafts("v1");
+    expect(loadDraft("v1", "new")).toBeNull();
+    expect(loadDraft("v1", "note-7")).toBeNull();
+    expect(loadDraft("v2", "new")?.body.content).toBe("keep");
+  });
+
+  it("removeVault() clears that vault's drafts (disconnect leaves no plaintext)", () => {
+    useVaultStore.setState({
+      vaults: {
+        gone: {
+          id: "gone",
+          url: "http://localhost:1940",
+          name: "gone",
+          issuer: "http://localhost:1940",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+      },
+      activeVaultId: "gone",
+    });
+    saveDraft("gone", "new", body({ content: "secret" }));
+    saveDraft("gone", "note-1", body({ content: "more secret" }));
+    useVaultStore.getState().removeVault("gone");
+    expect(loadDraft("gone", "new")).toBeNull();
+    expect(loadDraft("gone", "note-1")).toBeNull();
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
   });
 
   it("survives a corrupt blob or a wrong-shape body", () => {

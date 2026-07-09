@@ -70,7 +70,11 @@ type EditorPane = "edit" | "preview";
 function EditorSurface({ note }: { note: Note }) {
   const navigate = useNavigate();
   const pushToast = useToastStore((s) => s.push);
-  const vaultId = useVaultStore((s) => s.activeVaultId);
+  // Pin the note's vault at MOUNT. The header vault switcher can change the
+  // active vault mid-edit; keying the draft to the live active vault would move
+  // this note's draft under a different vault's key. The draft belongs to the
+  // vault the note lives in (notes#175 F1).
+  const vaultId = useRef(useVaultStore.getState().activeVaultId).current;
   const resolver = useMemo(() => buildWikilinkResolver(note), [note]);
   const [baseline, setBaseline] = useState<EditorState>(() => toEditorState(note));
   const [draft, setDraft] = useState<EditorState>(() => toEditorState(note));
@@ -208,8 +212,11 @@ function EditorSurface({ note }: { note: Note }) {
 
   const handleCancel = useCallback(() => {
     if (isDirty && !confirm("Discard unsaved changes?")) return;
+    // The user answered "discard" — drop the local draft too, or it would
+    // resurface as a false "restore?" offer on the next edit.
+    if (vaultId) clearDraft(vaultId, note.id);
     navigate(`/n/${encodeURIComponent(note.id)}`);
-  }, [isDirty, navigate, note.id]);
+  }, [isDirty, navigate, note.id, vaultId]);
 
   // Prevent tab close with unsaved edits.
   useEffect(() => {
@@ -347,6 +354,10 @@ function EditorSurface({ note }: { note: Note }) {
         <ConflictBanner
           conflict={conflict}
           onReload={() => {
+            // "Reload latest (discard my edits)" — clear the draft first, or the
+            // reloaded editor would immediately offer to restore the edits the
+            // user just chose to discard.
+            if (vaultId) clearDraft(vaultId, note.id);
             window.location.reload();
           }}
           onDismiss={() => setConflict(null)}

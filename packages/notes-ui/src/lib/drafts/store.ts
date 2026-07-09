@@ -81,6 +81,26 @@ export function clearDraft(vaultId: string, scope: string): void {
   }
 }
 
+/**
+ * Remove EVERY draft for a vault (all scopes) — called when a vault is
+ * disconnected so plaintext note content doesn't linger in localStorage after
+ * the vault (and its token) are gone. Prefix-scans; collects keys first, then
+ * removes, so we don't mutate the store mid-iteration.
+ */
+export function clearVaultDrafts(vaultId: string): void {
+  try {
+    const prefix = `${KEY_PREFIX}${vaultId}:`;
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) toRemove.push(key);
+    }
+    for (const key of toRemove) localStorage.removeItem(key);
+  } catch {
+    // best-effort only.
+  }
+}
+
 /** Value equality on the editable fields — used to decide whether a stored
  * draft actually differs from a baseline (server note, or a new-note's empty
  * default), so we don't offer to "restore" something identical. */

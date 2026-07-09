@@ -608,4 +608,40 @@ describe("NoteEditor — local draft persistence (notes#175)", () => {
     await waitFor(() => expect(screen.getByText("NoteViewPage:abc-123")).toBeInTheDocument());
     expect(loadDraft("dev", "abc-123")).toBeNull();
   });
+
+  it("clears the draft when Cancel is confirmed as discard (F3a)", async () => {
+    saveDraft("dev", "abc-123", { content: "junk", path: baseNote.path, tags: baseNote.tags });
+    installFetch({ "/api/notes": { body: baseNote } });
+    renderAt("/n/abc-123/edit");
+
+    await screen.findByTestId("cm-editor");
+    // confirm() is mocked to true in beforeEach → the user chose "discard".
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(loadDraft("dev", "abc-123")).toBeNull();
+  });
+
+  it("clears the draft when the conflict banner's 'Reload latest' is chosen (F3b)", async () => {
+    // clearDraft runs synchronously BEFORE window.location.reload() in the
+    // onReload handler; jsdom's real reload is a harmless no-op, so asserting the
+    // draft is gone after the click verifies the clear-before-reload ordering
+    // (can't spy on the non-configurable location.reload).
+    saveDraft("dev", "abc-123", { content: "pre", path: baseNote.path, tags: baseNote.tags });
+    installFetch({
+      "GET /api/notes": { body: baseNote },
+      "PATCH /api/notes/": {
+        status: 409,
+        body: { error: "conflict", current_updated_at: "2026-04-18T10:00:00Z" },
+      },
+    });
+    renderAt("/n/abc-123/edit");
+
+    const cm = (await screen.findByTestId("cm-editor")) as HTMLTextAreaElement;
+    fireEvent.change(cm, { target: { value: "my edit" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    });
+    const reloadBtn = await screen.findByRole("button", { name: /reload latest/i });
+    fireEvent.click(reloadBtn);
+    expect(loadDraft("dev", "abc-123")).toBeNull();
+  });
 });

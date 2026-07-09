@@ -13,6 +13,13 @@ describe("cloudConsoleUrl", () => {
     expect(cloudConsoleUrl("https://parachute.example.ts.net/vault/default")).toBeNull();
   });
 
+  it("does not match a look-alike host that merely contains the cloud host (F6)", () => {
+    // Exact-host map, so an attacker-controlled suffix/subdomain never opens the door.
+    expect(cloudConsoleUrl("https://myu.parachute.computer.evil.example/vault/x")).toBeNull();
+    expect(cloudConsoleUrl("https://u.parachute.computer.evil.example/vault/x")).toBeNull();
+    expect(cloudConsoleUrl("https://u.parachute.computer.evil.example")).toBeNull();
+  });
+
   it("returns null for a malformed URL", () => {
     expect(cloudConsoleUrl("not a url")).toBeNull();
   });

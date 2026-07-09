@@ -1321,6 +1321,60 @@ describe("NoteNew — local draft persistence (notes#175)", () => {
     localStorage.clear();
   });
 
+  it("pins the compose draft to the MOUNT vault across a mid-compose vault switch (F1)", () => {
+    useVaultStore.setState({
+      vaults: {
+        dev: {
+          id: "dev",
+          url: "http://localhost:1940",
+          name: "dev",
+          issuer: "http://localhost:1940",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+        other: {
+          id: "other",
+          url: "http://localhost:1941",
+          name: "other",
+          issuer: "http://localhost:1941",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-07-01T00:00:00.000Z",
+          lastUsedAt: "2026-07-01T00:00:00.000Z",
+        },
+      },
+      activeVaultId: "dev",
+    });
+    localStorage.setItem(
+      "lens:token:other",
+      JSON.stringify({ accessToken: "t", scope: "full", vault: "default" }),
+    );
+    installFetch({});
+    renderAt("/new");
+
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "belongs to A" } });
+    // pagehide forces an immediate flush (no debounce wait).
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(loadDraft("dev", "new")?.body.content).toBe("belongs to A");
+
+    // Switch the active vault WHILE the compose screen stays mounted.
+    act(() => {
+      useVaultStore.setState({ activeVaultId: "other" });
+    });
+    fireEvent.change(screen.getByTestId("cm-editor"), { target: { value: "still A's session" } });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    // B's compose key is never touched; A keeps its session.
+    expect(loadDraft("other", "new")).toBeNull();
+    expect(loadDraft("dev", "new")?.body.content).toBe("still A's session");
+  });
+
   it("restores a persisted compose-session draft and shows the banner", async () => {
     saveDraft("dev", "new", { content: "in-progress note", path: "Notes/wip", tags: ["ideas"] });
     installFetch({});
