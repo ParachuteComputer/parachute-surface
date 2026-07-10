@@ -1,0 +1,54 @@
+{
+  "name": "@openparachute/account-client",
+  "version": "0.1.0",
+  "description": "Browser-side SDK for the Parachute account/door contract — capability discovery, the cookie→account-token mint (held in memory), and vault lifecycle (list/create/delete/mint-token) against one door origin (Hub or Cloud).",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./account-client": {
+      "types": "./dist/account-client.d.ts",
+      "import": "./dist/account-client.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "gen-version": "bun scripts/gen-version.ts",
+    "prebuild": "bun scripts/gen-version.ts",
+    "build": "tsc",
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/account-client"
+  }
+}
