@@ -47,3 +47,19 @@ export const navigationDenylist: readonly RegExp[] = [
   /^\/unsubscribe/, // onboarding-drip one-click unsubscribe (GET/POST)
   /^\/health/, // liveness JSON
 ];
+
+// True when `pathname` matches some server-owned ceremony prefix above. This is
+// the exact predicate workbox applies for `navigateFallbackDenylist` (tested
+// against `url.pathname + url.search`), exported so the SPA route table can ask
+// the SAME question the service worker asks — the one source of truth. Its
+// second consumer is App.tsx's legacy bare-path note shim (`/:id`), which must
+// NOT redirect a ceremony-shaped path (`/login`, `/admin`, …) to a `/n/<id>`
+// note: once the app is served same-origin with the ceremonies (Phase 1,
+// parachute-cloud#116) the SW forwards such a path past the SPA to the real
+// server page, and the route table has to agree. Pass an origin-absolute path
+// (e.g. `window.location.pathname`); the check is mount-aware for free, since a
+// note literally named `login` served under a `/notes` or `/surface/<slug>`
+// mount sits at `/notes/login`, which matches nothing here.
+export function matchesNavigationDenylist(pathname: string): boolean {
+  return navigationDenylist.some((re) => re.test(pathname));
+}

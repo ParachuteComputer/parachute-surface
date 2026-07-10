@@ -13,6 +13,7 @@ import { useActiveVaultClient } from "@/lib/vault/queries";
 import { useReachabilityProbe } from "@/lib/vault/reachability-probe";
 import { QueryProvider } from "@/providers/QueryProvider";
 import { SyncProvider } from "@/providers/SyncProvider";
+import { matchesNavigationDenylist } from "@/pwa-navigation-denylist";
 import { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useParams, useSearchParams } from "react-router";
 import { Home } from "./routes/Home";
@@ -90,9 +91,26 @@ export function RouteFallback() {
 // `/<id>` and `/<id>/edit` — which the catch-all would otherwise bounce to
 // `/`. Redirect them to the canonical `/n/<id>` routes so old bookmarks
 // survive.
+//
+// One class of bare path must NOT be treated as a note: a ceremony-shaped path
+// (`/login`, `/admin`, `/console`, …). Once the app is served same-origin with
+// the auth/account ceremonies (Phase 1 — parachute-cloud#116) the service
+// worker forwards those paths past the SPA to the real server page (the
+// navigation denylist), so the route table has to agree — otherwise a note
+// bookmarked as bare `/login` would be redirected to `/n/login` on the SPA
+// side while a hard nav to the same URL lands on the ceremony, and the two
+// would disagree. The canonical `/n/<id>` form is unaffected (it never matches
+// the denylist), so a note literally named `login` stays reachable there. We
+// test `window.location.pathname` — the origin-absolute path the SW itself
+// evaluates — so the guard is mount-aware: under a `/notes` or `/surface/<slug>`
+// mount the same note sits at `/notes/login`, which is not a ceremony, and
+// still redirects. Only ordinary bare paths (`/MyNote`) keep the legacy shim.
 function NoteIdRedirect({ suffix = "" }: { suffix?: string }) {
   const { id } = useParams<{ id: string }>();
   if (!id) return <Navigate to="/" replace />;
+  if (matchesNavigationDenylist(window.location.pathname)) {
+    return <Navigate to="/" replace />;
+  }
   return <Navigate to={`/n/${encodeURIComponent(id)}${suffix}`} replace />;
 }
 

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { navigationDenylist } from "./pwa-navigation-denylist";
+import { matchesNavigationDenylist } from "./pwa-navigation-denylist";
 
-// Mirror workbox's NavigationRoute matching: it tests each denylist RegExp
-// against `url.pathname + url.search` and skips the SPA nav-fallback (lets the
-// request reach the origin) iff SOME entry matches.
-function isDenied(pathnameAndSearch: string): boolean {
-  return navigationDenylist.some((re) => re.test(pathnameAndSearch));
-}
+// The exported predicate is exactly what workbox applies for
+// `navigateFallbackDenylist` (each RegExp tested against `url.pathname +
+// url.search`; the request escapes the SPA nav-fallback iff SOME entry
+// matches). Testing it directly keeps the SW gate and App.tsx's bare-path note
+// shim on one implementation.
+const isDenied = matchesNavigationDenylist;
 
 describe("PWA navigation denylist", () => {
   // Every server-owned ceremony (identity worker route table,
@@ -79,5 +79,38 @@ describe("PWA navigation denylist", () => {
   it("keeps /oauth/callback SPA-owned while denying sibling /oauth ceremonies", () => {
     expect(isDenied("/oauth/callback")).toBe(false);
     expect(isDenied("/oauth/authorize")).toBe(true);
+  });
+
+  // Second consumer: App.tsx's legacy bare-path note shim (`/:id`) feeds the
+  // origin-absolute pathname through this same predicate to decide whether a
+  // bare path is a note or a server ceremony. Because the check is against the
+  // ORIGIN-ABSOLUTE path, it is mount-aware — a note literally named `login`
+  // collides with the ceremony ONLY at the root mount (Phase 1's same-origin
+  // app), never under a `/notes` or `/surface/<slug>` mount where it lives at
+  // `/notes/login`. Guards against a mount-blind guard that would wrongly stop
+  // resolving such notes on the self-hosted surfaces.
+  describe("bare-path note shim: origin-absolute mount-awareness", () => {
+    it("denies a ceremony-word bare path at the root mount (Phase 1 collision)", () => {
+      // `/login` served same-origin with the ceremony IS the ceremony — the
+      // SPA must not claim it as a note.
+      expect(isDenied("/login")).toBe(true);
+      expect(isDenied("/admin")).toBe(true);
+      expect(isDenied("/billing")).toBe(true);
+      expect(isDenied("/health")).toBe(true);
+    });
+
+    it("does NOT deny the same note under a /notes or /surface/<slug> mount", () => {
+      // A note named `login` bookmarked bare on a mounted host sits below the
+      // mount prefix — no ceremony collision, keep redirecting it to /n/login.
+      expect(isDenied("/notes/login")).toBe(false);
+      expect(isDenied("/notes/admin/edit")).toBe(false);
+      expect(isDenied("/surface/notes/login")).toBe(false);
+      expect(isDenied("/surface/my-notes/billing")).toBe(false);
+    });
+
+    it("does NOT deny an ordinary bare-path note that spells nothing special", () => {
+      expect(isDenied("/MyNote")).toBe(false);
+      expect(isDenied("/2026-07-10")).toBe(false);
+    });
   });
 });
