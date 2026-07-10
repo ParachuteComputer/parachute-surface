@@ -6,6 +6,7 @@ export * from "./cross-tab-sync";
 export * from "./discovery";
 export * from "./graph";
 export * from "./hub-discovery";
+export * from "./map-earned";
 export * from "./neighborhood";
 export * from "./note-query";
 export * from "./oauth";

@@ -25,6 +25,13 @@ function renderHeader() {
   );
 }
 
+function seedVault() {
+  useVaultStore.setState({
+    vaults: { a: makeVault({ id: "a", url: "http://localhost:1940", name: "default" }) },
+    activeVaultId: "a",
+  });
+}
+
 describe("Header vault label fallback", () => {
   beforeEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
@@ -75,12 +82,11 @@ describe("Header vault label fallback", () => {
   });
 });
 
-// Responsive structure tests (notes#136). JSDOM doesn't compute layout, but
-// these pin the class-name signal that drives the responsive break so a
-// future refactor that drops `lg:`-gated visibility, `flex-wrap`, or the
-// rem-based vault label cap is caught at the unit-test boundary instead of
-// resurfacing as the same UX bug.
-describe("Header responsive structure (notes#136)", () => {
+// Phase 3a: the header is now the mobile/tablet top bar only — the desktop
+// spine moved to the left Rail. The bar leads with the vault switcher (the
+// identity spine, D6), and Settings + the secondary destinations live one tap
+// off in the ⋯ menu now that the bottom bar is the 4-slot D6 set.
+describe("Header mobile shell (Phase 3a)", () => {
   beforeEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     global.fetch = vi.fn(
@@ -98,111 +104,45 @@ describe("Header responsive structure (notes#136)", () => {
     vi.restoreAllMocks();
   });
 
-  it("inline desktop cluster activates at lg (not md) so tablet widths use the menu", () => {
-    useVaultStore.setState({
-      vaults: { a: makeVault({ id: "a", url: "http://localhost:1940", name: "default" }) },
-      activeVaultId: "a",
-    });
-    renderHeader();
-    // The hamburger lives in a `lg:hidden` cluster — confirm `lg:` is the
-    // gate, not `md:` (the old gate that caused notes#136 brittleness).
-    const hamburger = screen.getByRole("button", { name: /open menu/i });
-    const mobileCluster = hamburger.parentElement;
-    expect(mobileCluster?.className).toContain("lg:hidden");
-    expect(mobileCluster?.className).not.toMatch(/\bmd:hidden\b/);
-  });
-
-  it("inline desktop cluster has flex-wrap so text-size scaling wraps instead of clipping", () => {
-    useVaultStore.setState({
-      vaults: { a: makeVault({ id: "a", url: "http://localhost:1940", name: "default" }) },
-      activeVaultId: "a",
-    });
+  it("is a mobile-only top bar (lg:hidden) — the Rail is the desktop spine", () => {
+    seedVault();
     const { container } = renderHeader();
-    // Find the hidden-until-lg cluster: it carries `hidden` + `lg:flex` so
-    // the row only mounts laid-out at desktop widths.
-    const desktopCluster = container.querySelector(".hidden.lg\\:flex");
-    expect(desktopCluster).not.toBeNull();
-    expect(desktopCluster?.className).toContain("flex-wrap");
+    const header = container.querySelector("header");
+    expect(header).not.toBeNull();
+    expect(header?.className).toContain("lg:hidden");
   });
 
-  it("vault popover trigger caps its width in rem so long names truncate", () => {
-    useVaultStore.setState({
-      vaults: {
-        a: makeVault({
-          id: "a",
-          url: "http://localhost:1940",
-          name: "a-very-long-vault-name-that-would-push-siblings-offscreen",
-        }),
-      },
-      activeVaultId: "a",
-    });
+  it("leads with the vault switcher when a vault is connected", () => {
+    seedVault();
     renderHeader();
-    const trigger = screen.getByRole("button", { name: /active vault:/i });
-    // rem-based cap (scales with text-size) + truncate so the label
-    // compresses before its siblings get pushed off-screen.
-    expect(trigger.className).toMatch(/max-w-\[\d+rem\]/);
-    const labelSpan = trigger.querySelector("span.truncate");
-    expect(labelSpan).not.toBeNull();
-    expect(labelSpan?.textContent).toContain("a-very-long-vault-name");
-  });
-});
-
-// The Layer-1 spine: the desktop cluster reduces to five load-bearing items,
-// with everything secondary one tap off in the ⋯ overflow.
-describe("Header five-item spine + overflow (Layer-1)", () => {
-  beforeEach(() => {
-    global.fetch = vi.fn(
-      async () =>
-        ({
-          ok: true,
-          status: 200,
-          json: async () => ({ vaults: [], services: [] }),
-        }) as Response,
-    ) as unknown as typeof fetch;
-    useVaultStore.setState({
-      vaults: { a: makeVault({ id: "a", url: "http://localhost:1940", name: "default" }) },
-      activeVaultId: "a",
-    });
+    expect(screen.getByRole("button", { name: /active vault: default/i })).toBeInTheDocument();
   });
 
-  afterEach(() => {
-    useVaultStore.setState({ vaults: {}, activeVaultId: null });
-    vi.restoreAllMocks();
-  });
-
-  it("renders the five-item spine when a vault is connected", () => {
+  it("shows the Parachute wordmark and the connect state when no vault", () => {
     renderHeader();
-    expect(screen.getByRole("link", { name: "Today" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "All notes" })).toHaveAttribute("href", "/all");
-    expect(screen.getByRole("link", { name: "Tags" })).toHaveAttribute("href", "/tags");
-    expect(screen.getByRole("link", { name: /\+ Capture/ })).toHaveAttribute("href", "/new");
-    expect(screen.getByRole("button", { name: /^search$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^parachute$/i })).toBeInTheDocument();
+    expect(screen.getByText(/no vault connected/i)).toBeInTheDocument();
   });
 
-  it("opens and closes the ⋯ overflow, which holds the secondary destinations", () => {
+  it("opens the ⋯ menu to Settings and the secondary destinations", () => {
+    seedVault();
     renderHeader();
-    const more = screen.getByRole("button", { name: /more/i });
-    expect(more).toHaveAttribute("aria-expanded", "false");
+    const menuButton = screen.getByRole("button", { name: /open menu/i });
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(more);
-    expect(more).toHaveAttribute("aria-expanded", "true");
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: "Graph" })).toHaveAttribute("href", "/graph");
-    expect(within(menu).getByRole("menuitem", { name: "Activity" })).toHaveAttribute(
+    fireEvent.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    const menu = document.getElementById("mobile-menu");
+    expect(menu).not.toBeNull();
+    const panel = within(menu as HTMLElement);
+    expect(panel.getByRole("link", { name: /settings/i })).toHaveAttribute("href", "/settings");
+    expect(panel.getByRole("link", { name: /connect your ai/i })).toHaveAttribute(
       "href",
-      "/activity",
+      "/connect",
     );
-    expect(within(menu).getByRole("menuitem", { name: "Calendar" })).toHaveAttribute(
-      "href",
-      "/calendar",
-    );
-    expect(within(menu).getByRole("menuitem", { name: "Import" })).toHaveAttribute(
-      "href",
-      "/import",
-    );
-
-    fireEvent.click(more);
-    expect(more).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(panel.getByRole("link", { name: /^map$/i })).toHaveAttribute("href", "/graph");
+    expect(panel.getByRole("link", { name: /activity/i })).toHaveAttribute("href", "/activity");
+    expect(panel.getByRole("link", { name: /calendar/i })).toHaveAttribute("href", "/calendar");
+    expect(panel.getByRole("link", { name: /import/i })).toHaveAttribute("href", "/import");
   });
 });
