@@ -18,6 +18,7 @@ import {
   useTags,
   useVaultStore,
 } from "@/lib/vault";
+import { cloudConsoleUrl } from "@/lib/vault";
 import {
   useAudioRetention,
   useRetentionChoiceMade,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/vault/audio-retention";
 import { useTranscriptionCapability } from "@/lib/vault/queries";
 import type { AudioRetention } from "@/lib/vault/types";
-import { useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router";
 
 // Per-vault settings UI. Sections stack top-to-bottom; add more as the
@@ -44,10 +45,11 @@ export function Settings() {
         </nav>
         <h1 className="font-serif text-2xl tracking-tight md:text-3xl">Settings</h1>
         <p className="mt-1 text-sm text-fg-muted">
-          Configuring <span className="text-fg">{activeVault.name}</span>.
+          Everything about <span className="text-fg">{activeVault.name}</span>, in one place.
         </p>
       </header>
 
+      <ManageSection vaultUrl={activeVault.url} />
       <ImportSection />
       <VoiceRetentionSection vaultId={activeVault.id} />
       <TextSizeSection />
@@ -55,6 +57,90 @@ export function Settings() {
       <TagRolesSection vaultId={activeVault.id} />
       <InstallStateSection />
     </div>
+  );
+}
+
+// The dissolved console (SYNTHESIS D5): Settings is where the console's
+// surface area comes home. Connections and Vaults live on both doors; Account
+// and Plan & Billing are cloud-only and link out to the console FOR NOW — an
+// honest door, clearly labelled, swapped for in-app management when the
+// `/account/*` contract lands (Phase 3b). Self-host shows neither: there's no
+// billing and no separate account there (account ≡ operator ≡ box), so we
+// paint no grey ghost — the rows simply don't exist.
+function ManageSection({ vaultUrl }: { vaultUrl: string }) {
+  const consoleUrl = cloudConsoleUrl(vaultUrl);
+  const isCloud = consoleUrl !== null;
+  return (
+    <section aria-label="Manage" className="mb-8">
+      <h2 className="eyebrow mb-3">Manage</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ManageCard
+          to="/connect"
+          title="Connections"
+          description="Connect Claude, ChatGPT, or any MCP client to this vault."
+        />
+        <ManageCard
+          to="/vaults"
+          title="Vaults"
+          description="Add a vault, switch between them, or export."
+        />
+        {isCloud ? (
+          <>
+            <ManageCard
+              href={consoleUrl}
+              title="Account"
+              description="Manage your account and sign-in on the console."
+            />
+            <ManageCard
+              href={consoleUrl}
+              title="Plan & Billing"
+              description="Your plan, usage, and payment — on the console."
+            />
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+// A settings link-card. Internal destinations use `to` (client route);
+// external doors (the console) use `href` and carry a "↗" so the hop off the
+// app is honest, not disguised.
+function ManageCard({
+  to,
+  href,
+  title,
+  description,
+}: {
+  to?: string;
+  href?: string;
+  title: string;
+  description: string;
+}) {
+  const body: ReactNode = (
+    <>
+      <p className="flex items-center gap-1.5 font-medium text-fg">
+        {title}
+        {href ? (
+          <span aria-hidden className="text-xs text-fg-dim">
+            ↗
+          </span>
+        ) : null}
+      </p>
+      <p className="mt-0.5 text-sm text-fg-muted">{description}</p>
+    </>
+  );
+  if (href) {
+    return (
+      <a href={href} className="focus-ring card p-4 transition-colors hover:border-accent">
+        {body}
+      </a>
+    );
+  }
+  return (
+    <Link to={to ?? "/"} className="focus-ring card p-4 transition-colors hover:border-accent">
+      {body}
+    </Link>
   );
 }
 
@@ -250,7 +336,7 @@ function InstallStateSection() {
         <span className="mr-2 inline-block rounded-full bg-[--color-positive-soft] px-2 py-0.5 text-xs font-medium text-[--color-positive]">
           Installed
         </span>
-        Parachute Notes is running as an installed app on this device.
+        Parachute is running as an installed app on this device.
       </p>
     </section>
   );

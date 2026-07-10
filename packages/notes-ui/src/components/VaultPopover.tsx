@@ -98,11 +98,14 @@ export function buildVaultPopoverRows(
 
 interface VaultPopoverProps {
   /**
-   * Render variant. `header` is the desktop dropdown anchored to the trigger;
-   * `inline` is the mobile menu where the popover sits in flow (no float, no
-   * absolute positioning).
+   * Render variant.
+   *   - `header` — the mobile/tablet dropdown anchored to the trigger.
+   *   - `inline` — the mobile menu where the popover sits in flow (no float).
+   *   - `rail`   — the desktop left-rail identity switcher: a full-width card
+   *                with a glyph + the vault name (the identity spine at the top
+   *                of the rail), its panel dropping full-width beneath it.
    */
-  variant?: "header" | "inline";
+  variant?: "header" | "inline" | "rail";
 }
 
 export function VaultPopover({ variant = "header" }: VaultPopoverProps) {
@@ -215,7 +218,9 @@ export function VaultPopover({ variant = "header" }: VaultPopoverProps) {
       className={
         variant === "header"
           ? "absolute right-0 z-30 mt-2 w-72 rounded-md border border-border bg-card text-sm shadow-lg"
-          : "mt-2 w-full rounded-md border border-border bg-card text-sm"
+          : variant === "rail"
+            ? "absolute inset-x-0 z-30 mt-2 rounded-md border border-border bg-card text-sm shadow-lg"
+            : "mt-2 w-full rounded-md border border-border bg-card text-sm"
       }
     >
       {connectedRows.length > 0 ? (
@@ -307,6 +312,40 @@ export function VaultPopover({ variant = "header" }: VaultPopoverProps) {
       </div>
     </div>
   );
+
+  // The rail switcher is the identity spine at the top of the desktop rail:
+  // a full-width card with a glyph square carrying the vault's initial + its
+  // name. Threads the vault name into the rail exactly where Neil put it.
+  if (variant === "rail") {
+    const initial = (triggerLabel.trim()[0] ?? "?").toUpperCase();
+    return (
+      <div ref={rootRef} className="relative">
+        <button
+          type="button"
+          aria-label={`Active vault: ${triggerLabel}`}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          onClick={() => setOpen((v) => !v)}
+          title={triggerLabel}
+          className="focus-ring flex w-full items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 py-2 text-left shadow-sm hover:border-accent/50"
+        >
+          <span
+            aria-hidden
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[--color-coral-soft] font-round text-sm font-semibold text-[--color-coral-ink]"
+          >
+            {initial}
+          </span>
+          <span className="min-w-0 flex-1 truncate font-round font-semibold text-fg">
+            {triggerLabel}
+          </span>
+          <span aria-hidden className="shrink-0 text-xs text-fg-dim">
+            ▾
+          </span>
+        </button>
+        {open ? panel : null}
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className={variant === "header" ? "relative max-w-full" : ""}>

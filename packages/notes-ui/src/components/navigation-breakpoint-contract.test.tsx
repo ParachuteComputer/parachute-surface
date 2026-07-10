@@ -1,24 +1,22 @@
 import { BottomTabBar } from "@/components/BottomTabBar";
-import { Header } from "@/components/Header";
-import { useQuickSwitchOpen } from "@/lib/quick-switch/open-store";
+import { Rail } from "@/components/Rail";
 import { useVaultStore } from "@/lib/vault/store";
 import type { VaultRecord } from "@/lib/vault/types";
-import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { type RenderResult, act, render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Contract test (notes#147): the primary-navigation cluster in Header
-// (desktop) and BottomTabBar (mobile + tablet) MUST share the same
-// breakpoint and meet without a gap. Header's desktop inline cluster is
-// gated `hidden lg:flex` (only visible at >= lg); BottomTabBar is
-// `lg:hidden` (visible until >= lg). At any viewport width, exactly one
-// renders. The earlier shipping pair was `md:hidden` + `lg:flex` which left
-// the 768-1023px band without primary nav — that's the regression this
-// test exists to prevent.
+// Contract test (notes#147, re-homed to Rail↔BottomTabBar in Phase 3a): the
+// primary-navigation surface on desktop (the left Rail) and on mobile+tablet
+// (the BottomTabBar) MUST share the same breakpoint and meet without a gap.
+// The Rail is `hidden lg:flex` (only visible at >= lg); the BottomTabBar is
+// `lg:hidden` (visible until >= lg). At any viewport width exactly one shows.
+// The failure mode this guards is one side drifting to `md:` — that leaves the
+// 768-1023px band with no primary navigation.
 //
-// JSDOM can't compute layout, so the assertion is at the class-name level:
-// the two components must use the same `lg` breakpoint, opposite
-// directions, with no gap.
+// JSDOM can't compute layout, so the assertion is at the class-name level.
 
 function makeVault(partial: Partial<VaultRecord> & Pick<VaultRecord, "id" | "url">): VaultRecord {
   return {
@@ -39,18 +37,31 @@ function seedActiveVault() {
   });
 }
 
-describe("Header + BottomTabBar breakpoint contract (notes#147)", () => {
+// The Rail reads react-query data (setup-checklist signal), so it needs a
+// client in scope. Retry off so the stubbed 200 settles immediately; async +
+// act so the settled query doesn't leave a pending state update.
+async function renderWithClient(ui: ReactNode): Promise<RenderResult> {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let result!: RenderResult;
+  await act(async () => {
+    result = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </QueryClientProvider>,
+    );
+  });
+  return result;
+}
+
+describe("Rail + BottomTabBar breakpoint contract (notes#147)", () => {
   beforeEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
-    useQuickSwitchOpen.setState({ open: false });
-    // Stub fetch so Header's VaultPopover well-known fetcher doesn't
-    // escape into a real network call during render.
     global.fetch = vi.fn(
       async () =>
         ({
           ok: true,
           status: 200,
-          json: async () => ({ vaults: [], services: [] }),
+          json: async () => ({ notes: [], vaults: [], services: [] }),
         }) as Response,
     ) as unknown as typeof fetch;
     seedActiveVault();
@@ -58,54 +69,34 @@ describe("Header + BottomTabBar breakpoint contract (notes#147)", () => {
 
   afterEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
-    useQuickSwitchOpen.setState({ open: false });
     vi.restoreAllMocks();
   });
 
-  it("BottomTabBar hides at lg+ and Header desktop cluster shows at lg+ — same gate, opposite direction, no gap", () => {
-    const { container: headerContainer } = render(
-      <MemoryRouter>
-        <Header />
-      </MemoryRouter>,
-    );
-    const { container: tabBarContainer } = render(
-      <MemoryRouter>
-        <BottomTabBar />
-      </MemoryRouter>,
-    );
+  it("Rail shows at lg+ and BottomTabBar hides at lg+ — same gate, opposite direction, no gap", async () => {
+    const { container: railContainer } = await renderWithClient(<Rail />);
+    const { container: barContainer } = await renderWithClient(<BottomTabBar />);
 
-    // Header's desktop inline cluster: `hidden lg:flex` (renders at >= lg).
-    const desktopCluster = headerContainer.querySelector(".hidden.lg\\:flex");
-    expect(desktopCluster, "Header desktop cluster (.hidden.lg:flex) must exist").not.toBeNull();
+    // The Rail's root <aside> is `hidden lg:flex` (renders at >= lg).
+    const rail = railContainer.querySelector("aside");
+    expect(rail, "Rail <aside> must render when a vault is active").not.toBeNull();
+    expect(rail?.className).toMatch(/\bhidden\b/);
+    expect(rail?.className).toMatch(/\blg:flex\b/);
 
     // BottomTabBar's primary nav: `lg:hidden` (renders at < lg).
-    const tabBarNav = tabBarContainer.querySelector('nav[aria-label="Primary"]');
-    expect(tabBarNav, "BottomTabBar primary nav must exist when a vault is active").not.toBeNull();
-    expect(tabBarNav?.className).toMatch(/\blg:hidden\b/);
+    const bar = barContainer.querySelector('nav[aria-label="Primary"]');
+    expect(bar, "BottomTabBar primary nav must exist when a vault is active").not.toBeNull();
+    expect(bar?.className).toMatch(/\blg:hidden\b/);
 
-    // The hard contract: neither side may use `md:` for the visibility
-    // gate. If one drifts to `md` while the other stays at `lg`, the
-    // 768-1023px band loses primary navigation entirely.
-    expect(desktopCluster?.className).not.toMatch(/\bmd:flex\b/);
-    expect(desktopCluster?.className).not.toMatch(/\bmd:hidden\b/);
-    expect(tabBarNav?.className).not.toMatch(/\bmd:hidden\b/);
-    expect(tabBarNav?.className).not.toMatch(/\bmd:flex\b/);
+    // The hard contract: neither side may use `md:` for the visibility gate.
+    expect(rail?.className).not.toMatch(/\bmd:flex\b/);
+    expect(rail?.className).not.toMatch(/\bmd:hidden\b/);
+    expect(bar?.className).not.toMatch(/\bmd:hidden\b/);
+    expect(bar?.className).not.toMatch(/\bmd:flex\b/);
   });
 
-  it("Header mobile hamburger cluster also uses lg:hidden (stays visible at tablet widths alongside the BottomTabBar)", () => {
-    const { container } = render(
-      <MemoryRouter>
-        <Header />
-      </MemoryRouter>,
-    );
-
-    // The hamburger button's parent cluster is `lg:hidden` — together with
-    // the BottomTabBar's `lg:hidden`, the mobile+tablet primary-nav
-    // surface area is consistent.
-    const hamburger = container.querySelector('button[aria-label="Open menu"]');
-    expect(hamburger).not.toBeNull();
-    const mobileCluster = hamburger?.parentElement;
-    expect(mobileCluster?.className).toContain("lg:hidden");
-    expect(mobileCluster?.className).not.toMatch(/\bmd:hidden\b/);
+  it("Rail renders nothing with no active vault (the no-vault desktop view is full-width Landing)", async () => {
+    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    const { container } = await renderWithClient(<Rail />);
+    expect(container.querySelector("aside")).toBeNull();
   });
 });

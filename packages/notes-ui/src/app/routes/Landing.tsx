@@ -12,10 +12,10 @@ export function Landing() {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-20 text-center">
-      <p className="mb-8 font-serif text-xl italic text-fg-muted">
-        The default frontend for Parachute.
+      <p className="mb-6 font-serif text-xl italic text-fg-muted">
+        A soft place for your thoughts to land.
       </p>
-      <h1 className="mb-4 font-serif text-5xl tracking-tight">Notes</h1>
+      <h1 className="mb-4 font-serif text-5xl tracking-tight">Parachute</h1>
 
       {/* Hold back the CTA while probing so we don't flash "Connect a vault"
           and then swap it for "Looks like there's a vault at ..." once the

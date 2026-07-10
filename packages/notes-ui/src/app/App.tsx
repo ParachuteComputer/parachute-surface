@@ -1,6 +1,8 @@
+import { AmbientMapFab } from "@/components/AmbientMapFab";
 import { BottomTabBar } from "@/components/BottomTabBar";
 import { Header } from "@/components/Header";
 import { QuickSwitchMount } from "@/components/QuickSwitchMount";
+import { Rail } from "@/components/Rail";
 import { TextSizeShortcutsMount } from "@/components/TextSizeControl";
 import { Toaster } from "@/components/Toaster";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -135,6 +137,13 @@ export function App() {
   useEffect(() => {
     applyTextSize(readStoredTextSize());
   }, []);
+  // Thread the active vault's name through the document title (Neil's trick —
+  // the vault name is the identity everywhere). "Parachute — {vault}" with a
+  // vault, plain "Parachute" without. index.html seeds the bare "Parachute".
+  const activeVaultName = useVaultStore((s) => s.getActiveVault()?.name ?? null);
+  useEffect(() => {
+    document.title = activeVaultName ? `Parachute — ${activeVaultName}` : "Parachute";
+  }, [activeVaultName]);
   return (
     <QueryProvider>
       <SyncProvider>
@@ -148,63 +157,84 @@ export function App() {
           for the detector + the design rationale.
         */}
         <BrowserRouter basename={detectMountBase()}>
-          <div className="app-canvas min-h-dvh overflow-x-hidden text-fg pb-16 md:pb-0">
+          <div className="app-canvas min-h-dvh overflow-x-hidden text-fg">
             <Toaster />
             <UpdateBanner />
             <VaultStatusBanner />
-            <Header />
-            <QuickSwitchMount />
-            <main>
-              <Suspense fallback={<RouteFallback />}>
-                <Routes>
-                  <Route path="/" element={<NotesIndex />} />
-                  <Route path="/all" element={<Notes />} />
-                  {/*
+            {/*
+              The shell: a left Rail (desktop spine, hidden lg:flex) beside the
+              content column. Below lg the Rail collapses and the mobile Header
+              + BottomTabBar carry navigation. `pb-16 lg:pb-0` keeps content
+              clear of the fixed bottom bar on mobile only.
+            */}
+            <div className="lg:flex">
+              <Rail />
+              <div className="flex min-w-0 flex-1 flex-col pb-16 lg:pb-0">
+                <Header />
+                <QuickSwitchMount />
+                <main className="flex-1">
+                  <Suspense fallback={<RouteFallback />}>
+                    <Routes>
+                      <Route path="/" element={<NotesIndex />} />
+                      <Route path="/all" element={<Notes />} />
+                      {/*
                     The four built-in views are filters inside /all now (a
                     ?view= chip), not their own routes. Old bookmarks redirect
                     into the filtered list so links keep working.
                   */}
-                  <Route path="/pinned" element={<Navigate to="/all?view=pinned" replace />} />
-                  <Route path="/archived" element={<Navigate to="/all?view=archived" replace />} />
-                  <Route path="/untagged" element={<Navigate to="/all?view=untagged" replace />} />
-                  <Route path="/orphaned" element={<Navigate to="/all?view=orphaned" replace />} />
-                  <Route path="/tags" element={<Tags />} />
-                  <Route path="/new" element={<NoteNew />} />
-                  {/*
+                      <Route path="/pinned" element={<Navigate to="/all?view=pinned" replace />} />
+                      <Route
+                        path="/archived"
+                        element={<Navigate to="/all?view=archived" replace />}
+                      />
+                      <Route
+                        path="/untagged"
+                        element={<Navigate to="/all?view=untagged" replace />}
+                      />
+                      <Route
+                        path="/orphaned"
+                        element={<Navigate to="/all?view=orphaned" replace />}
+                      />
+                      <Route path="/tags" element={<Tags />} />
+                      <Route path="/new" element={<NoteNew />} />
+                      {/*
                     Capture and New were split surfaces pre-2026-05-27. Unified
                     into NoteNew per Aaron's "serious pass": one creation
                     screen with title up front, voice as an affordance.
                     Legacy `/capture` bookmarks redirect into the new flow.
                   */}
-                  <Route path="/capture" element={<Navigate to="/new" replace />} />
-                  <Route path="/import" element={<Import />} />
-                  <Route path="/connect" element={<ConnectAI />} />
-                  <Route path="/graph" element={<VaultGraph />} />
-                  <Route path="/today" element={<Today />} />
-                  <Route path="/calendar" element={<Calendar />} />
-                  <Route path="/activity" element={<Activity />} />
-                  <Route path="/n/:id" element={<NoteView />} />
-                  <Route path="/n/:id/edit" element={<NoteEditor />} />
-                  <Route path="/:id" element={<NoteIdRedirect />} />
-                  <Route path="/:id/edit" element={<NoteIdRedirect suffix="/edit" />} />
-                  <Route path="/add" element={<AddVault />} />
-                  <Route path="/oauth/callback" element={<OAuthCallback />} />
-                  <Route path="/vaults" element={<Vaults />} />
-                  <Route path="/settings" element={<Settings />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Suspense>
-            </main>
+                      <Route path="/capture" element={<Navigate to="/new" replace />} />
+                      <Route path="/import" element={<Import />} />
+                      <Route path="/connect" element={<ConnectAI />} />
+                      <Route path="/graph" element={<VaultGraph />} />
+                      <Route path="/today" element={<Today />} />
+                      <Route path="/calendar" element={<Calendar />} />
+                      <Route path="/activity" element={<Activity />} />
+                      <Route path="/n/:id" element={<NoteView />} />
+                      <Route path="/n/:id/edit" element={<NoteEditor />} />
+                      <Route path="/:id" element={<NoteIdRedirect />} />
+                      <Route path="/:id/edit" element={<NoteIdRedirect suffix="/edit" />} />
+                      <Route path="/add" element={<AddVault />} />
+                      <Route path="/oauth/callback" element={<OAuthCallback />} />
+                      <Route path="/vaults" element={<Vaults />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </Suspense>
+                </main>
+                <footer className="mx-auto max-w-5xl px-6 py-10 text-center text-sm text-fg-dim">
+                  <p>
+                    Part of the{" "}
+                    <a href="https://parachute.computer" className="text-accent hover:underline">
+                      Parachute Computer
+                    </a>{" "}
+                    ecosystem. AGPL-3.0.
+                  </p>
+                </footer>
+              </div>
+            </div>
             <BottomTabBar />
-            <footer className="mx-auto max-w-5xl px-6 py-10 text-center text-sm text-fg-dim">
-              <p>
-                Part of the{" "}
-                <a href="https://parachute.computer" className="text-accent hover:underline">
-                  Parachute Computer
-                </a>{" "}
-                ecosystem. AGPL-3.0.
-              </p>
-            </footer>
+            <AmbientMapFab />
           </div>
         </BrowserRouter>
       </SyncProvider>

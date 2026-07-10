@@ -31,7 +31,7 @@ function renderAt(path: string) {
   );
 }
 
-describe("BottomTabBar", () => {
+describe("BottomTabBar (D6 four-slot)", () => {
   beforeEach(() => {
     useVaultStore.setState({ vaults: {}, activeVaultId: null });
     useQuickSwitchOpen.setState({ open: false });
@@ -43,17 +43,21 @@ describe("BottomTabBar", () => {
     useQuickSwitchOpen.setState({ open: false });
   });
 
-  it("renders Today, Tags, New, Search, Settings tabs when a vault is active", () => {
+  it("renders Home · Notes · [+] · Search when a vault is active (D6 slots)", () => {
     renderAt("/");
     const nav = screen.getByRole("navigation", { name: /primary/i });
-    expect(within(nav).getByLabelText(/^today$/i)).toBeInTheDocument();
-    expect(within(nav).getByLabelText(/^tags$/i)).toBeInTheDocument();
-    // The "+ Capture" / "+ New" tab is the unified create entry point —
-    // labeled "New" since 2026-05-27 (notes-ui unified create + tag
-    // schemas pass).
-    expect(within(nav).getByLabelText(/^new$/i)).toBeInTheDocument();
+    expect(within(nav).getByLabelText(/^home$/i)).toBeInTheDocument();
+    expect(within(nav).getByLabelText(/^notes$/i)).toBeInTheDocument();
+    // The centre capture action (the raised + disc).
+    expect(within(nav).getByLabelText(/new note/i)).toBeInTheDocument();
     expect(within(nav).getByLabelText(/search/i)).toBeInTheDocument();
-    expect(within(nav).getByLabelText(/settings/i)).toBeInTheDocument();
+  });
+
+  it("no longer carries Tags or Settings tabs (they moved off the bottom bar)", () => {
+    renderAt("/");
+    const nav = screen.getByRole("navigation", { name: /primary/i });
+    expect(within(nav).queryByLabelText(/^tags$/i)).toBeNull();
+    expect(within(nav).queryByLabelText(/^settings$/i)).toBeNull();
   });
 
   it("does not render when no active vault", () => {
@@ -62,32 +66,27 @@ describe("BottomTabBar", () => {
     expect(screen.queryByRole("navigation", { name: /primary/i })).toBeNull();
   });
 
-  it("is hidden on lg+ viewports via lg:hidden class (matches Header desktop-cluster lg:flex gate — notes#147)", () => {
+  it("is hidden on lg+ viewports via lg:hidden class (matches the Rail's lg:flex gate — notes#147)", () => {
     renderAt("/");
     const nav = screen.getByRole("navigation", { name: /primary/i });
     expect(nav.className).toMatch(/\blg:hidden\b/);
-    // Guard against regressing back to `md:hidden` — at 768-1023px that
-    // would hide BottomTabBar while Header's desktop cluster (lg:flex) is
-    // still hidden too, leaving tablet users with no primary navigation.
+    // Guard against regressing back to `md:hidden` — at 768-1023px that would
+    // hide the bar while the Rail (lg:flex) is still hidden too, leaving
+    // tablet users with no primary navigation.
     expect(nav.className).not.toMatch(/\bmd:hidden\b/);
   });
 
-  it("marks the Today tab active on /", () => {
+  it("marks Home active on / and on a note (/n/:id stays under Home)", () => {
     renderAt("/");
-    const today = screen.getByLabelText(/^today$/i);
-    expect(today).toHaveAttribute("aria-current", "page");
-  });
-
-  it("marks the Tags tab active on /tags", () => {
-    renderAt("/tags");
-    const tags = screen.getByLabelText(/^tags$/i);
-    expect(tags).toHaveAttribute("aria-current", "page");
-  });
-
-  it("keeps Today tab active on /n/:id (reading a note is still under Today)", () => {
+    expect(screen.getByLabelText(/^home$/i)).toHaveAttribute("aria-current", "page");
     renderAt("/n/abc");
-    const today = screen.getByLabelText(/^today$/i);
-    expect(today).toHaveAttribute("aria-current", "page");
+    const homes = screen.getAllByLabelText(/^home$/i);
+    expect(homes.some((el) => el.getAttribute("aria-current") === "page")).toBe(true);
+  });
+
+  it("marks Notes active on /all", () => {
+    renderAt("/all");
+    expect(screen.getByLabelText(/^notes$/i)).toHaveAttribute("aria-current", "page");
   });
 
   it("opens the quick-switch via the Search tab", () => {
@@ -97,9 +96,8 @@ describe("BottomTabBar", () => {
     expect(useQuickSwitchOpen.getState().open).toBe(true);
   });
 
-  it("New tab navigates to /new (the unified create surface)", () => {
+  it("the centre + navigates to /new (the unified create surface)", () => {
     renderAt("/");
-    const newTab = screen.getByLabelText(/^new$/i);
-    expect(newTab).toHaveAttribute("href", "/new");
+    expect(screen.getByLabelText(/new note/i)).toHaveAttribute("href", "/new");
   });
 });

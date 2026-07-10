@@ -40,14 +40,14 @@ export function InstallPrompt() {
           className="fixed inset-0 z-50 m-auto max-w-sm rounded-md border border-border bg-card p-6 text-fg shadow-lg"
         >
           <h2 id="ios-install-title" className="mb-3 font-serif text-xl">
-            Add Parachute Notes to your home screen
+            Add Parachute to your home screen
           </h2>
           <ol className="mb-5 list-decimal space-y-2 pl-5 text-sm text-fg-muted">
             <li>Tap the Share icon in Safari's toolbar.</li>
             <li>
               Choose <strong className="text-fg">Add to Home Screen</strong>.
             </li>
-            <li>Tap Add. Parachute Notes will open standalone from your home screen.</li>
+            <li>Tap Add. Parachute will open standalone from your home screen.</li>
           </ol>
           {activeVaultUrl ? (
             <div className="mb-5 rounded-md border border-border bg-bg-soft/60 p-3">

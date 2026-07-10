@@ -1,5 +1,52 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.2.0] - 2026-07-10
+
+### Changed — the Parachute app shell: rail IA, rename, Neil's air (Phase 3a)
+
+The visible transformation of the app into the synthesized design (Parachute
+App campaign — parachute-cloud#116; SYNTHESIS D4/D5/D6 + Neil's prototype).
+Frontend only — no new backend, no auth/OAuth/storage-key changes. The door
+contract (`/account/*`) lands separately in Phase 3b.
+
+- **The rename (D4).** The app's face is now **Parachute**, not "Parachute
+  Notes": the PWA manifest `name` ("Parachute Notes"→"Parachute") and
+  `short_name` ("Notes"→"Parachute"), the document `<title>` (now threaded live
+  as `Parachute — {vault}`), the no-vault landing wordmark, and the
+  install/update copy. "Notes" survives only as the **All-notes view label**.
+  The manifest `id`/`start_url`/`scope`, every `lens:*` / IndexedDB / OPFS
+  storage key, and the OAuth `client_name` stay **frozen** — the rename is
+  display-only and re-keys no installed PWA or stored data.
+- **The desktop left Rail (D5, prototype scene 6).** The top nav-spine is
+  replaced by a left rail: the **vault switcher** at the top (the identity
+  spine — the vault name leads everything), a Search affordance, **Your notes**
+  (Today · All notes · Tags), a **Set up** shelf that shares the Home
+  checklist's state and collapses to a ✓ when done, and **Settings** pinned to
+  the foot. Generous whitespace and calm density — Neil's air, our tokens.
+- **The Map earns its slot (D5).** No day-1 Map room. The Map appears in the
+  rail only once the vault crosses a real-graph threshold (≥2 connected vaults
+  or ≥15 linked notes, read cache-only — no new fetch). Until then it lives as
+  an **ambient FAB** bottom-right that opens the existing vault graph; once
+  earned, the FAB steps back to `lg:hidden` (the phone keeps it, the desktop
+  rail carries the row).
+- **The phone shell (D6).** The bottom tab bar becomes the four-slot D6 set —
+  **Home · Notes · [ + ] · Search** — with the centre + a raised capture disc,
+  not a peer tab. Settings left the bottom bar for the header ⋯ menu (the
+  dissolved console is a room, not a tab). The mobile header now leads with the
+  vault switcher (identity spine), matching D6.
+- **The Settings shell (D5 — the dissolved console).** A **Manage** section
+  brings the console's surface home: **Connections** and **Vaults** on both
+  doors; **Account** and **Plan & Billing** on cloud vaults only, linking out to
+  the console for now (an honest, clearly-labelled door — swapped for in-app
+  management when the `/account/*` contract lands). Self-host shows neither and
+  paints no grey ghost.
+- **Copy voice.** Neil-calm on the surfaces touched ("Welcome aboard", "a soft
+  place for your thoughts to land").
+- **Tests follow the IA honestly.** The Header/BottomTabBar/breakpoint tests are
+  updated to the new shell (the notes#147 gap contract is re-homed to
+  Rail↔BottomTabBar), and new tests cover the Rail, the ambient FAB, and the
+  Map earned-threshold.
+
 ## [0.1.23] - 2026-07-10
 
 ### Fixed — bare-path note route no longer collides with ceremony paths (#189)

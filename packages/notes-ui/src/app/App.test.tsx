@@ -26,9 +26,9 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the Parachute Notes wordmark and the connect CTA when no vaults exist", async () => {
+  it("renders the Parachute wordmark and the connect CTA when no vaults exist", async () => {
     render(<App />);
-    expect(screen.getByRole("link", { name: /parachute notes/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^parachute$/i })).toBeInTheDocument();
     // Home holds back the CTA until the origin probe settles to avoid
     // flashing "Connect a vault" before swapping to "Looks like there's a
     // vault at …". Wait for the probe to resolve before asserting the CTA.
@@ -44,7 +44,7 @@ describe("App", () => {
     // stripping the external prefix, the internal path is "/" and the index
     // dispatcher (Home for no vault) renders. The URL must stay /notes/, not
     // become /notes/notes.
-    expect(screen.getByRole("link", { name: /parachute notes/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^parachute$/i })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/notes/");
   });
 
@@ -107,7 +107,7 @@ describe("App", () => {
     // a horizontal scroller. jsdom doesn't compute layout, so this is a
     // class-presence check, not a measured scrollWidth assertion — the
     // manual-testing steps live in the PR body.
-    const shell = screen.getByRole("link", { name: /parachute notes/i }).closest("div.min-h-dvh");
+    const shell = screen.getByRole("link", { name: /^parachute$/i }).closest("div.min-h-dvh");
     expect(shell).not.toBeNull();
     expect(shell?.className).toMatch(/\boverflow-x-hidden\b/);
   });

@@ -88,8 +88,8 @@ function Masthead({ vaultName, mode }: { vaultName: string; mode: "fresh" | "ret
         <>
           <h1 className="page-title">Welcome aboard.</h1>
           <p className="mt-3 text-fg-muted">
-            This is your vault — a home for your notes that any AI can read and write. A few small
-            steps and it's yours.
+            This is your soft place to land — a home for your notes that any AI can read and write.
+            A few small steps and it's yours.
           </p>
         </>
       ) : (
@@ -121,7 +121,7 @@ function QuickActions({ installAvailable }: { installAvailable: boolean }) {
         <div className="card flex items-center justify-between gap-3 p-4">
           <div className="min-w-0">
             <p className="font-medium text-fg">Install the app</p>
-            <p className="mt-0.5 text-sm text-fg-muted">Add Notes to your home screen.</p>
+            <p className="mt-0.5 text-sm text-fg-muted">Add Parachute to your home screen.</p>
           </div>
           <InstallPrompt />
         </div>
@@ -169,7 +169,7 @@ const STEP_COPY: Record<HomeStepId, { title: string; description: string; to?: s
   },
   install: {
     title: "Install the app",
-    description: "Add Notes to your home screen for one-tap capture.",
+    description: "Add Parachute to your home screen for one-tap capture.",
   },
 };
 

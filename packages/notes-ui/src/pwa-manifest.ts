@@ -7,10 +7,15 @@ export function buildPwaManifest(base = "/"): Partial<ManifestOptions> {
   const normalized = base.endsWith("/") ? base : `${base}/`;
   return {
     id: normalized,
-    name: "Parachute Notes",
-    short_name: "Notes",
+    // The app's face is "Parachute" (D4; the naming decision Aaron ratified).
+    // "Notes" survives only as the All-notes VIEW label, never the product
+    // name. The `id`/`start_url`/`scope` below stay pinned to the base path —
+    // renaming the manifest name is display-only and does NOT re-key the
+    // installed PWA (those three are the install identity; leave them frozen).
+    name: "Parachute",
+    short_name: "Parachute",
     description:
-      "The default frontend for Parachute. Browse, edit, and capture in any Parachute Vault.",
+      "Your notes, and a soft place for your thoughts to land. Browse, edit, and capture in any Parachute Vault.",
     // New-brand pass (0.1.21): coral accent + warm paper, mirroring the CSS
     // token values (--color-accent / --color-bg light theme).
     theme_color: "#bf4a2a",
