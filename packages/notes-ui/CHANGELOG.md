@@ -1,5 +1,33 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.22] - 2026-07-09
+
+### Fixed — SW navigation denylist covers the full ceremony set (P0.3)
+
+Prep for serving the SPA same-origin with the auth/account ceremonies
+(`app.parachute.computer`, the Parachute App campaign — parachute-cloud#116).
+
+- **The workbox `navigateFallbackDenylist` grew from 3 prefixes to the full
+  server-ceremony set.** Today only `/api/`, `/oauth/`, `/.well-known/` were
+  kept off the SPA nav fallback. Those three were enough while the ceremonies
+  lived on a different origin (`cloud.parachute.computer`) — the installed
+  service worker never saw them. At one origin, an un-denied navigation to a
+  ceremony (`/login`, `/console`, `/billing/checkout`, …) would be swallowed by
+  the SW and painted as the cached SPA shell instead of the real server page.
+  The denylist now mirrors the identity worker's route table: `/api/`, `/oauth/`
+  (except the callback, below), `/.well-known/`, `/signup`, `/login`, `/logout`,
+  `/auth/`, `/console`, `/admin`, `/account/`, `/billing`, `/unsubscribe`,
+  `/health`.
+- **`/oauth/callback` stays SPA-owned.** It is the SPA's own PKCE redirect
+  target (`App.tsx`), not a worker route — a negative-lookahead
+  (`/^\/oauth\/(?!callback)/`) denies the worker's `/oauth/*` ceremonies while
+  letting the callback boot the cached shell (even offline / cache-first).
+- Inert on `notes.parachute.computer` today (these prefixes 404 there anyway);
+  ships as a normal notes-ui release. The prefix set + the callback exception
+  are extracted to `src/pwa-navigation-denylist.ts` with a unit test asserting
+  both directions (every ceremony denied; every SPA route — including
+  `/oauth/callback` and `/n/<ceremony-word>` note ids — never denied).
+
 ## [0.1.21] - 2026-07-09
 
 ### Changed — new-brand pass: system fonts, coral accent, warm paper

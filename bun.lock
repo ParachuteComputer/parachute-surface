@@ -104,7 +104,7 @@
     },
     "packages/notes-ui": {
       "name": "@openparachute/notes-ui",
-      "version": "0.1.21",
+      "version": "0.1.22",
       "dependencies": {
         "@codemirror/commands": "^6.10.3",
         "@codemirror/lang-markdown": "^6.5.0",
