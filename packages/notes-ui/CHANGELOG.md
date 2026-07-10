@@ -1,5 +1,33 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.2.1] - 2026-07-10
+
+### Fixed — the arrival fork: Create your Parachute / connect your own (Phase 3b)
+
+The no-vault Landing is the product's front door, and on `app.parachute.computer`
+it was misfiring: a self-origin probe offered "Looks like there's a vault at
+https://app.parachute.computer" with a Connect button — but that origin is the
+identity worker (a **door**), not a vault, so Connect led to a confusing
+failure. (surface#193; SYNTHESIS D10; campaign parachute-cloud#116.)
+
+- **Killed the self-origin misdetection.** The Landing no longer presents its
+  own serving origin as a connectable vault. It never renders a probed origin as
+  a fact ("there's a vault at …") — a door is not a vault.
+- **Honest door detection.** On mount the no-vault Landing probes its OWN
+  origin's `/.well-known/oauth-authorization-server` (issuer discovery — live on
+  `app.parachute.computer`, 404 on `notes.parachute.computer`'s static host).
+  The probe is cached for the page session and fails quiet (any error →
+  treated as not-a-door). This is narrower than the connect probe: own-origin
+  only, no `<meta parachute-hub>` and no loopback fallback.
+- **The fork (D10).** When a door is serving the Landing, it offers **"Create
+  your Parachute"** (coral primary — a full-page nav to the same-origin
+  `/signup` ceremony) and a quiet **"I already have a vault"** → the existing
+  connect-by-URL flow. When no door is serving (static host), connect-by-URL
+  leads, exactly as before but without the self-origin offer.
+- **Untouched:** the connected-vault flows, the `?add=` deep-link arrival, and
+  the shell. `useOriginVaultProbe` (still used by the connect form's URL
+  prefill) is unchanged; the door probe is a separate, focused helper.
+
 ## [0.2.0] - 2026-07-10
 
 ### Changed — the Parachute app shell: rail IA, rename, Neil's air (Phase 3a)

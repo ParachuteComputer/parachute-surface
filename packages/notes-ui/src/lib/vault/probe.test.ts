@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { probeForIssuer, probeIssuerAtOrigin, shouldTryLocalHubFallback } from "./probe";
+import {
+  probeForIssuer,
+  probeIssuerAtOrigin,
+  probeOwnOriginIsDoor,
+  shouldTryLocalHubFallback,
+} from "./probe";
 
 const validMetadata = {
   issuer: "http://localhost:1939",
@@ -104,6 +109,59 @@ describe("shouldTryLocalHubFallback", () => {
 
   it("is false for malformed input", () => {
     expect(shouldTryLocalHubFallback("not a url")).toBe(false);
+  });
+});
+
+describe("probeOwnOriginIsDoor", () => {
+  it("is true when the origin answers valid issuer discovery (a door)", async () => {
+    // app.parachute.computer / a self-hosted hub: the origin IS an issuer.
+    const fetchImpl = routedFetch({
+      "https://app.parachute.computer/.well-known/oauth-authorization-server": {
+        json: validMetadata,
+      },
+    });
+    expect(await probeOwnOriginIsDoor("https://app.parachute.computer", 500, fetchImpl)).toBe(true);
+  });
+
+  it("is false when the origin 404s discovery (a static host, not a door)", async () => {
+    // notes.parachute.computer on GitHub Pages: no issuer metadata.
+    const fetchImpl = routedFetch({
+      "/.well-known/oauth-authorization-server": { ok: false, status: 404 },
+    });
+    expect(await probeOwnOriginIsDoor("https://notes.parachute.computer", 500, fetchImpl)).toBe(
+      false,
+    );
+  });
+
+  it("is false when discovery network-errors (fail-quiet)", async () => {
+    const fetchImpl = routedFetch({
+      "/.well-known/oauth-authorization-server": "network-error",
+    });
+    expect(await probeOwnOriginIsDoor("https://app.parachute.computer", 500, fetchImpl)).toBe(
+      false,
+    );
+  });
+
+  it("is false when the origin serves a 200 that isn't valid issuer metadata", async () => {
+    const fetchImpl = routedFetch({
+      "/.well-known/oauth-authorization-server": {
+        json: { ...validMetadata, code_challenge_methods_supported: ["plain"] },
+      },
+    });
+    expect(await probeOwnOriginIsDoor("https://app.parachute.computer", 500, fetchImpl)).toBe(
+      false,
+    );
+  });
+
+  it("probes the OWN origin only — no loopback fallback (unlike probeForIssuer)", async () => {
+    // A door detector must not phone a *different* issuer; it answers strictly
+    // "is THIS origin a door." The mock throws on any URL but the own-origin one.
+    const fetchImpl = routedFetch({
+      "http://localhost:1942/.well-known/oauth-authorization-server": { ok: false, status: 404 },
+    });
+    expect(await probeOwnOriginIsDoor("http://localhost:1942", 500, fetchImpl)).toBe(false);
+    const calls = fetchImpl.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes("127.0.0.1:1939"))).toBe(false);
   });
 });
 
