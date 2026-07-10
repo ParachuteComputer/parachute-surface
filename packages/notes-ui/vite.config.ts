@@ -7,6 +7,7 @@ import { VitePWA } from "vite-plugin-pwa";
 import { buildServiceInfo, infoEndpointPlugin } from "./scripts/info-endpoint-plugin";
 import { notesServicePlugin } from "./scripts/notes-service-plugin";
 import { buildPwaManifest } from "./src/pwa-manifest";
+import { navigationDenylist } from "./src/pwa-navigation-denylist";
 
 // Set VITE_EXPOSE=true to bind the dev server to all interfaces and accept any
 // Host header — useful when reaching the dev server over a tailnet. Off by default.
@@ -118,8 +119,10 @@ export default defineConfig({
       manifest: buildPwaManifest(basePath),
       workbox: {
         navigateFallback: `${basePath}index.html`,
-        // Keep vault API + OAuth off the nav fallback so they error cleanly offline.
-        navigateFallbackDenylist: [/^\/api\//, /^\/oauth\//, /^\/\.well-known\//],
+        // Keep the server-owned auth/account ceremonies off the SPA nav fallback
+        // so the installed SW never swallows a navigation to them (load-bearing
+        // once the SPA is served same-origin — see pwa-navigation-denylist.ts).
+        navigateFallbackDenylist: [...navigationDenylist],
         globPatterns: ["**/*.{js,css,html,svg,png,ico,webmanifest}"],
         // No runtimeCaching: fonts are system stacks now (0.1.21 brand pass), so
         // there's nothing external to cache. The old google-fonts rule was dead.
