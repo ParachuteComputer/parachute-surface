@@ -185,4 +185,33 @@ describe("App", () => {
       expect(window.location.pathname).toBe("/notes/settings");
     });
   });
+
+  it("bare-path note that spells a ceremony word still resolves under the /notes mount (no false-bail, #189)", async () => {
+    // Mount-awareness guard: `/notes/login` is NOT the origin ceremony
+    // `/login`, so the bare-path shim keeps redirecting it to the canonical
+    // note route. A mount-blind guard that bailed on the bare segment `login`
+    // would wrongly stop resolving a note literally named `login` on every
+    // self-hosted (`/notes`, `/surface/<slug>`) surface. A vault is set so
+    // NoteView holds the URL instead of bouncing to the connect screen.
+    useVaultStore.setState({
+      vaults: {
+        v1: {
+          id: "v1",
+          url: "http://localhost:1940",
+          name: "default",
+          issuer: "http://localhost:1940",
+          clientId: "c",
+          scope: "full",
+          addedAt: "2026-04-20T00:00:00.000Z",
+          lastUsedAt: "2026-04-20T00:00:00.000Z",
+        },
+      },
+      activeVaultId: "v1",
+    });
+    window.history.replaceState({}, "", "/notes/login");
+    render(<App />);
+    return waitFor(() => {
+      expect(window.location.pathname).toBe("/notes/n/login");
+    });
+  });
 });

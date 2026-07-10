@@ -1,5 +1,37 @@
 # Changelog — @openparachute/notes-ui
 
+## [0.1.23] - 2026-07-10
+
+### Fixed — bare-path note route no longer collides with ceremony paths (#189)
+
+Follow-up to the P0.3 SW navigation denylist (0.1.22), closing the route-table
+half of the same Phase-1 hazard (`app.parachute.computer`, the Parachute App
+campaign — parachute-cloud#116).
+
+- **The legacy bare-path note shim (`/:id`, `/:id/edit`) no longer treats a
+  server-ceremony path as a note.** `NoteIdRedirect` bounces old pre-`/n/`
+  bookmarks to the canonical `/n/<id>` route. Once the SPA is served
+  same-origin with the auth/account ceremonies, a note bookmarked as bare
+  `/login`, `/admin`, `/console`, … would be forwarded by the service worker to
+  the real ceremony page on a hard nav, while the SPA's shim would have
+  redirected the same URL to a `/n/<id>` note — the two disagreeing. The shim
+  now consults the navigation denylist and, for a ceremony-shaped path, bails to
+  the index instead of manufacturing a shadow note.
+- **Kept, not retired.** The bare-path shim is preserved for every non-ceremony
+  bookmark (`/MyNote` → `/n/MyNote`) — notes-ui is a real-users surface and
+  nothing in-app generates bare-path links, so only the collision class is
+  removed, not the back-compat.
+- **Mount-aware by construction.** The check is against the origin-absolute
+  `window.location.pathname` — the exact path the service worker evaluates —
+  reusing `matchesNavigationDenylist` from `pwa-navigation-denylist.ts` as the
+  single source of truth. A note literally named `login` collides only at the
+  root mount (Phase 1's same-origin app); under a `/notes` or `/surface/<slug>`
+  mount it sits at `/notes/login`, matches nothing, and still resolves.
+- **The canonical `/n/<id>` note route is unaffected** — it never matches the
+  denylist, so a note that spells a ceremony word stays reachable there.
+- Inert on `notes.parachute.computer` today (no ceremonies at that origin);
+  load-bearing at one origin. Route-table change, no denylist change.
+
 ## [0.1.22] - 2026-07-09
 
 ### Fixed — SW navigation denylist covers the full ceremony set (P0.3)
