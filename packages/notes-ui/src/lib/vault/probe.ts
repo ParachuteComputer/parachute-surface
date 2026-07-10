@@ -123,6 +123,77 @@ export function shouldTryLocalHubFallback(pageOrigin: string): boolean {
   return true;
 }
 
+// ── "Am I served by a door?" ────────────────────────────────────────────────
+//
+// A DOOR (identity/issuer — cloud's `app.parachute.computer`, or a self-hosted
+// hub) answers OAuth issuer discovery at its OWN origin; a static surface host
+// (`notes.parachute.computer` on GitHub Pages) 404s it. That single fact is the
+// honest signal for "the account ceremony (`/signup`) lives on THIS origin," and
+// it is what the no-vault Landing forks on (D10): a door offers "Create your
+// Parachute"; a non-door leads with connect-by-URL.
+//
+// This is deliberately narrower than `probeForIssuer` above: it probes the OWN
+// origin ONLY — no `<meta parachute-hub>` and no loopback fallback, because
+// those find a *separate* issuer to connect to, which is a connect-by-URL
+// concern, not "is the origin serving me a door." Offering the app's own door
+// origin as a connectable vault is the misdetection this replaces (surface#193).
+
+export type DoorProbeStatus = "probing" | "door" | "not-door";
+
+// In-memory, per-page-load cache keyed by origin so re-mounts (e.g. returning
+// from `/add` via back) don't re-hit the network. Deliberately NOT
+// sessionStorage: a full reload should re-probe and self-heal, never persist a
+// transient failure into a wrongly-doorless Landing for the rest of the tab.
+const doorProbeCache = new Map<string, boolean>();
+
+/** Test-only: drop the door-probe cache between cases. */
+export function resetDoorProbeCache(): void {
+  doorProbeCache.clear();
+}
+
+// Does THIS origin serve an OAuth issuer (i.e. is it a door)? Reuses the same
+// validated discovery as the connect probe, so a bare 200 that isn't real
+// issuer metadata doesn't count. Fail-quiet: any error → not a door.
+export async function probeOwnOriginIsDoor(
+  origin: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  fetchImpl: typeof fetch = fetch.bind(globalThis),
+): Promise<boolean> {
+  const found = await probeIssuerAtOrigin(origin, timeoutMs, fetchImpl);
+  return found !== null;
+}
+
+// Probe the current window's origin once on mount (cached for the page session),
+// so the Landing can fork honestly on whether a door is serving it.
+export function useOwnOriginDoor(): DoorProbeStatus {
+  const [status, setStatus] = useState<DoorProbeStatus>(() => {
+    const cached = doorProbeCache.get(window.location.origin);
+    if (cached === undefined) return "probing";
+    return cached ? "door" : "not-door";
+  });
+
+  useEffect(() => {
+    const origin = window.location.origin;
+    const cached = doorProbeCache.get(origin);
+    if (cached !== undefined) {
+      setStatus(cached ? "door" : "not-door");
+      return;
+    }
+    let cancelled = false;
+    setStatus("probing");
+    probeOwnOriginIsDoor(origin).then((isDoor) => {
+      doorProbeCache.set(origin, isDoor);
+      if (cancelled) return;
+      setStatus(isDoor ? "door" : "not-door");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return status;
+}
+
 // Probe the current window's origin on mount, but skip if the user already has
 // vaults in storage — their choice is already made and a probe would just be
 // noise + a wasted request.

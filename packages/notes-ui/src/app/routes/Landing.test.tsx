@@ -1,9 +1,13 @@
 import { Landing } from "@/app/routes/Landing";
-import { useVaultStore } from "@/lib/vault/store";
+import { resetDoorProbeCache } from "@/lib/vault/probe";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// A valid OAuth authorization-server document — what a DOOR (identity/issuer)
+// answers at `/.well-known/oauth-authorization-server`. The `issuer` value need
+// not equal the probed origin: the probe returns the candidate origin, and
+// discovery validates the document's shape (S256, endpoints), not its host.
 const validMetadata = {
   issuer: "http://localhost:1940",
   authorization_endpoint: "http://localhost:1940/oauth/authorize",
@@ -35,7 +39,7 @@ function mockFetchOnce(response: {
   return impl;
 }
 
-function renderHome() {
+function renderLanding() {
   return render(
     <MemoryRouter initialEntries={["/"]}>
       <Routes>
@@ -46,86 +50,79 @@ function renderHome() {
   );
 }
 
-describe("Landing (no-vault) probe", () => {
+describe("Landing (no-vault) door fork", () => {
   beforeEach(() => {
-    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    // The door probe caches per origin for the page session; clear it so each
+    // case probes fresh with its own mocked response.
+    resetDoorProbeCache();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    useVaultStore.setState({ vaults: {}, activeVaultId: null });
+    resetDoorProbeCache();
   });
 
-  it("offers to connect to the detected origin when the probe succeeds", async () => {
+  it("offers the create/connect fork when a door is serving the origin", async () => {
     mockFetchOnce({ json: validMetadata });
-    renderHome();
+    renderLanding();
 
-    const connect = await screen.findByRole("link", { name: /^connect$/i });
-    expect(connect).toHaveAttribute(
-      "href",
-      `/add?url=${encodeURIComponent(window.location.origin)}`,
-    );
-    expect(screen.getByText(/looks like there's a vault at/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /or connect to a different vault/i })).toHaveAttribute(
+    // Primary: "Create your Parachute" is a plain full-page link to the
+    // same-origin `/signup` ceremony (not an SPA route).
+    const create = await screen.findByRole("link", { name: /create your parachute/i });
+    expect(create).toHaveAttribute("href", "/signup");
+
+    // Secondary: "I already have a vault" leads to the connect-by-URL flow.
+    expect(screen.getByRole("link", { name: /i already have a vault/i })).toHaveAttribute(
       "href",
       "/add",
     );
+
+    // The misdetection is gone: never present the serving origin as a vault.
+    expect(screen.queryByText(/looks like there's a vault/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^connect$/i })).not.toBeInTheDocument();
   });
 
-  it("falls back silently to the default CTA on network error", async () => {
-    mockFetchOnce({ throwNetwork: true });
-    renderHome();
-
-    await waitFor(() =>
-      expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
-    );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
-  });
-
-  it("falls back silently on 404", async () => {
+  it("leads with connect-by-URL and NEVER self-offers when the origin is not a door", async () => {
+    // notes.parachute.computer today: a static host, no issuer discovery (404).
     mockFetchOnce({ ok: false, status: 404 });
-    renderHome();
+    renderLanding();
 
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^connect a vault$/i })).toHaveAttribute(
+      "href",
+      "/add",
+    );
+
+    // Regression pin (surface#193): the serving origin is never offered as a
+    // vault, and the create fork does not appear off a non-door origin.
+    expect(screen.queryByText(/looks like there's a vault/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /create your parachute/i })).not.toBeInTheDocument();
   });
 
-  it("falls back silently when metadata is invalid", async () => {
+  it("treats a probe network error as not-a-door (fail-quiet → connect-by-URL)", async () => {
+    mockFetchOnce({ throwNetwork: true });
+    renderLanding();
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("link", { name: /create your parachute/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/looks like there's a vault/i)).not.toBeInTheDocument();
+  });
+
+  it("treats invalid issuer metadata as not-a-door", async () => {
+    // A 200 that isn't real issuer metadata (no S256) must not count as a door.
     mockFetchOnce({
       json: { ...validMetadata, code_challenge_methods_supported: ["plain"] },
     });
-    renderHome();
+    renderLanding();
 
     await waitFor(() =>
       expect(screen.getByRole("link", { name: /^connect a vault$/i })).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/looks like there's a vault at/i)).not.toBeInTheDocument();
-  });
-
-  it("does not probe when vaults are already in storage", async () => {
-    const fetchImpl = mockFetchOnce({ json: validMetadata });
-    useVaultStore.setState({
-      vaults: {
-        existing: {
-          id: "existing",
-          url: "http://localhost:1940",
-          name: "default",
-          issuer: "http://localhost:1940",
-          clientId: "c",
-          scope: "full",
-          addedAt: "2026-04-18T00:00:00.000Z",
-          lastUsedAt: "2026-04-18T00:00:00.000Z",
-        },
-      },
-      activeVaultId: "existing",
-    });
-    renderHome();
-    // Landing never redirects — App.tsx's NotesIndex dispatches to the guided
-    // Home when a vault is active and mounts Landing only when none is.
-    // Landing's job here is just: don't probe if there's already a vault.
-    await waitFor(() => expect(fetchImpl).not.toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: /create your parachute/i })).not.toBeInTheDocument();
   });
 });
