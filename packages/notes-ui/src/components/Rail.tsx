@@ -1,4 +1,13 @@
-import { IconCog, IconHome, IconMap, IconNotes, IconSearch, IconTag } from "@/components/NavIcons";
+import {
+  IconActivity,
+  IconCog,
+  IconHome,
+  IconMap,
+  IconNotes,
+  IconSearch,
+  IconTag,
+} from "@/components/NavIcons";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { VaultPopover } from "@/components/VaultPopover";
 import {
   type DerivedStep,
@@ -49,13 +58,18 @@ export function Rail() {
         <SetupShelf vaultId={vault.id} />
       </nav>
 
-      <div className="border-t border-border p-3">
-        <RailLink
-          to="/settings"
-          label="Settings"
-          icon={<IconCog />}
-          match={(p) => p === "/settings"}
-        />
+      <div className="flex items-center gap-2 border-t border-border p-3">
+        <div className="min-w-0 flex-1">
+          <RailLink
+            to="/settings"
+            label="Settings"
+            icon={<IconCog />}
+            match={(p) => p === "/settings"}
+          />
+        </div>
+        {/* Appearance lived in the old desktop ⋯ overflow; the rail foot is its
+            calm new home (a quiet icon, no label — Neil's air). */}
+        <ThemeToggle />
       </div>
     </aside>
   );
@@ -124,6 +138,14 @@ function NotesSection() {
       {mapEarned ? (
         <RailLink to="/graph" label="Map" icon={<IconMap />} match={(p) => p === "/graph"} />
       ) : null}
+      {/* Activity lost its desktop home when the ⋯ overflow went; a quiet room
+          here is its calm landing (the reflective "what happened" view). */}
+      <RailLink
+        to="/activity"
+        label="Activity"
+        icon={<IconActivity />}
+        match={(p) => p === "/activity"}
+      />
     </div>
   );
 }

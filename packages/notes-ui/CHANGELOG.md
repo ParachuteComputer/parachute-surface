@@ -20,9 +20,11 @@ contract (`/account/*`) lands separately in Phase 3b.
 - **The desktop left Rail (D5, prototype scene 6).** The top nav-spine is
   replaced by a left rail: the **vault switcher** at the top (the identity
   spine — the vault name leads everything), a Search affordance, **Your notes**
-  (Today · All notes · Tags), a **Set up** shelf that shares the Home
-  checklist's state and collapses to a ✓ when done, and **Settings** pinned to
-  the foot. Generous whitespace and calm density — Neil's air, our tokens.
+  (Today · All notes · Tags · Activity), a **Set up** shelf that shares the Home
+  checklist's state and collapses to a ✓ when done, and **Settings** + a quiet
+  **theme toggle** pinned to the foot. (Activity and appearance were the two
+  things the old desktop ⋯ overflow carried; the rail is their calm new home.)
+  Generous whitespace and calm density — Neil's air, our tokens.
 - **The Map earns its slot (D5).** No day-1 Map room. The Map appears in the
   rail only once the vault crosses a real-graph threshold (≥2 connected vaults
   or ≥15 linked notes, read cache-only — no new fetch). Until then it lives as

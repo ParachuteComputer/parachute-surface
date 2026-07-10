@@ -95,4 +95,13 @@ describe("Rail (desktop spine, Phase 3a)", () => {
     await renderRail();
     expect(screen.getByRole("link", { name: /^map$/i })).toHaveAttribute("href", "/graph");
   });
+
+  // Folded review nits (#192): things the old desktop ⋯ overflow carried that
+  // lost their desktop home — Activity gets a rail room, appearance gets the foot.
+  it("gives Activity a desktop room and the theme toggle a home in the foot", async () => {
+    seedVaults({ a: makeVault({ id: "a", url: "http://localhost:1940", name: "gardening" }) });
+    await renderRail();
+    expect(screen.getByRole("link", { name: /^activity$/i })).toHaveAttribute("href", "/activity");
+    expect(screen.getByRole("button", { name: /theme:/i })).toBeInTheDocument();
+  });
 });

@@ -71,6 +71,15 @@ export function IconCog(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// A pulse line — the Activity feed mark.
+export function IconActivity(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...BASE} aria-hidden="true" {...props}>
+      <path d="M3 12h4l2.5-6 4 13 2.5-7H21" />
+    </svg>
+  );
+}
+
 // A one-hub / three-satellite relational glyph — the Map mark.
 export function IconMap(props: SVGProps<SVGSVGElement>) {
   return (
