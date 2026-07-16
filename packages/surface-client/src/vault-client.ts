@@ -550,13 +550,29 @@ export class VaultClient {
   }
 
   /**
-   * Cursor-paginated variant. Vault's `/api/notes` accepts `cursor` +
-   * `limit` and returns `X-Next-Cursor` on the response. Consumers
-   * chain calls until `nextCursor` is undefined.
+   * Cursor-paginated variant. Vault's `/api/notes` cursor mode is
+   * PRESENCE-based (`?cursor=` set at all, even empty) — both doors agree
+   * (bun `src/routes.ts:1383-1394`, cloud `rest/notes.ts:256-268`): the
+   * bootstrap call (no watermark yet) still sends the bare `?cursor=`
+   * param, and every call in cursor mode answers the `{notes, next_cursor}`
+   * envelope in the JSON body. `X-Next-Cursor` is a cloud-only ADDITIVE
+   * mirror of that same body field (`rest/parse.ts:50-53`) — bun never
+   * emits it, so it can't be the primary read; this client reads the body
+   * and only falls back to the header when the body omits it.
+   *
+   * Cursor pagination forces ascending order by `updated_at` server-side
+   * (`core/src/notes.ts:1320-1338`), so `orderBy` or `sort: "desc"`
+   * alongside `cursor` always 400s (`INVALID_QUERY`) on both doors — this
+   * throws client-side instead of spending a round trip on a combination
+   * that can never succeed.
+   *
+   * Consumers chain calls (`cursor = nextCursor` from the prior page)
+   * until `nextCursor` is undefined.
    *
    * Implementation: drives the request through `requestCursorWithRetry`
    * which mirrors `requestWithRetry`'s 401/403 refresh-and-retry but
-   * preserves the Response so we can read the `X-Next-Cursor` header.
+   * preserves the Response so we can parse the envelope / fall back to
+   * the header.
    */
   async queryNotesCursor(
     params: NotesQueryInput,
@@ -564,7 +580,25 @@ export class VaultClient {
     limit?: number,
   ): Promise<{ items: Note[]; nextCursor?: string }> {
     const qs = toNotesSearchParams(params);
-    if (cursor) qs.set("cursor", cursor);
+    // Check the SERIALIZED wire keys, not the typed `NotesQuery` fields —
+    // `params` may also arrive as a raw `URLSearchParams | Record<string,
+    // string>` (the wire grammar's own `order_by`/`sort` spelling), and
+    // both forms funnel through `toNotesSearchParams` to the same keys.
+    if (qs.get("order_by") !== null) {
+      throw new Error(
+        "queryNotesCursor: `orderBy` is incompatible with cursor pagination — cursor mode always orders by updated_at ascending",
+      );
+    }
+    if (qs.get("sort") === "desc") {
+      throw new Error(
+        'queryNotesCursor: `sort: "desc"` is incompatible with cursor pagination — cursor mode requires ascending order',
+      );
+    }
+    // Bootstrap: the FIRST call has no watermark yet but must still set the
+    // param (empty string) to opt into cursor mode at all — omitting
+    // `cursor` entirely gets the legacy bare-array shape forever
+    // (vault#550's bootstrap fix; see the JSDoc above).
+    qs.set("cursor", cursor ?? "");
     if (typeof limit === "number") qs.set("limit", String(limit));
     const s = qs.toString();
     const path = `/api/notes${s ? `?${s}` : ""}`;
@@ -573,9 +607,10 @@ export class VaultClient {
 
   /**
    * Protected: cursor-paginated variant of `requestWithRetry` that preserves
-   * the Response so the `X-Next-Cursor` header survives the auth-retry path.
-   * Subclasses can call this directly when adding cursor-paginated
-   * domain-specific list endpoints.
+   * the Response so the `{notes, next_cursor}` envelope (and the cloud-only
+   * `X-Next-Cursor` fallback) survives the auth-retry path. Subclasses can
+   * call this directly when adding cursor-paginated domain-specific list
+   * endpoints.
    */
   protected async requestCursorWithRetry(
     path: string,
@@ -640,10 +675,29 @@ export class VaultClient {
       const text = await res.text();
       throw new Error(`GET ${path} failed (${res.status}): ${text}`);
     }
-    const items = (await res.json()) as Note[];
-    const headerCursor = res.headers.get("x-next-cursor") ?? undefined;
+    const body = (await res.json()) as unknown;
+    // Cursor mode always answers the `{notes, next_cursor}` envelope (both
+    // doors: bun `routes.ts:1729-1735`, cloud `notes.ts(c):379-383`) — this
+    // call always sets `?cursor=` so it's always in cursor mode. Guard the
+    // shape anyway rather than assume, so a server that ignores `cursor`
+    // degrades to a single final page instead of throwing on `.notes`.
+    let items: Note[];
+    let nextCursor: string | undefined;
+    if (body && typeof body === "object" && !Array.isArray(body) && "notes" in body) {
+      const envelope = body as { notes: Note[]; next_cursor?: string | null };
+      items = envelope.notes;
+      nextCursor = envelope.next_cursor ?? undefined;
+    } else {
+      items = body as Note[];
+    }
+    // `X-Next-Cursor` is a cloud-only additive mirror of the same body
+    // field (bun never emits it) — fallback only, body is authoritative.
+    if (!nextCursor) {
+      const headerCursor = res.headers.get("x-next-cursor") ?? undefined;
+      if (headerCursor) nextCursor = headerCursor;
+    }
     const out: { items: Note[]; nextCursor?: string } = { items };
-    if (headerCursor) out.nextCursor = headerCursor;
+    if (nextCursor) out.nextCursor = nextCursor;
     return out;
   }
 

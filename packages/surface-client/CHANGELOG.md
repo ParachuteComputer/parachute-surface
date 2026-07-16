@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.3.6] - 2026-07-16
+
+### Fixed — `queryNotesCursor` actually paginates (contract-drift brief §3)
+
+`queryNotesCursor` was broken against both doors in three compounding ways;
+pagination silently stopped after page 1 everywhere. Grounded against the
+real wire contract (bun `parachute-vault/src/routes.ts:1383-1394,1729-1735`,
+cloud `parachute-cloud/workers/vault/src/rest/notes.ts:256-268,379-383` +
+`rest/parse.ts:50-53`):
+
+- **Bootstrap gap** — the first call never sent `?cursor=` at all (only set
+  the param `if (cursor)`, and page 1 has no cursor yet). Cursor mode is
+  PRESENCE-based on both doors: an entirely-omitted `cursor` param gets the
+  legacy bare-array shape forever, so the first call could never obtain a
+  watermark. Fixed: every call now sets `cursor` (empty string on
+  bootstrap).
+- **Envelope not parsed** — once in cursor mode, both doors answer
+  `{notes, next_cursor}`, not a bare array; the old code cast the whole body
+  to `Note[]`, so `items` silently became a malformed non-array object.
+  Fixed: the body is parsed as the envelope, with a defensive fallback to a
+  bare array for a server that ignores `cursor` entirely.
+- **Wrong cursor source** — the old code read `X-Next-Cursor`, a header the
+  self-hosted bun vault never emits (only cloud mirrors the watermark into
+  it, additively). Fixed: `next_cursor` is read from the body first; the
+  header is now only a fallback for a response whose body omits it.
+- **New client-side guard** — cursor pagination forces ascending
+  `updated_at` order server-side, so `orderBy` or `sort: "desc"` alongside
+  `cursor` always 400s (`INVALID_QUERY`) on both doors
+  (`parachute-vault/core/src/notes.ts:1320-1338`). `queryNotesCursor` now
+  throws that error client-side instead of spending a round trip on a
+  combination that can never succeed.
+
+**Wire-visible**: `queryNotesCursor` requests now always carry a `cursor`
+query param (previously omitted on the bootstrap call) and its response
+parsing changed from "cast the body to `Note[]`" to "parse the
+`{notes, next_cursor}` envelope" — the public input/output *types* are
+unchanged (`{ items: Note[]; nextCursor?: string }`), but the runtime
+behavior of this one broken-in-practice method changes for anyone who was
+compensating for the old bugs. `queryNotes` (the non-cursor path) is
+untouched — same request shape, same bare-array response, byte-compatible.
+
+### Removed — stale `notes.parachute.computer` GitHub Pages deploy workflow
+
+`.github/workflows/deploy-notes-ui.yml` deployed `notes-ui` to GitHub Pages
+on every push to `main` touching `packages/notes-ui/**` or
+`packages/surface-client/**`. `notes.parachute.computer` is now a 301
+redirect worker on Cloudflare (`parachute-cloud/workers/notes-redirect`) —
+the GitHub Pages target is DNS-shadowed and unreachable, so the workflow was
+burning CI minutes deploying a bundle nothing can see. The `notes-ui`
+package itself is untouched; only the dead deploy job is gone.
+
 ## [0.3.5] - 2026-07-16
 
 ### Added — write-attribution fields on `Note` / `NoteSummary` (vault#298)
