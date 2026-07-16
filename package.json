@@ -19,7 +19,7 @@
     "test:render": "bun run --filter '@openparachute/surface-render' test",
     "test:admin": "bun run --filter '@openparachute/surface-admin-ui' test",
     "test:all": "bun run test && cd web/admin && bun run test",
-    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && cd ../account-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../notes-ui && tsc -b --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json && cd ../docs-editor && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-ingest && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-mcp && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && tsc -p tsconfig.test.json && cd ../account-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../notes-ui && tsc -b --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json && cd ../docs-editor && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-ingest && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-mcp && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
     "build:render": "bun run --filter '@openparachute/surface-render' build",
     "typecheck:admin": "cd web/admin && bun run typecheck",
     "typecheck:all": "bun run typecheck && bun run typecheck:admin",

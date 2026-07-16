@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-client",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Shared browser-side library for Parachute apps \u2014 OAuth (PKCE + DCR), vault REST client, token storage, service-worker reload helper, vault-id + runtime tenancy helpers.",
   "license": "AGPL-3.0",
   "type": "module",
@@ -61,7 +61,7 @@
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "@types/bun": "latest",

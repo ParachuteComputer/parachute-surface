@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.5] - 2026-07-16
+
+### Added — write-attribution fields on `Note` / `NoteSummary` (vault#298)
+
+The vault has carried write-attribution (`createdBy`/`createdVia`/`lastUpdatedBy`/
+`lastUpdatedVia`) on note responses since vault#298; the public `Note` and
+`NoteSummary` contracts didn't expose it yet, so consumers had no typed way to
+read it. Strictly additive — all four fields are optional `string | null`, so
+existing consumers and legacy notes (which carry `null`, predating attribution)
+are unaffected.
+
+- **`createdBy` / `createdVia`** — the principal + interface of the first write.
+- **`lastUpdatedBy` / `lastUpdatedVia`** — the principal + interface of the most
+  recent write.
+- These are **factual provenance fields only** — a surface that wants to render
+  a "human vs AI" distinction maps known principals to it separately; the
+  contract makes no such inference.
+- Compile-time contract fixture (`src/__tests__/vault-types.contract.test.ts`)
+  asserts the barrel's `Note`/`NoteSummary` accept the fields (string, `null`,
+  and omitted) and reject a wrong-typed value — wired into a new
+  `tsconfig.test.json` so `tsc` actually checks it (the build config excludes
+  `__tests__`), run from both this package's `typecheck` script and the root
+  `typecheck:all`.
+
 ## [0.3.4] - 2026-07-05
 
 ### Changed — live-query is now WebSocket-only (no SSE; the fallback is polling)

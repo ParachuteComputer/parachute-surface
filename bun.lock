@@ -177,7 +177,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.4",
+      "version": "0.3.5",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
