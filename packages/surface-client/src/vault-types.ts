@@ -60,6 +60,23 @@ export interface Note {
   path?: string;
   createdAt: string;
   updatedAt?: string;
+  /**
+   * Write-attribution (vault#298) — two axes of provenance, both nullable.
+   * `*By` is the principal (a JWT `sub`, or an operator / `token:<id>`
+   * label); `*Via` is the interface the write arrived through (`mcp`,
+   * `surface:<name>`, `agent:<id>`, `operator`/`cli`, `api`). The
+   * `created*` pair is set once at create; the `lastUpdated*` pair tracks
+   * the most recent mutating write. `null` = unknown / written before
+   * attribution existed (legacy rows) or by a path that carried no
+   * context — distinct from any real principal. These are FACTUAL
+   * provenance fields only — do not infer "human vs AI" from them; a
+   * surface that wants to render that distinction maps known principals
+   * to it separately.
+   */
+  createdBy?: string | null;
+  createdVia?: string | null;
+  lastUpdatedBy?: string | null;
+  lastUpdatedVia?: string | null;
   tags?: string[];
   metadata?: Record<string, unknown>;
   preview?: string;
@@ -75,6 +92,11 @@ export interface NoteSummary {
   tags?: string[];
   createdAt?: string;
   updatedAt?: string;
+  /** Write-attribution — see {@link Note.createdBy} for the full semantics. */
+  createdBy?: string | null;
+  createdVia?: string | null;
+  lastUpdatedBy?: string | null;
+  lastUpdatedVia?: string | null;
   metadata?: Record<string, unknown>;
 }
 

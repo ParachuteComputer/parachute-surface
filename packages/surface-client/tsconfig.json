@@ -1,5 +1,18 @@
 {
   "compilerOptions": {
+    // Build config (tsc → dist).
+    //
+    // Sibling config (comment-free JSON — biome treats non-standard
+    // tsconfig names as strict JSON):
+    // - tsconfig.test.json: noEmit typecheck of `__tests__/*.contract.test.ts`
+    //   only — compile-time-only fixtures (e.g. Note/NoteSummary attribution
+    //   type assertions) that this build config excludes from `dist` and
+    //   `bun test` alone can't verify (bun's transpiler strips types, it
+    //   doesn't typecheck). Deliberately narrow: the REST of `__tests__` has
+    //   never been under `tsc` and carries pre-existing type debt (stale
+    //   `.ts`-extension imports, drifted fixtures) — widening the glob to
+    //   the whole directory surfaces all of that unrelated to whatever
+    //   change motivated adding a `.contract.test.ts` file.
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "target": "ESNext",
     "module": "ESNext",
