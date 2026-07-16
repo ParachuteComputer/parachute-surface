@@ -13,7 +13,12 @@
  *   - 2xx → onReachability("healthy")
  *   - 409 → VaultConflictError
  *   - 409 target_exists → VaultTargetExistsError
- *   - queryNotesCursor: reads X-Next-Cursor; auth retry preserves cursor
+ *   - queryNotesCursor: bootstraps `?cursor=` on page 1, parses the
+ *     `{notes, next_cursor}` envelope, walks a full pagination loop that
+ *     terminates on an EMPTY page (next_cursor keeps advancing — it's a
+ *     resumable watermark, not a null terminator), falls back to
+ *     X-Next-Cursor only when the body omits next_cursor, rejects
+ *     cursor+orderBy/sort:"desc" client-side, auth retry preserves cursor
  */
 
 import { describe, expect, test } from "bun:test";
@@ -314,27 +319,141 @@ describe("VaultClient — error classes", () => {
 });
 
 describe("VaultClient — cursor pagination", () => {
-  test("queryNotesCursor reads X-Next-Cursor header", async () => {
+  test("queryNotesCursor bootstraps `?cursor=` on the first call (no cursor arg)", async () => {
+    let capturedUrl: string | undefined;
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
       fetchImpl: makeFetch([
-        () => jsonRes([{ id: "n1", createdAt: "x" }], 200, { "X-Next-Cursor": "abc123" }),
+        (url) => {
+          capturedUrl = url;
+          return jsonRes({ notes: [{ id: "n1", createdAt: "x" }], next_cursor: "w1" });
+        },
       ]),
     });
     const out = await c.queryNotesCursor({ tag: "x" }, undefined, 10);
+    const url = new URL(capturedUrl!);
+    // Presence, not truthiness: `cursor` must be SET (empty) on page 1, or
+    // both doors treat the call as non-cursor and answer a bare array
+    // forever (the bug this fix closes).
+    expect(url.searchParams.has("cursor")).toBe(true);
+    expect(url.searchParams.get("cursor")).toBe("");
     expect(out.items.length).toBe(1);
-    expect(out.nextCursor).toBe("abc123");
+    expect(out.nextCursor).toBe("w1");
   });
 
-  test("queryNotesCursor without next cursor returns undefined", async () => {
+  test("queryNotesCursor parses the {notes, next_cursor} envelope body", async () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
-      fetchImpl: makeFetch([() => jsonRes([{ id: "n1", createdAt: "x" }], 200, {})]),
+      fetchImpl: makeFetch([
+        () =>
+          jsonRes({
+            notes: [
+              { id: "n1", createdAt: "x" },
+              { id: "n2", createdAt: "y" },
+            ],
+            next_cursor: "abc123",
+          }),
+      ]),
+    });
+    const out = await c.queryNotesCursor({ tag: "x" }, undefined, 10);
+    expect(out.items.map((n) => n.id)).toEqual(["n1", "n2"]);
+    expect(out.nextCursor).toBe("abc123");
+  });
+
+  test("queryNotesCursor falls back to X-Next-Cursor only when the body omits next_cursor", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => jsonRes({ notes: [] }, 200, { "X-Next-Cursor": "from-header" })]),
     });
     const out = await c.queryNotesCursor({});
+    expect(out.nextCursor).toBe("from-header");
+  });
+
+  test("queryNotesCursor: body next_cursor wins over a stale X-Next-Cursor header", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        () =>
+          jsonRes({ notes: [], next_cursor: "from-body" }, 200, {
+            "X-Next-Cursor": "stale-header",
+          }),
+      ]),
+    });
+    const out = await c.queryNotesCursor({});
+    expect(out.nextCursor).toBe("from-body");
+  });
+
+  test("queryNotesCursor: an empty page still carries a REAL next_cursor — the resumable watermark, not a terminator", async () => {
+    // Neither door ever sends `next_cursor: null`. Core's `queryNotesPaged`
+    // (core/src/notes.ts:1741-1748) unconditionally encodes a watermark,
+    // HOLDING at the prior value on an empty page — the "since last
+    // checked" contract a caller polls against. `QueryNotesPage.next_cursor`
+    // is typed `string` (core/src/types.ts:327-330), never nullable.
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => jsonRes({ notes: [], next_cursor: "w1" })]),
+    });
+    const out = await c.queryNotesCursor({}, "w1");
+    expect(out.items.length).toBe(0);
+    expect(out.nextCursor).toBe("w1");
+  });
+
+  test("queryNotesCursor: next_cursor: null parses to undefined (defensive fallback — not a real wire shape)", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        () => jsonRes({ notes: [{ id: "n1", createdAt: "x" }], next_cursor: null }),
+      ]),
+    });
+    const out = await c.queryNotesCursor({}, "w1");
+    expect(out.items.length).toBe(1);
     expect(out.nextCursor).toBeUndefined();
+  });
+
+  test("queryNotesCursor: full pagination walk — page 1 (bootstrap) → page 2 (?cursor=w1) → drains on an empty page", async () => {
+    const urls: string[] = [];
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        (url) => {
+          urls.push(url);
+          return jsonRes({ notes: [{ id: "n1", createdAt: "x" }], next_cursor: "w1" });
+        },
+        (url) => {
+          urls.push(url);
+          return jsonRes({ notes: [{ id: "n2", createdAt: "y" }], next_cursor: "w2" });
+        },
+        (url) => {
+          urls.push(url);
+          // The real termination signal: an empty page. `next_cursor` is
+          // STILL a live watermark ("w2", not null) — a caller draining a
+          // one-shot page set stops on `items.length === 0` and persists
+          // this cursor to resume a later "since last checked" poll.
+          return jsonRes({ notes: [], next_cursor: "w2" });
+        },
+      ]),
+    });
+    const allItems: string[] = [];
+    let cursor: string | undefined;
+    let page = await c.queryNotesCursor({ tag: "x" }, cursor);
+    while (page.items.length > 0) {
+      allItems.push(...page.items.map((n) => n.id));
+      cursor = page.nextCursor;
+      page = await c.queryNotesCursor({ tag: "x" }, cursor);
+    }
+
+    expect(allItems).toEqual(["n1", "n2"]);
+    expect(page.nextCursor).toBe("w2");
+    expect(new URL(urls[0]!).searchParams.get("cursor")).toBe("");
+    expect(new URL(urls[1]!).searchParams.get("cursor")).toBe("w1");
+    expect(new URL(urls[2]!).searchParams.get("cursor")).toBe("w2");
   });
 
   test("queryNotesCursor 401 → onAuthError → retry preserves cursor", async () => {
@@ -346,7 +465,7 @@ describe("VaultClient — cursor pagination", () => {
         () => new Response("denied", { status: 401 }),
         (url) => {
           secondUrl = url;
-          return jsonRes([], 200, { "X-Next-Cursor": "next2" });
+          return jsonRes({ notes: [], next_cursor: "next2" });
         },
       ]),
       onAuthError: async () => "fresh",
@@ -355,6 +474,60 @@ describe("VaultClient — cursor pagination", () => {
     expect(out.nextCursor).toBe("next2");
     expect(secondUrl).toContain("cursor=cur1");
     expect(secondUrl).toContain("limit=5");
+  });
+
+  test("queryNotesCursor rejects `orderBy` (mutually exclusive with cursor server-side)", async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([]),
+    });
+    await expect(c.queryNotesCursor({ tag: "x", orderBy: "created_at" })).rejects.toThrow(
+      /orderBy/,
+    );
+  });
+
+  test('queryNotesCursor rejects `sort: "desc"` (mutually exclusive with cursor server-side)', async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([]),
+    });
+    await expect(c.queryNotesCursor({ tag: "x", sort: "desc" })).rejects.toThrow(/sort/);
+  });
+
+  test('queryNotesCursor allows `sort: "asc"` alongside cursor (the forced order, not a conflict)', async () => {
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => jsonRes({ notes: [], next_cursor: "w1" })]),
+    });
+    await expect(c.queryNotesCursor({ tag: "x", sort: "asc" })).resolves.toEqual({
+      items: [],
+      nextCursor: "w1",
+    });
+  });
+});
+
+describe("VaultClient — queryNotes (non-cursor) stays byte-compatible", () => {
+  test("queryNotes never sends a cursor param and returns the bare array unwrapped", async () => {
+    let capturedUrl: string | undefined;
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([
+        (url) => {
+          capturedUrl = url;
+          return jsonRes([
+            { id: "n1", createdAt: "x" },
+            { id: "n2", createdAt: "y" },
+          ]);
+        },
+      ]),
+    });
+    const out = await c.queryNotes({ tag: "x" });
+    expect(new URL(capturedUrl!).searchParams.has("cursor")).toBe(false);
+    expect(out.map((n) => n.id)).toEqual(["n1", "n2"]);
   });
 });
 

@@ -319,10 +319,12 @@ describe("VaultClient query methods accept NotesQuery", () => {
 
   test("queryNotesCursor merges cursor + limit onto a NotesQuery", async () => {
     const urls: string[] = [];
-    await clientCapturing(urls).queryNotesCursor({ tag: "#x", sort: "desc" }, "CURSOR123", 10);
+    // `sort` is omitted here (defaults to ascending) — `sort: "desc"`
+    // alongside `cursor` is mutually exclusive per the wire contract and is
+    // rejected client-side (see vault-client.test.ts's guard tests).
+    await clientCapturing(urls).queryNotesCursor({ tag: "#x" }, "CURSOR123", 10);
     const url = new URL(urls[0]!);
     expect(url.searchParams.get("tag")).toBe("#x");
-    expect(url.searchParams.get("sort")).toBe("desc");
     expect(url.searchParams.get("cursor")).toBe("CURSOR123");
     expect(url.searchParams.get("limit")).toBe("10");
   });
