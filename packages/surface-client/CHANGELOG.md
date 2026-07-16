@@ -32,6 +32,16 @@ cloud `parachute-cloud/workers/vault/src/rest/notes.ts:256-268,379-383` +
   throws that error client-side instead of spending a round trip on a
   combination that can never succeed.
 
+**Termination contract**: `next_cursor` is never null or absent on the
+wire — core's `queryNotesPaged` unconditionally encodes a watermark,
+advancing it across rows and holding it at the prior value on an empty
+page (`parachute-vault/core/src/notes.ts:1741-1748`; `QueryNotesPage`'s
+`next_cursor` is a non-nullable `string`). So `nextCursor` is a resumable
+"since last checked" watermark, not a finite-pagination end marker — stop
+draining when a page comes back with `items.length === 0`, not when
+`nextCursor` is falsy (it never will be). Always persist the last
+`nextCursor` you saw as your resume point.
+
 **Wire-visible**: `queryNotesCursor` requests now always carry a `cursor`
 query param (previously omitted on the bootstrap call) and its response
 parsing changed from "cast the body to `Note[]`" to "parse the

@@ -566,8 +566,15 @@ export class VaultClient {
    * throws client-side instead of spending a round trip on a combination
    * that can never succeed.
    *
-   * Consumers chain calls (`cursor = nextCursor` from the prior page)
-   * until `nextCursor` is undefined.
+   * **Termination**: `next_cursor` is never null/absent on the wire — core's
+   * `queryNotesPaged` (`core/src/notes.ts:1741-1748`) unconditionally
+   * encodes a watermark, ADVANCING it across rows and HOLDING it at the
+   * prior value on an empty page, so a caller can persist ONE cursor and
+   * keep polling ("since last checked"). That means `nextCursor` is a
+   * resumable watermark, not a finite-pagination end marker — **stop
+   * draining when a page comes back with `items.length === 0`**, not when
+   * `nextCursor` is falsy (it never will be). Always keep the last
+   * `nextCursor` you saw; it's your resume point for the next poll.
    *
    * Implementation: drives the request through `requestCursorWithRetry`
    * which mirrors `requestWithRetry`'s 401/403 refresh-and-retry but
@@ -686,6 +693,10 @@ export class VaultClient {
     if (body && typeof body === "object" && !Array.isArray(body) && "notes" in body) {
       const envelope = body as { notes: Note[]; next_cursor?: string | null };
       items = envelope.notes;
+      // Defensive, not a real wire shape: `next_cursor` is a non-nullable
+      // `string` on both doors (core/src/types.ts:327-330's
+      // `QueryNotesPage`) — it's never null or absent in practice. The `??
+      // undefined` just tolerates a malformed/future response gracefully.
       nextCursor = envelope.next_cursor ?? undefined;
     } else {
       items = body as Note[];

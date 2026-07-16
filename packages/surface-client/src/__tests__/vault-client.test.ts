@@ -14,8 +14,10 @@
  *   - 409 → VaultConflictError
  *   - 409 target_exists → VaultTargetExistsError
  *   - queryNotesCursor: bootstraps `?cursor=` on page 1, parses the
- *     `{notes, next_cursor}` envelope, walks a full pagination loop, falls
- *     back to X-Next-Cursor only when the body omits next_cursor, rejects
+ *     `{notes, next_cursor}` envelope, walks a full pagination loop that
+ *     terminates on an EMPTY page (next_cursor keeps advancing — it's a
+ *     resumable watermark, not a null terminator), falls back to
+ *     X-Next-Cursor only when the body omits next_cursor, rejects
  *     cursor+orderBy/sort:"desc" client-side, auth retry preserves cursor
  */
 
@@ -385,7 +387,23 @@ describe("VaultClient — cursor pagination", () => {
     expect(out.nextCursor).toBe("from-body");
   });
 
-  test("queryNotesCursor: final page (next_cursor: null) ends the loop", async () => {
+  test("queryNotesCursor: an empty page still carries a REAL next_cursor — the resumable watermark, not a terminator", async () => {
+    // Neither door ever sends `next_cursor: null`. Core's `queryNotesPaged`
+    // (core/src/notes.ts:1741-1748) unconditionally encodes a watermark,
+    // HOLDING at the prior value on an empty page — the "since last
+    // checked" contract a caller polls against. `QueryNotesPage.next_cursor`
+    // is typed `string` (core/src/types.ts:327-330), never nullable.
+    const c = new VaultClient({
+      vaultUrl: "http://vault.test",
+      accessToken: "t",
+      fetchImpl: makeFetch([() => jsonRes({ notes: [], next_cursor: "w1" })]),
+    });
+    const out = await c.queryNotesCursor({}, "w1");
+    expect(out.items.length).toBe(0);
+    expect(out.nextCursor).toBe("w1");
+  });
+
+  test("queryNotesCursor: next_cursor: null parses to undefined (defensive fallback — not a real wire shape)", async () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
@@ -398,7 +416,7 @@ describe("VaultClient — cursor pagination", () => {
     expect(out.nextCursor).toBeUndefined();
   });
 
-  test("queryNotesCursor: full pagination walk — page 1 (no cursor) → page 2 (?cursor=) → loop ends on null", async () => {
+  test("queryNotesCursor: full pagination walk — page 1 (bootstrap) → page 2 (?cursor=w1) → drains on an empty page", async () => {
     const urls: string[] = [];
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
@@ -410,21 +428,32 @@ describe("VaultClient — cursor pagination", () => {
         },
         (url) => {
           urls.push(url);
-          return jsonRes({ notes: [{ id: "n2", createdAt: "y" }], next_cursor: null });
+          return jsonRes({ notes: [{ id: "n2", createdAt: "y" }], next_cursor: "w2" });
+        },
+        (url) => {
+          urls.push(url);
+          // The real termination signal: an empty page. `next_cursor` is
+          // STILL a live watermark ("w2", not null) — a caller draining a
+          // one-shot page set stops on `items.length === 0` and persists
+          // this cursor to resume a later "since last checked" poll.
+          return jsonRes({ notes: [], next_cursor: "w2" });
         },
       ]),
     });
     const allItems: string[] = [];
     let cursor: string | undefined;
-    do {
-      const page = await c.queryNotesCursor({ tag: "x" }, cursor);
+    let page = await c.queryNotesCursor({ tag: "x" }, cursor);
+    while (page.items.length > 0) {
       allItems.push(...page.items.map((n) => n.id));
       cursor = page.nextCursor;
-    } while (cursor);
+      page = await c.queryNotesCursor({ tag: "x" }, cursor);
+    }
 
     expect(allItems).toEqual(["n1", "n2"]);
+    expect(page.nextCursor).toBe("w2");
     expect(new URL(urls[0]!).searchParams.get("cursor")).toBe("");
     expect(new URL(urls[1]!).searchParams.get("cursor")).toBe("w1");
+    expect(new URL(urls[2]!).searchParams.get("cursor")).toBe("w2");
   });
 
   test("queryNotesCursor 401 → onAuthError → retry preserves cursor", async () => {
@@ -471,9 +500,12 @@ describe("VaultClient — cursor pagination", () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
-      fetchImpl: makeFetch([() => jsonRes({ notes: [], next_cursor: null })]),
+      fetchImpl: makeFetch([() => jsonRes({ notes: [], next_cursor: "w1" })]),
     });
-    await expect(c.queryNotesCursor({ tag: "x", sort: "asc" })).resolves.toEqual({ items: [] });
+    await expect(c.queryNotesCursor({ tag: "x", sort: "asc" })).resolves.toEqual({
+      items: [],
+      nextCursor: "w1",
+    });
   });
 });
 
