@@ -123,7 +123,7 @@
         "@codemirror/state": "^6.6.0",
         "@codemirror/view": "^6.41.1",
         "@lezer/highlight": "^1.2.3",
-        "@openparachute/surface-client": "^0.3.3",
+        "@openparachute/surface-client": "^0.3.4",
         "@openparachute/surface-render": "^0.2.0",
         "@tanstack/react-query": "^5",
         "highlight.js": "^11.11.1",
@@ -209,7 +209,7 @@
     },
     "packages/surface-render": {
       "name": "@openparachute/surface-render",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@openparachute/surface-client": "^0.3.3",
       },
@@ -2094,6 +2094,8 @@
 
     "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
+    "@openparachute/notes-ui/@openparachute/surface-render": ["@openparachute/surface-render@0.2.0", "", { "dependencies": { "@openparachute/surface-client": "^0.2.0" }, "peerDependencies": { "react": "^18 || ^19", "react-dom": "^18 || ^19", "react-markdown": "^9 || ^10", "rehype-highlight": "^7", "remark-gfm": "^4" }, "optionalPeers": ["rehype-highlight"] }, "sha512-I/GIpTqyBgeB3G32T77zcuMfKur1jlrMdzXWx0rlOY4cMqdfOV93SJlJllTTFMkzjYzU0l5zAozZJTFDkpWNdw=="],
+
     "@openparachute/notes-ui/typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
@@ -2165,6 +2167,8 @@
     "workbox-build/pretty-bytes": ["pretty-bytes@5.6.0", "", {}, "sha512-FFw039TmrBqFK8ma/7OL3sDz/VytdtJr044/QUJtH0wK9lb9jLq9tJyIxUwtQJHwar2BqtiA4iCWSwo9JLkzFg=="],
 
     "workbox-expiration/idb": ["idb@7.1.1", "", {}, "sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ=="],
+
+    "@openparachute/notes-ui/@openparachute/surface-render/@openparachute/surface-client": ["@openparachute/surface-client@0.2.0", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-SC2czbj+wiArCTm0//P7vDJDte92EEkqZjRI5jzKJ2i7T86CjWMW33kJH3wH6HO9CwoCtyeZELpgXm9WWV5bFA=="],
 
     "accepts/mime-types/mime-db": ["mime-db@1.54.0", "", {}, "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ=="],
 
