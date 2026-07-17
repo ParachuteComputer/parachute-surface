@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.3.0
+
+Renders a single newline inside a paragraph as a visible line break, matching
+Obsidian / GitHub-comment markdown — not strict CommonMark, which collapses a
+soft break to a space.
+
+- **`<MarkdownView breaks>` / `<NoteRenderer breaks>`** — new prop, **default
+  `true`**. Wires [`remark-breaks`](https://github.com/remarkjs/remark-breaks)
+  into the remark pipeline (before `remarkWikilinks`, so it only ever sees
+  plain paragraph text and never re-splits the wikilink plugin's styled
+  inert-unresolved span). Set `breaks={false}` to opt back into strict
+  CommonMark soft-break behavior. `remark-breaks` joins `remark-gfm` as a
+  required peer dependency (imported unconditionally, like `remark-gfm`).
+- **Behavior change, minor bump.** This is a rendering *default* change for
+  consumers that upgrade — existing `.md` content with internal single
+  newlines will now show a break where it previously collapsed to a space.
+  0.x caret semantics mean consumers pinned to `^0.2.0` (e.g. notes-ui) do
+  **not** auto-resolve to 0.3.0 — bumping in is a deliberate per-consumer
+  choice.
+- Fenced code blocks and inline code are unaffected — `remark-breaks` only
+  rewrites `text` mdast nodes, which code/inlineCode nodes are not.
+
 ## 0.2.0
 
 DX polish from the notes-ui Phase-4 dogfood ([#74](https://github.com/ParachuteComputer/parachute-surface/issues/74)). All additive + backward-compatible — existing consumers (notes-ui) render identically.

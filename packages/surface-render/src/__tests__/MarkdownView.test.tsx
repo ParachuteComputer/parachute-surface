@@ -61,4 +61,73 @@ describe("MarkdownView", () => {
     expect(a).toHaveAttribute("target", "_blank");
     expect(a).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
+
+  describe("breaks (single-newline soft breaks)", () => {
+    it("renders a single internal newline as a visible <br> by default", () => {
+      const { container } = render(<MarkdownView content={"Line one\nLine two"} />);
+      const p = container.querySelector("p");
+      const br = p?.querySelectorAll("br");
+      expect(br).toHaveLength(1);
+      // mdast-util-to-hast's break handler emits `<br>` followed by a "\n"
+      // text node (the canonical CommonMark `<br />\n` HTML output) — the
+      // literal `\n` in textContent is expected; browsers collapse it visually.
+      expect(p?.textContent).toBe("Line one\nLine two");
+      expect(p?.children[0]?.tagName.toLowerCase()).toBe("br");
+    });
+
+    it("still separates paragraphs on a blank line", () => {
+      const { container } = render(<MarkdownView content={"Para one\n\nPara two"} />);
+      const paragraphs = container.querySelectorAll("p");
+      expect(paragraphs).toHaveLength(2);
+      expect(paragraphs[0]?.textContent).toBe("Para one");
+      expect(paragraphs[1]?.textContent).toBe("Para two");
+      expect(container.querySelectorAll("br")).toHaveLength(0);
+    });
+
+    it("collapses a single newline to a space when breaks={false} (strict CommonMark)", () => {
+      const { container } = render(<MarkdownView content={"Line one\nLine two"} breaks={false} />);
+      const p = container.querySelector("p");
+      expect(p?.querySelectorAll("br")).toHaveLength(0);
+      expect(p?.textContent).toBe("Line one\nLine two");
+    });
+
+    it("trailing-two-spaces hard breaks still work with breaks={false}", () => {
+      const { container } = render(
+        <MarkdownView content={"Line one  \nLine two"} breaks={false} />,
+      );
+      const p = container.querySelector("p");
+      expect(p?.querySelectorAll("br")).toHaveLength(1);
+    });
+
+    it("backslash hard breaks still work with breaks={false}", () => {
+      const { container } = render(
+        <MarkdownView content={"Line one\\\nLine two"} breaks={false} />,
+      );
+      const p = container.querySelector("p");
+      expect(p?.querySelectorAll("br")).toHaveLength(1);
+    });
+
+    it("does not double newlines inside fenced code blocks", () => {
+      const { container } = render(<MarkdownView content={"```\nfirst\nsecond\nthird\n```"} />);
+      const code = container.querySelector("pre code");
+      expect(code?.querySelectorAll("br")).toHaveLength(0);
+      expect(code?.textContent).toBe("first\nsecond\nthird\n");
+    });
+
+    it("does not affect inline code spans", () => {
+      const { container } = render(<MarkdownView content={"See `a\nb` here."} />);
+      // Inline code cannot span a literal newline in CommonMark — the newline
+      // there is treated as a space inside the code span, not a break.
+      const code = container.querySelector("code");
+      expect(code?.querySelectorAll("br")).toHaveLength(0);
+      expect(code?.textContent).toBe("a b");
+    });
+
+    it("still renders a break inside a wikilink-adjacent text run", () => {
+      render(<MarkdownView content={"before\nSee [[Known]] after"} resolve={resolve} />);
+      expect(screen.getByText("Known")).toBeInTheDocument();
+      const p = screen.getByText("Known").closest("p");
+      expect(p?.querySelectorAll("br")).toHaveLength(1);
+    });
+  });
 });

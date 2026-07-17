@@ -59,7 +59,13 @@ export interface NoteRendererOverrides {
 export interface NoteRendererProps
   extends Pick<
     MarkdownViewProps,
-    "resolve" | "linkComponent" | "fetchBlob" | "components" | "remarkPlugins" | "rehypePlugins"
+    | "resolve"
+    | "linkComponent"
+    | "fetchBlob"
+    | "components"
+    | "breaks"
+    | "remarkPlugins"
+    | "rehypePlugins"
   > {
   note: NoteLike;
   /** Container class passed to each format renderer (default `prose-note`). */
