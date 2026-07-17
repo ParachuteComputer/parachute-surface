@@ -221,11 +221,14 @@ export function MarkdownView({
   type RemarkPlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>;
   const remark: RemarkPlugins = [
     remarkGfm,
-    // Runs before remarkWikilinks so it only ever sees plain paragraph text —
-    // the wikilink plugin re-emits its inert-unresolved span as a "text" node
-    // carrying extra hName/hProperties data, and this plugin's find-and-replace
-    // walk (mdast-util-find-and-replace) treats every "text" node generically,
-    // so running it first avoids splitting that styled node back apart.
+    // Order relative to remarkWikilinks only matters for one unreachable
+    // edge: a literal newline typed INSIDE [[...]] syntax. Neither order
+    // handles it fully (this order: the wikilink fails to parse and raw
+    // brackets show; reversed: unresolved wikilinks lose their styled span)
+    // — and normal authoring (Enter/Shift+Enter) can never produce it, since
+    // the break lands between text nodes, not inside the bracket match.
+    // Verified empirically in review; all other wikilink/break interplay is
+    // order-insensitive.
     ...(breaks ? [remarkBreaks] : []),
     ...(resolve ? ([[remarkWikilinks, { resolve }]] as RemarkPlugins) : []),
     ...(remarkPlugins ?? []),
