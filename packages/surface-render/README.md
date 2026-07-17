@@ -9,7 +9,10 @@ core types).
 This package owns **"render a note"**:
 
 - **Markdown + wikilinks** — `<MarkdownView>` (react-markdown + GFM) with a
-  per-surface `[[wikilink]]` resolver and link-component hook.
+  per-surface `[[wikilink]]` resolver and link-component hook. A single
+  internal newline renders as a visible line break by default (Obsidian /
+  GitHub-comment style, not strict CommonMark) — see
+  [**Line breaks**](#line-breaks).
 - **Auth'd vault media** — `<VaultImage>` / `<VaultAudio>` that fetch
   `/api/storage/…` blobs *with* the surface's authorization.
 - **Multi-format renderers** — `<CsvRenderer>` (→ table), `<JsonRenderer>`
@@ -29,15 +32,16 @@ never bakes in a URL space, a router, or an opinionated layout.
 ## Install
 
 ```sh
-npm add @openparachute/surface-render @openparachute/surface-client react react-dom react-markdown remark-gfm
+npm add @openparachute/surface-render @openparachute/surface-client react react-dom react-markdown remark-gfm remark-breaks
 # optional, for fenced-code-block coloring in markdown:
 npm add rehype-highlight
 ```
 
-`react`, `react-dom`, `react-markdown`, and `remark-gfm` are **required peer
-dependencies** (the package doesn't bundle React, and `MarkdownView` imports
-`remark-gfm` unconditionally). `rehype-highlight` is an optional peer (only
-needed if you pass it for fenced-code-block coloring).
+`react`, `react-dom`, `react-markdown`, `remark-gfm`, and `remark-breaks` are
+**required peer dependencies** (the package doesn't bundle React, and
+`MarkdownView` imports `remark-gfm` and `remark-breaks` unconditionally).
+`rehype-highlight` is an optional peer (only needed if you pass it for
+fenced-code-block coloring).
 
 ## Quick start
 
@@ -183,6 +187,24 @@ dependency.
 >
 > When `highlight` is set, the built-in markdown `code` renderer activates; a
 > `components.code` override you pass still wins over both.
+
+## Line breaks
+
+`<MarkdownView>` renders a single `\n` inside a paragraph as a visible `<br>`
+by default (`breaks` defaults to `true`) — Obsidian / GitHub-comment behavior,
+not strict CommonMark (which collapses a soft break to a space, requiring a
+trailing double-space or backslash to force one). This matches the
+Enter=paragraph / Shift+Enter=newline authoring model: the newline only reads
+right if it actually shows.
+
+```tsx
+<MarkdownView content={note.content} />               {/* breaks: true (default) */}
+<MarkdownView content={note.content} breaks={false} />  {/* strict CommonMark */}
+```
+
+Fenced code blocks and inline code are unaffected either way — the newlines
+inside them are never touched. `<NoteRenderer>` forwards `breaks` straight
+through to the markdown branch.
 
 ## Wikilinks vs embeds
 

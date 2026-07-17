@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { VaultImage } from "../embed/VaultImage.js";
 import type { FetchBlob } from "../embed/fetch-blob.js";
@@ -74,6 +75,16 @@ export interface MarkdownViewProps {
    * against). Pass `""` to opt out of the default prose container.
    */
   className?: string;
+  /**
+   * Render a single line break inside a paragraph (`\n`) as a visible `<br>`,
+   * matching Obsidian / GitHub-comment markdown instead of strict CommonMark
+   * (which collapses a soft break to a space). **Default `true`** — Parachute
+   * notes are written Enter=paragraph / Shift+Enter=newline, and that only
+   * reads right if the newline actually shows. Set `false` for strict
+   * CommonMark soft-break behavior (a single `\n` collapses to a space; only
+   * a trailing double-space or backslash forces a break).
+   */
+  breaks?: boolean;
   /**
    * Syntax highlighter for fenced code blocks (```​lang … ```), wired into the
    * markdown `code` renderer so the SAME `highlight` hook colors both
@@ -151,6 +162,7 @@ export function MarkdownView({
   fetchBlob,
   components,
   className = "prose-note",
+  breaks = true,
   highlight,
   remarkPlugins,
   rehypePlugins,
@@ -209,6 +221,12 @@ export function MarkdownView({
   type RemarkPlugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>;
   const remark: RemarkPlugins = [
     remarkGfm,
+    // Runs before remarkWikilinks so it only ever sees plain paragraph text —
+    // the wikilink plugin re-emits its inert-unresolved span as a "text" node
+    // carrying extra hName/hProperties data, and this plugin's find-and-replace
+    // walk (mdast-util-find-and-replace) treats every "text" node generically,
+    // so running it first avoids splitting that styled node back apart.
+    ...(breaks ? [remarkBreaks] : []),
     ...(resolve ? ([[remarkWikilinks, { resolve }]] as RemarkPlugins) : []),
     ...(remarkPlugins ?? []),
   ];

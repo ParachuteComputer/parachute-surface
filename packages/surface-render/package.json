@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-render",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "React rendering primitives for Parachute surfaces — markdown + wikilinks, auth'd vault media (image/audio) embeds, multi-format (csv/json/yaml/code/plain) renderers, a note-format dispatcher, and an MDX-safe-by-default view. Good defaults + per-surface override hooks. Sibling to @openparachute/surface-client.",
   "license": "AGPL-3.0",
   "type": "module",
@@ -57,6 +57,7 @@
     "react-dom": "^18 || ^19",
     "react-markdown": "^9 || ^10",
     "rehype-highlight": "^7",
+    "remark-breaks": "^4",
     "remark-gfm": "^4"
   },
   "peerDependenciesMeta": {
@@ -78,6 +79,7 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
