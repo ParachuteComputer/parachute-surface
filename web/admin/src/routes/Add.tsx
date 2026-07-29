@@ -36,7 +36,12 @@ type SourceKind = "npm" | "path" | "url";
 const KIND_META: Record<SourceKind, { label: string; placeholder: string; hint: string }> = {
   npm: {
     label: "npm package",
-    placeholder: "@openparachute/notes-ui[@version]",
+    // A generic shape, not a real first-party package. This used to read
+    // `@openparachute/notes-ui[@version]` — a retired module (hub#788) offered
+    // as THE example of what to install, which is how notes kept resurfacing
+    // inside surface long after it stopped being maintained. A placeholder is
+    // a recommendation whether or not you intend it as one.
+    placeholder: "@scope/my-surface[@version]",
     hint: "A published npm package whose tarball ships dist/index.html (and usually meta.json).",
   },
   path: {
