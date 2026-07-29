@@ -129,8 +129,8 @@ const INSPECT_GITHUB = {
 
 describe("validateSource", () => {
   test("npm kind rejects paths + urls, accepts specs", () => {
-    expect(validateSource("npm", "@openparachute/notes-ui")).toBeNull();
-    expect(validateSource("npm", "@openparachute/notes-ui@1.0.0")).toBeNull();
+    expect(validateSource("npm", "@openparachute/surface-render")).toBeNull();
+    expect(validateSource("npm", "@openparachute/surface-render@1.0.0")).toBeNull();
     expect(validateSource("npm", "/tmp/x")).toMatch(/Server path/);
     expect(validateSource("npm", "https://x.com/a.tgz")).toMatch(/URL \/ GitHub release/);
     expect(validateSource("npm", "Not A Spec!")).toMatch(/Not a valid npm/);
@@ -162,7 +162,7 @@ describe("Add — inspect step", () => {
     mockHostFetch({ inspect: INSPECT_WITH_META, log });
     renderWithRouter();
     await userEvent.type(
-      screen.getByPlaceholderText(/@openparachute\/notes-ui/),
+      screen.getByPlaceholderText(/@scope\/my-surface/),
       "@openparachute/my-ui",
     );
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
@@ -183,7 +183,7 @@ describe("Add — inspect step", () => {
     const log: Captured[] = [];
     mockHostFetch({ inspect: INSPECT_WITH_META, log });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "/tmp/somewhere");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "/tmp/somewhere");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     expect(await screen.findByText(/switch the source kind/)).toBeInTheDocument();
     expect(log.find((c) => c.url.endsWith("/surface/inspect"))).toBeUndefined();
@@ -192,7 +192,7 @@ describe("Add — inspect step", () => {
   test("a backed surface shows the trust card BEFORE install", async () => {
     mockHostFetch({ inspect: INSPECT_BACKED });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "backed-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "backed-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
 
     expect(await screen.findByText(/This surface ships a server/)).toBeInTheDocument();
@@ -256,7 +256,7 @@ describe("Add — install step", () => {
       log,
     });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/From the bundle's meta.json/);
     await userEvent.click(screen.getByRole("button", { name: /Install surface/ }));
@@ -281,7 +281,7 @@ describe("Add — install step", () => {
       log,
     });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/Who can open it\?/);
     await userEvent.click(screen.getByRole("radio", { name: /Operator only/ }));
@@ -347,7 +347,7 @@ describe("Add — install step", () => {
       log,
     });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/From the bundle's meta.json/);
 
@@ -375,7 +375,7 @@ describe("Add — install step", () => {
       log,
     });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/From the bundle's meta.json/);
     // Typing the package's OWN name is the same as leaving it blank.
@@ -397,7 +397,7 @@ describe("Add — install step", () => {
       addStatus: 409,
     });
     renderWithRouter();
-    await userEvent.type(screen.getByPlaceholderText(/@openparachute\/notes-ui/), "my-ui-pkg");
+    await userEvent.type(screen.getByPlaceholderText(/@scope\/my-surface/), "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/From the bundle's meta.json/);
     await userEvent.click(screen.getByRole("button", { name: /Install surface/ }));
@@ -408,7 +408,7 @@ describe("Add — install step", () => {
   test("changing the source resets the inspection", async () => {
     mockHostFetch({ inspect: INSPECT_WITH_META });
     renderWithRouter();
-    const input = screen.getByPlaceholderText(/@openparachute\/notes-ui/);
+    const input = screen.getByPlaceholderText(/@scope\/my-surface/);
     await userEvent.type(input, "my-ui-pkg");
     await userEvent.click(screen.getByRole("button", { name: /Inspect source/ }));
     await screen.findByText(/From the bundle's meta.json/);

@@ -8,7 +8,6 @@
 #   - @openparachute/surface-client ← tag prefix `client-v...`    (from packages/surface-client)
 #   - @openparachute/account-client ← tag prefix `account-v...`   (from packages/account-client)
 #   - @openparachute/surface-render ← tag prefix `render-v...`    (from packages/surface-render)
-#   - @openparachute/notes-ui       ← tag prefix `notes-ui-v...`  (from packages/notes-ui)
 #   - @openparachute/doc-schema     ← tag prefix `doc-schema-v...` (from packages/doc-schema)
 #   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
 #   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (from packages/docs-editor;
@@ -24,13 +23,11 @@
 # Tag conventions (matches governance rule 2, https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md):
 #   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.2.0-rc.10)
 #                                          (client-v0.1.0-rc.4)
-#                                          (notes-ui-v0.1.4-rc.1)
 #                                          (doc-schema-v0.1.0-rc.1)
 #                                          (server-v0.1.0-rc.1)
 #                                          (docs-editor-v0.1.0-rc.1)
 #   - stable: v<X>.<Y>.<Z>                 (e.g. v0.2.0)
 #                                          (client-v0.1.0)
-#                                          (notes-ui-v0.1.4)
 #                                          (doc-schema-v0.1.0)
 #                                          (server-v0.1.0)
 #                                          (docs-editor-v0.1.0)
@@ -44,8 +41,6 @@
 #        # for surface-client
 #        VERSION="client-v$(bun -e "console.log(require('./packages/surface-client/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
-#        # for notes-ui
-#        VERSION="notes-ui-v$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")"
 #        git tag "$VERSION" && git push origin "$VERSION"
 #        # for doc-schema
 #        VERSION="doc-schema-v$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")"
@@ -61,8 +56,8 @@
 #
 # Operator setup (one-time) — see RELEASING.md:
 #   - npm Trusted Publisher rules: one per package (surface, surface-client,
-#     account-client, surface-render, notes-ui, doc-schema, surface-server).
-#     All seven rules point at: org=ParachuteComputer, repo=parachute-surface,
+#     account-client, surface-render, doc-schema, surface-server).
+#     All six rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -83,9 +78,6 @@ on:
       # Surface-render release tags
       - 'render-v[0-9]+.[0-9]+.[0-9]+'
       - 'render-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
-      # Notes-ui release tags
-      - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+'
-      - 'notes-ui-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
       # Doc-schema release tags
       - 'doc-schema-v[0-9]+.[0-9]+.[0-9]+'
       - 'doc-schema-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
@@ -122,19 +114,19 @@ jobs:
         run: bun install --frozen-lockfile
       - name: typecheck
         # Root script typechecks all workspace packages (surface-host,
-        # surface-client, surface-server, surface-render, notes-ui,
+        # surface-client, surface-server, surface-render,
         # pebble-config, doc-schema incl. its no-DOM codec tsconfig).
         run: bun run typecheck:all
       - name: tests
         # Root script runs every suite: surface-host, surface-client,
-        # surface-server, pebble-config, doc-schema (bun test), plus notes-ui
-        # and surface-render (vitest via `bun run --filter`).
+        # surface-server, pebble-config, doc-schema (bun test), plus
+        # surface-render (vitest via `bun run --filter`).
         run: bun run test
 
   publish-surface-npm:
     name: publish @openparachute/surface to npm
     needs: test
-    # App-only: skip on client-, account-, render-, notes-ui-, doc-schema-,
+    # App-only: skip on client-, account-, render-, doc-schema-,
     # server-, docs-editor-, meeting-ingest-, and meeting-mcp- tags. (The bare
     # `v...` namespace is the catch-all: every NEW tag prefix MUST be excluded
     # here, or its tag would fire this job too. `account-` is a DISTINCT prefix
@@ -143,7 +135,7 @@ jobs:
     # `doc-schema-` prefix. Likewise `meeting-mcp-` and `meeting-ingest-` are
     # DISTINCT prefixes — neither `startsWith` the other, so each needs its own
     # exclusion.)
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'notes-ui-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-') }}
+    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -389,64 +381,6 @@ jobs:
             DIST_TAG=latest
           fi
           echo "publishing @openparachute/surface-render with dist-tag=$DIST_TAG"
-          npm publish --tag "$DIST_TAG" --access public --provenance
-
-  publish-notes-ui-npm:
-    name: publish @openparachute/notes-ui to npm
-    needs: test
-    # notes-ui-only: skip on surface and surface-client tags.
-    if: ${{ startsWith(github.ref_name, 'notes-ui-') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - name: install deps
-        # Workspace install at root brings in notes-ui's deps.
-        run: bun install --frozen-lockfile
-      - name: verify package.json version matches tag
-        # Pin against notes-ui's package.json; tag prefix is `notes-ui-v...`.
-        run: |
-          PKG_VERSION=$(bun -e "console.log(require('./packages/notes-ui/package.json').version)")
-          TAG_VERSION="${GITHUB_REF_NAME#notes-ui-v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::packages/notes-ui/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
-            exit 1
-          fi
-      - name: "guard against workspace:/link: protocol in published manifest"
-        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
-        # do, on their own publish path). A leaked protocol breaks every `npm install`
-        # of the published package. notes-ui depends on @openparachute/surface-client
-        # via `workspace:*` for the live-list dogfood, so this guard is load-bearing:
-        # fail loudly before publish if any dependency block still carries one.
-        working-directory: packages/notes-ui
-        run: |
-          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
-            echo "no workspace:/link: protocols in published manifest"
-          else
-            echo "::error::packages/notes-ui/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
-            exit 1
-          fi
-      - name: publish
-        # notes-ui's package.json has `prepublishOnly: bun run build`, which
-        # runs `tsc -b && vite build` to produce `dist/` (the published artifact).
-        # `npm publish` triggers prepublishOnly, so the build happens just-in-time.
-        working-directory: packages/notes-ui
-        run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
-          echo "publishing @openparachute/notes-ui with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-doc-schema-npm:
