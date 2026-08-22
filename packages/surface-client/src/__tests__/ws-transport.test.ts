@@ -13,9 +13,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import type { SubscribeHandlers, SubscribeTransport, WebSocketCtor } from "../subscribe.ts";
-import { VaultAuthError, VaultPermissionError } from "../vault-client.ts";
-import { startWsSubscription } from "../ws-transport.ts";
+import type { SubscribeHandlers, SubscribeTransport, WebSocketCtor } from "../subscribe.js";
+import { VaultAuthError, VaultPermissionError } from "../vault-client.js";
+import { startWsSubscription } from "../ws-transport.js";
 
 // ---- fake WebSocket ----
 
@@ -88,7 +88,7 @@ async function waitFor<T>(
   for (;;) {
     const v = fn();
     if (v) return v as T;
-    if (Date.now() - start > ms) throw new Error("timed out waiting for " + label);
+    if (Date.now() - start > ms) throw new Error(`timed out waiting for ${label}`);
     await sleep(2);
   }
 }
@@ -336,7 +336,10 @@ describe("ws transport — close-code map", () => {
     const snapshots: number[] = [];
     const unsub = startWsSubscription(
       makeTransport(),
-      noopHandlers({ onStatus: (s) => statuses.push(s), onSnapshot: (n) => snapshots.push(n.length) }),
+      noopHandlers({
+        onStatus: (s) => statuses.push(s),
+        onSnapshot: (n) => snapshots.push(n.length),
+      }),
       { initialBackoffMs: 5, maxBackoffMs: 20 },
     );
     const ws0 = await socketAt(0);
@@ -458,7 +461,10 @@ describe("ws transport — degrade to polling + recover", () => {
     const snapshots: string[][] = [];
     const unsub = startWsSubscription(
       makeTransport(),
-      noopHandlers({ onStatus: (s) => statuses.push(s), onSnapshot: (n) => snapshots.push(n.map((x) => x.id)) }),
+      noopHandlers({
+        onStatus: (s) => statuses.push(s),
+        onSnapshot: (n) => snapshots.push(n.map((x) => x.id)),
+      }),
       { initialBackoffMs: 5, maxBackoffMs: 20 },
     );
     // First probe fails (server not yet WS-capable) …

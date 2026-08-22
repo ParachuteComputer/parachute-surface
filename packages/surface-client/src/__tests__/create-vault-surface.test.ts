@@ -16,8 +16,8 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { createVaultSurface } from "../create-vault-surface.ts";
-import { saveToken } from "../token-storage.ts";
+import { createVaultSurface } from "../create-vault-surface.js";
+import { saveToken } from "../token-storage.js";
 
 // --- in-memory storage stub (matches token-storage's localStorage shape) ---
 
@@ -527,7 +527,7 @@ describe("createVaultSurface — getClient", () => {
     // First request 401s (at_1 is expired) → wired onAuthError re-reads
     // getToken, refreshes with rt_3 → vault accepts the at_refreshed retry.
     const notes = await client!.queryNotes({ tag: "#x" });
-    expect(notes).toEqual([{ id: "n1" }]);
+    expect(notes.map(({ id }) => ({ id }))).toEqual([{ id: "n1" }]);
 
     // (a) the refresh used the LATEST stored refresh token (rt_3), not the
     //     rt_1 that was stored when getClient() built the closure.

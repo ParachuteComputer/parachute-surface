@@ -24,8 +24,8 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { createVaultSurface } from "../create-vault-surface.ts";
-import { saveToken } from "../token-storage.ts";
+import { createVaultSurface } from "../create-vault-surface.js";
+import { saveToken } from "../token-storage.js";
 
 // --- in-memory storage stub (token-storage's localStorage shape) -----------
 

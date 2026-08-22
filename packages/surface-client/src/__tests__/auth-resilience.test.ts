@@ -21,9 +21,9 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { createVaultSurface } from "../create-vault-surface.ts";
-import { ParachuteOAuth } from "../oauth.ts";
-import { loadToken, saveToken } from "../token-storage.ts";
+import { createVaultSurface } from "../create-vault-surface.js";
+import { ParachuteOAuth } from "../oauth.js";
+import { loadToken, saveToken } from "../token-storage.js";
 
 // --- in-memory storage stub (token-storage's localStorage shape) -----------
 
@@ -280,9 +280,7 @@ describe("cold-load DCR seeding (brain gap 1)", () => {
     );
     const counters = freshCounters();
     const surface = makeSurface(counters);
-    expect(surface.getClient()!.queryNotes({ tag: "#x" })).rejects.toThrow(
-      /rejected the token/,
-    );
+    expect(surface.getClient()!.queryNotes({ tag: "#x" })).rejects.toThrow(/rejected the token/);
     await Promise.resolve();
     expect(counters.tokenExchanges).toBe(0);
   });

@@ -17,12 +17,12 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  type NotesQuery,
   buildNotesQuery,
   isNotesQuery,
   toNotesSearchParams,
-  type NotesQuery,
-} from "../notes-query.ts";
-import { VaultClient } from "../vault-client.ts";
+} from "../notes-query.js";
+import { VaultClient } from "../vault-client.js";
 
 function wire(q: NotesQuery): string {
   return buildNotesQuery(q).toString();
@@ -122,9 +122,9 @@ describe("buildNotesQuery — exact wire format", () => {
     expect(buildNotesQuery({ metadata: { due: { exists: true } } }).get("meta[due][exists]")).toBe(
       "true",
     );
-    expect(
-      buildNotesQuery({ metadata: { due: { exists: false } } }).get("meta[due][exists]"),
-    ).toBe("false");
+    expect(buildNotesQuery({ metadata: { due: { exists: false } } }).get("meta[due][exists]")).toBe(
+      "false",
+    );
   });
 
   test("in/not_in with a non-array throws loudly", () => {
