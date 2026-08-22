@@ -23,6 +23,22 @@ describe("wikilink resolver helpers", () => {
     expect(ROOT_WIKILINK_RE).toBe(MARKDOWN_WIKILINK_RE);
   });
 
+  it("isolates rendering from consumer mutations of the exported matcher", () => {
+    try {
+      expect(MARKDOWN_WIKILINK_RE.test("[[Alpha]] and [[Beta]]")).toBe(true);
+      const resolve: WikilinkResolver = (target) => resolvedLink(`/n/${target}`);
+
+      render(<MarkdownView content="[[Alpha]] and [[Beta]]" resolve={resolve} />);
+
+      expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Alpha",
+        "Beta",
+      ]);
+    } finally {
+      MARKDOWN_WIKILINK_RE.lastIndex = 0;
+    }
+  });
+
   it("unresolvedLink builds a navigable {exists:false} target", () => {
     expect(unresolvedLink("/n/Foo")).toEqual({ href: "/n/Foo", exists: false });
   });

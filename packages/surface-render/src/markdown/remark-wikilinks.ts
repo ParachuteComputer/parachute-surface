@@ -130,7 +130,7 @@ interface ParentWithChildren {
 function splitTextNode(text: string, resolve: WikilinkResolver): RootContent[] {
   const out: RootContent[] = [];
   let lastIndex = 0;
-  for (const match of text.matchAll(WIKILINK_RE)) {
+  for (const match of text.matchAll(new RegExp(WIKILINK_RE.source, WIKILINK_RE.flags))) {
     const matchIndex = match.index ?? 0;
     if (matchIndex > lastIndex) {
       out.push({ type: "text", value: text.slice(lastIndex, matchIndex) });
