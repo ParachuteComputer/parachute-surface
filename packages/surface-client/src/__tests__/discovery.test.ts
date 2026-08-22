@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { discoverAuthServer, registerClient } from "../discovery.ts";
+import { discoverAuthServer, registerClient } from "../discovery.js";
 
 function fetchOk(body: unknown, status = 200): typeof fetch {
   return (async () =>

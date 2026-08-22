@@ -7,7 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { normalizeVaultUrl, vaultIdFromUrl } from "../vault-id.ts";
+import { normalizeVaultUrl, vaultIdFromUrl } from "../vault-id.js";
 
 describe("vaultIdFromUrl", () => {
   test("strips https scheme", () => {

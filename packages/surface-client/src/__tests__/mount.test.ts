@@ -22,7 +22,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { getHubOrigin, getMountBase, getTenantId, getVaultUrl } from "../mount.ts";
+import { getHubOrigin, getMountBase, getTenantId, getVaultUrl } from "../mount.js";
 
 /**
  * Minimal Document stub: a map of meta-name → content. Returns a fake

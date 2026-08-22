@@ -9,9 +9,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { ParachuteOAuth, PendingApprovalError } from "../oauth.ts";
-import type { ParachuteOAuthOpts } from "../oauth.ts";
-import { saveToken } from "../token-storage.ts";
+import { ParachuteOAuth, PendingApprovalError } from "../oauth.js";
+import type { ParachuteOAuthOpts } from "../oauth.js";
+import { saveToken } from "../token-storage.js";
 
 // --- in-memory storage stubs ---
 
