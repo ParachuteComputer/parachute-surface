@@ -440,4 +440,206 @@ describe("live-list registry — releaseDelayMs grace window", () => {
     a.close();
     expect(c.unsub()).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * D2: the window belongs to the consumer that asked for it. It used to
+   * ratchet up on the shared entry and never come back down, so the moment ANY
+   * consumer anywhere in the app opted a key into a grace window, every other
+   * consumer's `close()` silently stopped being synchronous — including
+   * consumers created with default options in another file.
+   */
+  test("a departed consumer's grace window does not defer a default consumer's teardown", () => {
+    const c = fakeClient();
+    const patient = createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      releaseDelayMs: 5000,
+    });
+    const plain = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    expect(c.subscribe).toHaveBeenCalledTimes(1);
+
+    // The opted-in consumer leaves first; `plain` still holds the refcount.
+    patient.close();
+    expect(c.unsub()).not.toHaveBeenCalled();
+
+    // `plain` asked for nothing, so its teardown must be synchronous.
+    plain.close();
+    expect(c.unsub()).toHaveBeenCalledTimes(1);
+  });
+
+  test("the window shrinks to the longest STILL-ATTACHED consumer's", async () => {
+    const c = fakeClient();
+    const long = createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      releaseDelayMs: 5000,
+    });
+    const short = createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      releaseDelayMs: 20,
+    });
+
+    long.close(); // 5000ms window departs with it
+    short.close(); // last out — only its own 20ms should apply
+    expect(c.unsub()).not.toHaveBeenCalled();
+
+    await new Promise((r) => setTimeout(r, 80));
+    expect(c.unsub()).toHaveBeenCalledTimes(1); // not still waiting on 5000ms
+  });
+
+  test("a consumer that takes the refcount to zero still gets its OWN window", async () => {
+    const c = fakeClient();
+    const plain = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    const patient = createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      releaseDelayMs: 40,
+    });
+
+    plain.close();
+    patient.close(); // last out, and it is the one holding the window
+    expect(c.unsub()).not.toHaveBeenCalled();
+
+    await new Promise((r) => setTimeout(r, 100));
+    expect(c.unsub()).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * D1: `closed` is documented as TERMINAL — the transport will never reconnect
+ * (`ws-transport` emits it on 4400 / 4403 / auth-refresh exhausted). Before
+ * dedup existed, a remount was the repair path: the new consumer opened a
+ * fresh socket with a fresh token. A registry that keeps handing out the dead
+ * entry removes that repair path for consumers who never opted in.
+ */
+describe("live-list registry — a terminally closed entry is a tombstone", () => {
+  test("a consumer arriving after a terminal close gets a FRESH subscription", () => {
+    const c = fakeClient();
+    const a = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    c.h().onSnapshot([note("stale-1"), note("stale-2")]);
+    expect(c.subscribe).toHaveBeenCalledTimes(1);
+
+    // Token expired, the one refresh attempt failed: terminal close.
+    c.h().onStatus?.("closed");
+    expect(a.getState().status).toBe("closed");
+
+    // The app re-authenticated on the SAME client and a new view mounted.
+    const b = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    expect(c.subscribe).toHaveBeenCalledTimes(2); // not attached to the corpse
+
+    // B is on its own live socket, with its own state — not A's stale list.
+    expect(b.getState().status).toBe("connecting");
+    expect(b.getList()).toEqual([]);
+
+    c.h(1).onSnapshot([note("fresh")]);
+    c.h(1).onStatus?.("open");
+    expect(b.getList().map((n) => n.id)).toEqual(["fresh"]);
+    expect(b.getState().status).toBe("live");
+
+    // The corpse is nobody else's problem: A keeps its final state.
+    expect(a.getState().status).toBe("closed");
+    expect(a.getList().map((n) => n.id)).toEqual(["stale-1", "stale-2"]);
+  });
+
+  test("a consumer already attached at the terminal close still sees `closed`", () => {
+    const c = fakeClient();
+    const a = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    const b = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    expect(c.subscribe).toHaveBeenCalledTimes(1);
+
+    c.h().onStatus?.("closed");
+    expect(a.getState().status).toBe("closed");
+    expect(b.getState().status).toBe("closed");
+
+    // And the dead entry's transport is still released exactly once, by the
+    // last attached consumer — deregistering is not disposing.
+    a.close();
+    expect(c.unsub()).not.toHaveBeenCalled();
+    b.close();
+    expect(c.unsub()).toHaveBeenCalledTimes(1);
+  });
+
+  test("a NON-terminal drop keeps sharing (reconnecting is not a tombstone)", () => {
+    const c = fakeClient();
+    const a = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    c.h().onSnapshot([note("a")]);
+    c.h().onStatus?.("reconnecting");
+
+    const b = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    expect(c.subscribe).toHaveBeenCalledTimes(1); // still one socket
+    expect(a.getState().status).toBe("reconnecting");
+
+    c.h().onStatus?.("open");
+    expect(b.getState().status).toBe("live");
+  });
+
+  test("a consumer created re-entrantly from the terminal status listener is fresh", () => {
+    const c = fakeClient();
+    const a = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    let rebuilt: ReturnType<typeof createLiveList> | null = null;
+    a.subscribe(() => {
+      if (a.getState().status === "closed" && rebuilt === null) {
+        rebuilt = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+      }
+    });
+
+    c.h().onStatus?.("closed");
+    expect(c.subscribe).toHaveBeenCalledTimes(2);
+    expect(rebuilt).not.toBeNull();
+  });
+});
+
+/**
+ * D3: sharing a transport must not mean sharing fate. The change-listener
+ * fan-out was already guarded; `onError` was not, so one consumer's throw
+ * aborted the loop for every consumer after it AND escaped back into the
+ * transport's terminal path (where `handlers.onError?.(…)` precedes the
+ * `close()` that emits `closed`), pinning peers at `live` on a dead socket.
+ */
+describe("live-list registry — a throwing consumer callback is contained", () => {
+  test("a throwing onError does not starve peer consumers", () => {
+    const c = fakeClient();
+    const boom = mock(() => {
+      throw new Error("consumer boom");
+    });
+    const peer = mock(() => {});
+    createLiveList(c.client, new URLSearchParams("tag=%23x"), { onError: boom });
+    createLiveList(c.client, new URLSearchParams("tag=%23x"), { onError: peer });
+
+    expect(() => c.h().onError?.(new Error("blip"))).not.toThrow();
+    expect(boom).toHaveBeenCalledTimes(1);
+    expect(peer).toHaveBeenCalledTimes(1);
+  });
+
+  test("a throwing onError does not escape into the transport's terminal path", () => {
+    const c = fakeClient();
+    createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      onError: () => {
+        // The ordinary fragile diagnostic: `err.response` is undefined on a
+        // VaultAuthError.
+        throw new TypeError("cannot read properties of undefined (reading 'status')");
+      },
+    });
+    const peer = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+    c.h().onSnapshot([note("a")]);
+    c.h().onStatus?.("open");
+    expect(peer.getState().status).toBe("live");
+
+    // ws-transport's terminal sequence: onError(…) then close() → "closed".
+    // If the throw escaped, close() would never run and the peer would stay
+    // pinned at "live" on a socket that is gone.
+    expect(() => {
+      c.h().onError?.(new Error("terminal"));
+      c.h().onStatus?.("closed");
+    }).not.toThrow();
+    expect(peer.getState().status).toBe("closed");
+  });
+
+  test("a throwing onError does not stop the shared list reconciling", () => {
+    const c = fakeClient();
+    createLiveList(c.client, new URLSearchParams("tag=%23x"), {
+      onError: () => {
+        throw new Error("consumer boom");
+      },
+    });
+    const peer = createLiveList(c.client, new URLSearchParams("tag=%23x"));
+
+    c.h().onSnapshot([note("a")]);
+    c.h().onError?.(new Error("blip"));
+    c.h().onUpsert(note("z"));
+    expect(peer.getList().map((n) => n.id)).toEqual(["z", "a"]);
+  });
 });

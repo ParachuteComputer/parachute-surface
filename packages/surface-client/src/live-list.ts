@@ -91,7 +91,17 @@
  *   - **Optional grace window.** `releaseDelayMs` holds the socket briefly
  *     after the last release so an unmount/remount across a route transition
  *     reuses it instead of churning. Default 0 — teardown is immediate unless
- *     a caller asks otherwise.
+ *     a caller asks otherwise. The window is tracked PER CONSUMER and departs
+ *     with the consumer that asked for it, so it can never defer a
+ *     default-options consumer's synchronous teardown.
+ *   - **A terminally-closed entry is a tombstone, not a cache hit.** When the
+ *     transport reaches `closed` (unrecoverable — auth exhausted, 4400/4403)
+ *     the entry is deregistered immediately, so the next consumer opens a
+ *     FRESH stream. Remount stays the repair path it was before dedup existed.
+ *   - **Shared transport, unshared fate.** Every per-consumer callback
+ *     (`onError`, change listeners) is invoked inside its own try/catch: one
+ *     consumer that throws can neither starve its peers nor escape back into
+ *     the transport.
  */
 
 import type { NotesQueryInput } from "./notes-query.js";
@@ -184,9 +194,12 @@ export interface CreateLiveListOptions {
    * of churning it. Default `0` — the transport is released synchronously
    * when the refcount hits zero.
    *
-   * On a shared entry the LONGEST window any attached consumer asked for
-   * wins, so one careful consumer's grace period is not undone by another's
-   * default.
+   * On a shared entry the LONGEST window among the consumers attached RIGHT
+   * NOW wins, so one careful consumer's grace period is not undone by
+   * another's default — and, symmetrically, the window is recomputed when a
+   * consumer releases, so an opted-in consumer that has already gone cannot
+   * defer a default-options consumer's teardown. A consumer that takes the
+   * refcount to zero still gets its own window for its own release.
    */
   releaseDelayMs?: number;
 }
@@ -281,6 +294,13 @@ interface EntryHandle {
   sync: () => void;
   /** Deliver an observational transport error. */
   error: (err: unknown) => void;
+  /**
+   * The grace window THIS consumer asked for. Held per handle so the entry's
+   * effective window can be recomputed when a consumer leaves — one
+   * consumer's `releaseDelayMs` must not outlive it and defer a peer's
+   * teardown (see {@link recomputeReleaseDelay}).
+   */
+  releaseDelayMs: number;
 }
 
 /**
@@ -300,7 +320,10 @@ interface LiveListEntry {
   delivering: boolean;
   /** A refcount-zero that arrived mid-delivery, re-evaluated after it. */
   releaseAfterDelivery: boolean;
-  /** Longest grace window any attached consumer has asked for. */
+  /**
+   * Longest grace window any CURRENTLY attached consumer has asked for —
+   * derived state, recomputed on every attach and release.
+   */
   releaseDelayMs: number;
   releaseTimer: ReturnType<typeof setTimeout> | null;
   disposed: boolean;
@@ -386,6 +409,28 @@ function disposeEntry(entry: LiveListEntry): void {
 }
 
 /**
+ * Recompute the entry's grace window as the max over the consumers actually
+ * attached RIGHT NOW. A window belongs to the consumer that asked for it: when
+ * that consumer closes, its window must go with it, or a later consumer
+ * created with default options would silently lose the synchronous teardown
+ * `close()` promises.
+ */
+function recomputeReleaseDelay(entry: LiveListEntry, departing?: EntryHandle): void {
+  let longest = 0;
+  for (const handle of entry.handles) {
+    if (handle.releaseDelayMs > longest) longest = handle.releaseDelayMs;
+  }
+  // A consumer that just took the refcount to zero still gets ITS OWN window
+  // for THIS release — deferring its own teardown across a remount is the
+  // whole point of the option. It just doesn't get to leave that window behind
+  // for whoever comes next.
+  if (entry.handles.size === 0 && departing !== undefined && departing.releaseDelayMs > longest) {
+    longest = departing.releaseDelayMs;
+  }
+  entry.releaseDelayMs = longest;
+}
+
+/**
  * Refcount hit zero — tear down, unless we're mid-fan-out (defer past it) or a
  * grace window is configured (defer by it, cancellable by a new consumer).
  */
@@ -463,6 +508,16 @@ function startEntry(
         const next = toLiveListStatus(s);
         if (next === entry.status) return;
         entry.status = next;
+        // `closed` is TERMINAL — the transport is gone for good (an auth
+        // failure that outlived its refreshes, a 4400/4403 rejection) and
+        // will never reconnect. Such an entry is a tombstone, not a cache
+        // hit: retire the key BEFORE fanning out, so any consumer arriving
+        // afterwards (including one created re-entrantly from a status
+        // listener) opens a FRESH stream instead of attaching to a corpse and
+        // inheriting a permanently stale list. Attached consumers keep this
+        // entry and observe the `closed` status they're entitled to; the
+        // transport is released when the last of them closes.
+        if (next === "closed") entry.deregister();
         deliver(entry, (h) => h.sync());
       },
       onError: (err) => {
@@ -524,8 +579,18 @@ function attachHandle(entry: LiveListEntry, opts: CreateLiveListOptions): LiveLi
     sync,
     error: (err) => {
       if (released) return;
-      opts.onError?.(err);
+      try {
+        opts.onError?.(err);
+      } catch {
+        // Same contract as the listener fan-out above: shared transport must
+        // not mean shared fate. A throwing `onError` would otherwise abort the
+        // fan-out loop — denying every LATER consumer its error callback — and
+        // escape back into the transport's terminal path, where it would skip
+        // the `close()` that emits `closed`, pinning every peer at `live` on a
+        // socket that is gone.
+      }
     },
+    releaseDelayMs: opts.releaseDelayMs ?? 0,
   };
 
   entry.handles.add(handle);
@@ -536,9 +601,7 @@ function attachHandle(entry: LiveListEntry, opts: CreateLiveListOptions): LiveLi
     entry.releaseTimer = null;
   }
   entry.releaseAfterDelivery = false;
-  if (opts.releaseDelayMs !== undefined && opts.releaseDelayMs > entry.releaseDelayMs) {
-    entry.releaseDelayMs = opts.releaseDelayMs;
-  }
+  recomputeReleaseDelay(entry);
 
   // Late joiner: the shared stream is already established. Deliver its current
   // state as this consumer's FIRST CHANGE (on a microtask) rather than as its
@@ -561,6 +624,8 @@ function attachHandle(entry: LiveListEntry, opts: CreateLiveListOptions): LiveLi
       if (released) return;
       released = true;
       entry.handles.delete(handle);
+      // This consumer's grace window leaves with it.
+      recomputeReleaseDelay(entry, handle);
       if (entry.handles.size === 0) scheduleRelease(entry);
     },
   };
@@ -643,7 +708,12 @@ export function createLiveList(
         registries.set(clientKey, registry);
       }
       const existing = registry.get(key);
-      if (existing && !existing.disposed) return attachHandle(existing, opts);
+      // A terminally-`closed` entry is deregistered the moment it dies, so it
+      // shouldn't be here at all — the status check is belt-and-braces so a
+      // corpse can never be served as a cache hit.
+      if (existing && !existing.disposed && existing.status !== "closed") {
+        return attachHandle(existing, opts);
+      }
 
       const owner = registry;
       const entry: LiveListEntry = makeEntry(() => {
