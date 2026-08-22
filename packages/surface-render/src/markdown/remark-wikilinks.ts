@@ -120,7 +120,8 @@ export const WIKILINK_CLASS = "wikilink";
 export const WIKILINK_RESOLVED_CLASS = "wikilink wikilink-resolved";
 export const WIKILINK_UNRESOLVED_CLASS = "wikilink wikilink-unresolved";
 
-const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+/** Canonical matcher for `[[target]]` and `[[target|alias]]` spans. */
+export const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
 interface ParentWithChildren {
   children: RootContent[];
