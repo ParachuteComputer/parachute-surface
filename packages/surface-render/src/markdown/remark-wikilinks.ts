@@ -120,7 +120,8 @@ export const WIKILINK_CLASS = "wikilink";
 export const WIKILINK_RESOLVED_CLASS = "wikilink wikilink-resolved";
 export const WIKILINK_UNRESOLVED_CLASS = "wikilink wikilink-unresolved";
 
-const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+/** Canonical matcher for `[[target]]` and `[[target|alias]]` spans. */
+export const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
 interface ParentWithChildren {
   children: RootContent[];
@@ -129,7 +130,7 @@ interface ParentWithChildren {
 function splitTextNode(text: string, resolve: WikilinkResolver): RootContent[] {
   const out: RootContent[] = [];
   let lastIndex = 0;
-  for (const match of text.matchAll(WIKILINK_RE)) {
+  for (const match of text.matchAll(new RegExp(WIKILINK_RE.source, WIKILINK_RE.flags))) {
     const matchIndex = match.index ?? 0;
     if (matchIndex > lastIndex) {
       out.push({ type: "text", value: text.slice(lastIndex, matchIndex) });
