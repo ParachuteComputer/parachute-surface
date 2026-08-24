@@ -21,3 +21,10 @@ The README and `docs/contracts/` explain how it works; this file is only traps.
 - **Two test runners:** notes-ui and surface-render are vitest; the rest are
   `bun test`. Use the root `bun run test` / `bun run typecheck` scripts — a
   bare `bun test` from the root sweeps the vitest packages and is not the gate.
+- **Test state isolation is unconditional.** Root and surface-host `bunfig.toml`
+  load `packages/surface-host/src/test-preload.ts`, which replaces any inherited
+  `PARACHUTE_HOME` with a fresh temp directory and clears inherited hub authority.
+  Do not weaken this to "only when unset": an inherited value commonly names the
+  operator's live install, and `serve()` immediately sweeps credentials. Default
+  surface-host paths share `resolveParachuteHome()`, whose test-mode tripwire
+  refuses the real `~/.parachute` fallback if the cwd-sensitive preload is missed.

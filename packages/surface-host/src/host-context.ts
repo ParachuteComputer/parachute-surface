@@ -23,7 +23,6 @@
  */
 
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import { getHubOrigin } from "./auth.ts";
@@ -35,6 +34,7 @@ import type {
 } from "./backend-types.ts";
 import { TRUST_LAYERS } from "./backend-types.ts";
 import type { AppConfig } from "./config.ts";
+import { resolveParachuteHome } from "./parachute-home.ts";
 import { ScopedVaultClient } from "./scoped-vault-client.ts";
 import { SurfaceStateStore } from "./surface-state-store.ts";
 import type { RegisteredUi } from "./ui-registry.ts";
@@ -71,8 +71,7 @@ export function clientIpFromRequest(req: Request): string | null {
 export function resolveSurfaceStateDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "surface", "state");
+  return path.join(resolveParachuteHome(env), "surface", "state");
 }
 
 /**
