@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - name: install deps
         # Workspace root install — picks up every packages/* workspace and
         # web/admin (the bundled admin SPA).
@@ -145,7 +145,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           # Node 24 ships npm 11.5+ which has Trusted Publishing OIDC
@@ -221,7 +221,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -279,7 +279,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -338,7 +338,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -396,7 +396,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -452,7 +452,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -520,7 +520,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - name: install deps
         # Workspace install at root — docs-editor's deps resolve to the
         # workspace copies (the monorepo precedent for private packages).
@@ -625,7 +625,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - name: install deps
         # Workspace install at root — meeting-ingest's deps resolve to the
         # workspace copies (the monorepo precedent for private packages).
@@ -726,7 +726,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3
+          bun-version: 1.4
       - name: install deps
         # Workspace install at root — meeting-mcp's deps resolve to the
         # workspace copies (the monorepo precedent for private packages).
