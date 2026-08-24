@@ -25,8 +25,8 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveParachuteHome } from "./parachute-home.ts";
 
 /**
  * Resolve the canonical operator-token path. Honors `PARACHUTE_HOME` for
@@ -36,8 +36,7 @@ import * as path from "node:path";
 export function resolveOperatorTokenPath(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "operator.token");
+  return path.join(resolveParachuteHome(env), "operator.token");
 }
 
 export type ReadOperatorTokenOpts = {
