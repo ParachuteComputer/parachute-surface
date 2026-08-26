@@ -17,8 +17,8 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { VaultAuthError, VaultClient, VaultNotFoundError } from "../vault-client.ts";
-import type { CreateNotePayload, UpdateNotePayload } from "../vault-types.ts";
+import { VaultAuthError, VaultClient, VaultNotFoundError } from "../vault-client.js";
+import type { CreateNotePayload, UpdateNotePayload } from "../vault-types.js";
 
 type Captured = { url: string; init?: RequestInit };
 
@@ -151,9 +151,7 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
   test("404 throws VaultNotFoundError", async () => {
     const calls: Captured[] = [];
     const client = clientCapturing(calls, () => new Response("missing", { status: 404 }));
-    expect(client.fetchAttachmentBlob("/api/storage/gone.png")).rejects.toThrow(
-      VaultNotFoundError,
-    );
+    expect(client.fetchAttachmentBlob("/api/storage/gone.png")).rejects.toThrow(VaultNotFoundError);
   });
 
   test("satisfies surface-render's BlobCapableClient preferred shape", () => {
@@ -166,6 +164,6 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
     const shaped: { fetchAttachmentBlob?: (url: string) => Promise<Blob> } = client;
     expect(shaped.fetchAttachmentBlob).toBeDefined();
     // And the token deliberately does NOT leak via an accessor.
-    expect((client as Record<string, unknown>).getAccessToken).toBeUndefined();
+    expect((client as unknown as Record<string, unknown>).getAccessToken).toBeUndefined();
   });
 });

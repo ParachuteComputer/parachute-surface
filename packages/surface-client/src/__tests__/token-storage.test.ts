@@ -12,7 +12,7 @@ import {
   saveToken,
   storedFromTokenResponse,
   tokenKey,
-} from "../token-storage.ts";
+} from "../token-storage.js";
 
 class MemoryStorage {
   private data = new Map<string, string>();

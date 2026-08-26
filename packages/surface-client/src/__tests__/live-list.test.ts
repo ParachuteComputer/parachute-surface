@@ -24,9 +24,9 @@ import {
   createLiveList,
   reconcileRemove,
   reconcileUpsert,
-} from "../live-list.ts";
-import type { SubscribeStatus } from "../subscribe.ts";
-import type { Note } from "../vault-types.ts";
+} from "../live-list.js";
+import type { SubscribeStatus } from "../subscribe.js";
+import type { Note } from "../vault-types.js";
 
 const note = (id: string, extra: Partial<Note> = {}): Note =>
   ({ id, createdAt: "2026-01-01T00:00:00Z", ...extra }) as Note;

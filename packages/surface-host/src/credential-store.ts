@@ -42,10 +42,10 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import type { AppConfig } from "./config.ts";
+import { resolveParachuteHome } from "./parachute-home.ts";
 import type { RegisteredUi } from "./ui-registry.ts";
 
 /** Mirrors the hub's wire `CredentialPayload.op` values (hub#648). */
@@ -100,8 +100,7 @@ export const CONNECTION_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i;
 export function resolveCredentialsDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "surface", "credentials");
+  return path.join(resolveParachuteHome(env), "surface", "credentials");
 }
 
 export function credentialPathFor(connectionId: string, dir = resolveCredentialsDir()): string {

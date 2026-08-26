@@ -30,7 +30,7 @@ import {
   VaultNotFoundError,
   VaultTargetExistsError,
   VaultUnreachableError,
-} from "../vault-client.ts";
+} from "../vault-client.js";
 
 type Responder = (url: string, init?: RequestInit) => Response | Promise<Response>;
 
@@ -101,14 +101,14 @@ describe("VaultClient — happy path", () => {
   });
 
   test("attaches Bearer header from accessToken", async () => {
-    let capturedAuth: string | null = null;
+    let capturedAuth = "";
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "tok-xyz",
       fetchImpl: makeFetch([
         (_url, init) => {
           const headers = new Headers(init?.headers);
-          capturedAuth = headers.get("Authorization");
+          capturedAuth = headers.get("Authorization") ?? "";
           return jsonRes({ name: "default", description: "x" });
         },
       ]),

@@ -14,4 +14,5 @@ export {
   WIKILINK_CLASS,
   WIKILINK_RESOLVED_CLASS,
   WIKILINK_UNRESOLVED_CLASS,
+  WIKILINK_RE,
 } from "./remark-wikilinks.js";

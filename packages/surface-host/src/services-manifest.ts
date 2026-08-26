@@ -17,8 +17,8 @@
  * fallback in hub's `FIRST_PARTY_FALLBACKS` registry.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import * as os from "node:os";
 import { dirname, join } from "node:path";
+import { resolveParachuteHome } from "./parachute-home.ts";
 
 export interface ServiceEntry {
   name: string;
@@ -52,8 +52,7 @@ interface ServicesManifest {
  * module follows).
  */
 export function resolveManifestPath(env: Record<string, string | undefined> = process.env): string {
-  const base = env.PARACHUTE_HOME ?? join(env.HOME ?? os.homedir(), ".parachute");
-  return join(base, "services.json");
+  return join(resolveParachuteHome(env), "services.json");
 }
 
 function readManifest(path: string): ServicesManifest {

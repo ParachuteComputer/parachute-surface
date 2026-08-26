@@ -16,8 +16,8 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveParachuteHome } from "./parachute-home.ts";
 
 export type AppConfig = {
   /** Hub origin used for DCR registration in Phase 1.2+. */
@@ -81,8 +81,7 @@ export class ConfigError extends Error {
  * so test-time `HOME=` overrides take effect.
  */
 export function resolveConfigPath(env: Record<string, string | undefined> = process.env): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "surface", "config.json");
+  return path.join(resolveParachuteHome(env), "surface", "config.json");
 }
 
 /**
@@ -90,8 +89,7 @@ export function resolveConfigPath(env: Record<string, string | undefined> = proc
  * hosted UIs. Honors `PARACHUTE_HOME` for tests + sandboxes.
  */
 export function resolveUisDir(env: Record<string, string | undefined> = process.env): string {
-  const parachuteHome = env.PARACHUTE_HOME ?? path.join(env.HOME ?? os.homedir(), ".parachute");
-  return path.join(parachuteHome, "surface", "uis");
+  return path.join(resolveParachuteHome(env), "surface", "uis");
 }
 
 // NOTE: the Surface Git Transport no longer clones pushed source under

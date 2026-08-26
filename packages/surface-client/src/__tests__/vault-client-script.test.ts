@@ -28,7 +28,7 @@ import {
   VaultPermissionError,
   VaultServerError,
   VaultUnreachableError,
-} from "../vault-client.ts";
+} from "../vault-client.js";
 
 // ---- Test plumbing ----
 
@@ -106,14 +106,14 @@ describe("VaultClient — fromHub factory", () => {
   });
 
   test("attaches Bearer header from token", async () => {
-    let capturedAuth: string | null = null;
+    let capturedAuth = "";
     const c = VaultClient.fromHub({
       hubOrigin: "https://hub.example.com",
       vaultName: "default",
       token: "pvt_abc",
       fetchImpl: makeFetch([
         (_url, init) => {
-          capturedAuth = new Headers(init?.headers).get("Authorization");
+          capturedAuth = new Headers(init?.headers).get("Authorization") ?? "";
           return jsonRes({ name: "default", description: "" });
         },
       ]),
@@ -161,13 +161,13 @@ describe("VaultClient — constructor validation", () => {
   });
 
   test("accepts tokenProvider in the main constructor", async () => {
-    let capturedAuth: string | null = null;
+    let capturedAuth = "";
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       tokenProvider: () => "sync-token",
       fetchImpl: makeFetch([
         (_u, init) => {
-          capturedAuth = new Headers(init?.headers).get("Authorization");
+          capturedAuth = new Headers(init?.headers).get("Authorization") ?? "";
           return jsonRes({ name: "default", description: "" });
         },
       ]),
@@ -177,14 +177,14 @@ describe("VaultClient — constructor validation", () => {
   });
 
   test("tokenProvider wins over accessToken when both are supplied", async () => {
-    let capturedAuth: string | null = null;
+    let capturedAuth = "";
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "static",
       tokenProvider: () => "dynamic",
       fetchImpl: makeFetch([
         (_u, init) => {
-          capturedAuth = new Headers(init?.headers).get("Authorization");
+          capturedAuth = new Headers(init?.headers).get("Authorization") ?? "";
           return jsonRes({ name: "default", description: "" });
         },
       ]),
@@ -297,10 +297,7 @@ describe("VaultClient — error class refinements", () => {
       [() => new Response("", { status: 401 }), VaultAuthError],
       [() => new Response("", { status: 403 }), VaultPermissionError],
       [() => new Response("", { status: 404 }), VaultNotFoundError],
-      [
-        () => jsonRes({ message: "stale" }, 409),
-        VaultConflictError,
-      ],
+      [() => jsonRes({ message: "stale" }, 409), VaultConflictError],
       [() => new Response("", { status: 502 }), VaultServerError],
     ];
     for (const [responder, klass] of cases) {
@@ -384,9 +381,9 @@ describe("VaultClient — createNotes (batch)", () => {
           ),
       ]),
     });
-    await expect(
-      c.createNotes([{ content: "x", path: "duplicate.md" }]),
-    ).rejects.toBeInstanceOf(VaultConflictError);
+    await expect(c.createNotes([{ content: "x", path: "duplicate.md" }])).rejects.toBeInstanceOf(
+      VaultConflictError,
+    );
   });
 
   test("oversized batch surfaces vault's 413 as Error (batch_too_large)", async () => {
@@ -516,9 +513,7 @@ describe("VaultClient — findPath", () => {
     const c = new VaultClient({
       vaultUrl: "http://vault.test",
       accessToken: "t",
-      fetchImpl: makeFetch([
-        () => jsonRes({ error: "Note not found: \"missing\"" }, 404),
-      ]),
+      fetchImpl: makeFetch([() => jsonRes({ error: 'Note not found: "missing"' }, 404)]),
     });
     await expect(c.findPath("missing", "b")).rejects.toBeInstanceOf(VaultNotFoundError);
   });
@@ -572,7 +567,7 @@ describe("VaultClient — deleteTag", () => {
             {
               error: "TagInUseByTokens",
               error_type: "tag_in_use_by_tokens",
-              message: "Tag \"project\" is referenced by 2 tag-scoped token(s)",
+              message: 'Tag "project" is referenced by 2 tag-scoped token(s)',
               tag: "project",
               referenced_by: [
                 { id: "tok1", label: "automation" },

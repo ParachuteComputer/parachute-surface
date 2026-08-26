@@ -1,7 +1,9 @@
 import { render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { type BlobCapableClient, useVaultFetchBlob } from "../embed/index.js";
+import { WIKILINK_RE as ROOT_WIKILINK_RE } from "../index.js";
 import { MarkdownView } from "../markdown/MarkdownView.js";
+import { WIKILINK_RE as MARKDOWN_WIKILINK_RE } from "../markdown/index.js";
 import {
   INERT,
   type WikilinkResolver,
@@ -12,6 +14,31 @@ import { NoteRenderer } from "../note/NoteRenderer.js";
 
 // ── Item 1: resolver helpers ────────────────────────────────────────────────
 describe("wikilink resolver helpers", () => {
+  it("exports the canonical wikilink matcher from both public entry points", () => {
+    const text = "[[Target]] and [[Target|Alias]]";
+    expect(Array.from(text.matchAll(MARKDOWN_WIKILINK_RE), (match) => match.slice(0, 3))).toEqual([
+      ["[[Target]]", "Target", undefined],
+      ["[[Target|Alias]]", "Target", "Alias"],
+    ]);
+    expect(ROOT_WIKILINK_RE).toBe(MARKDOWN_WIKILINK_RE);
+  });
+
+  it("isolates rendering from consumer mutations of the exported matcher", () => {
+    try {
+      expect(MARKDOWN_WIKILINK_RE.test("[[Alpha]] and [[Beta]]")).toBe(true);
+      const resolve: WikilinkResolver = (target) => resolvedLink(`/n/${target}`);
+
+      render(<MarkdownView content="[[Alpha]] and [[Beta]]" resolve={resolve} />);
+
+      expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Alpha",
+        "Beta",
+      ]);
+    } finally {
+      MARKDOWN_WIKILINK_RE.lastIndex = 0;
+    }
+  });
+
   it("unresolvedLink builds a navigable {exists:false} target", () => {
     expect(unresolvedLink("/n/Foo")).toEqual({ href: "/n/Foo", exists: false });
   });

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.7] - 2026-08-26
+
+Version + changelog of everything on `next` after 0.3.6. **No new code in this PR.** Merging to `next` does not publish. The follow-up `next`→`main` plus tag `client-v0.3.7` publishes `@latest`.
+
+This is a stable patch, not an rc: host/render/server depend on `^0.3.3`, and a `0.3.7-rc.1` workspace version is a caret-miss (bun would resolve npm 0.3.6 for those packages). Surface's documented convention. Soak is `next` itself.
+
+
+### Added — refcounted live-list registry (surface#205, fixes #202)
+
+`createLiveList` shares one `client.subscribe()` per `(client, canonical params)`. Two consumers of the same query get one socket and one snapshot; the transport is released when the last consumer calls `close()`. Equivalent queries dedup regardless of param order or input shape (`URLSearchParams`, raw record, typed `NotesQuery`).
+
+The registry is a `WeakMap` keyed on the client instance — two vaults / two tokens never share a stream. Additive options: `share?` (default `true`), `releaseDelayMs?` (default `0`, so existing `close()` stays synchronous). A caller passing `subscribeOptions` (AbortSignal / backoff) still gets a dedicated socket. Per-consumer `thinkingStatuses` and `onError` stay per-consumer.
+
+Late joiners observe the sequence they would have seen with their own socket (pristine `connecting`/`[]`, then the established state as the first change), so bindings that treat the pristine list as not-yet-authoritative keep writing normally.
+
+### Internal — typecheck the full test tree (surface#206)
+
+`packages/surface-client/src/__tests__` is now in a tsc project. Not in the published tarball.
+
 ## [0.3.6] - 2026-07-16
 
 ### Fixed — `queryNotesCursor` actually paginates (contract-drift brief §3)

@@ -14,7 +14,7 @@
  * fixtures on that naming convention rather than widening the glob.
  */
 import { describe, test } from "bun:test";
-import type { Note, NoteSummary } from "../index.ts";
+import type { Note, NoteSummary } from "../index.js";
 
 describe("Note/NoteSummary — write-attribution contract (compile-time only)", () => {
   test("no-op — see the type assertions below this block", () => {
