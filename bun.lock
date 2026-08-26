@@ -127,7 +127,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.7",
+      "version": "0.3.7-rc.1",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
@@ -161,7 +161,7 @@
       "name": "@openparachute/surface-render",
       "version": "0.3.0",
       "dependencies": {
-        "@openparachute/surface-client": "^0.3.3",
+        "@openparachute/surface-client": "0.3.7-rc.1",
       },
       "devDependencies": {
         "@testing-library/dom": "^10.4.0",
