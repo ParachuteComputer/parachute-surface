@@ -1,10 +1,11 @@
 # Changelog
 
-## [0.3.7-rc.1] - 2026-08-26
+## [0.3.7] - 2026-08-26
 
-Version + changelog of everything on `next` after 0.3.6. **No new code in this PR.** Merging to `next` does not publish. The follow-up `next`→`main` plus tag `client-v0.3.7-rc.1` publishes `@rc`.
+Version + changelog of everything on `next` after 0.3.6. **No new code in this PR.** Merging to `next` does not publish. The follow-up `next`→`main` plus tag `client-v0.3.7` publishes `@latest`.
 
-Stable later is a suffix-drop from this same core, no new code.
+This is a stable patch, not an rc: host/render/server depend on `^0.3.3`, and a `0.3.7-rc.1` workspace version is a caret-miss (bun would resolve npm 0.3.6 for those packages). Surface's documented convention. Soak is `next` itself.
+
 
 ### Added — refcounted live-list registry (surface#205, fixes #202)
 
