@@ -12,12 +12,16 @@ The README and `docs/contracts/` explain how it works; this file is only traps.
   `VITE_BASE_PATH=/`, or deep routes like `/oauth/callback` resolve assets
   relatively and 404. Full story: the comments in
   `packages/notes-ui/vite.config.ts`.
-- **npm publishes are tag-prefix-driven CI** — one package per tag prefix
-  (`v...` = surface-host, `client-v...`, `render-v...`, `notes-ui-v...`, ...);
-  see [RELEASING.md](./RELEASING.md). The twice-bitten trap: sibling deps in a
-  publishable `package.json` must be concrete semver — `workspace:*`/`link:`
-  leak into the published manifest and break every install. Publish
-  `surface-client` before its dependents.
+- **npm publishes are merge-driven** (`next` → `@rc`, `main` → `@latest`) via
+  `scripts/release-plan.ts`. Tag prefixes are ALIASES, not directory basenames
+  (`packages/surface-host` → `v…`, `packages/surface-client` → `client-v…`);
+  inferring the basename re-creates hub#830. Dist-tag comes from package.json
+  version, not `github.ref_name` (hub#792). Stables publish from `main` only
+  (hub#913). Tarball packages (docs-editor / meeting-ingest / meeting-mcp)
+  stay tag-only. See [RELEASING.md](./RELEASING.md). The twice-bitten trap:
+  sibling deps in a publishable `package.json` must be concrete semver —
+  `workspace:*`/`link:` leak into the published manifest and break every
+  install. Publish `surface-client` before its dependents.
 - **Two test runners:** notes-ui and surface-render are vitest; the rest are
   `bun test`. Use the root `bun run test` / `bun run typecheck` scripts — a
   bare `bun test` from the root sweeps the vitest packages and is not the gate.
