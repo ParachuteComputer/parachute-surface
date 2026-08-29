@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/surface-render",
-  "version": "0.3.0",
+  "version": "0.3.1-rc.1",
   "description": "React rendering primitives for Parachute surfaces — markdown + wikilinks, auth'd vault media (image/audio) embeds, multi-format (csv/json/yaml/code/plain) renderers, a note-format dispatcher, and an MDX-safe-by-default view. Good defaults + per-surface override hooks. Sibling to @openparachute/surface-client.",
   "license": "AGPL-3.0",
   "type": "module",
@@ -50,7 +50,7 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "@openparachute/surface-client": "0.3.7-rc.1"
+    "@openparachute/surface-client": "0.3.7-rc.2"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
