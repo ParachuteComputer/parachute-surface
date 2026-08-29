@@ -544,6 +544,14 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          # `git rev-parse $T` is the "already tagged" dedupe. A bare checkout
+          # is `--depth=1 --no-tags`, so a tag that already exists on origin
+          # is invisible here; the job then `git tag && git push` and the
+          # rejected push is swallowed by continue-on-error. Same fetch as
+          # `plan` (hub#830 class).
+          fetch-depth: 0
+          fetch-tags: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4

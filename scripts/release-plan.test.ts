@@ -485,8 +485,8 @@ describe("driftLogArgs", () => {
 
 describe("release.yml drift advisory can execute (hub#830)", () => {
   const workflow = readFileSync(join(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
-  // Scope every assertion to the `plan` job — the other jobs' shallow
-  // checkouts are fine, only `plan` reads git history.
+  // Scope every assertion to the `plan` job — publish jobs' shallow
+  // checkouts are fine; `plan` reads git history.
   const planJob = workflow.match(/\n {2}plan:\n([\s\S]*?)\n {2}[a-z][\w-]*:\n/)?.[1];
 
   test("the plan job is findable (guards the slicing above)", () => {
@@ -502,6 +502,29 @@ describe("release.yml drift advisory can execute (hub#830)", () => {
 
   test("the plan job's checkout fetches tags — the advisory's range is a TAG", () => {
     expect(planJob).toMatch(/fetch-tags:\s*true/);
+  });
+});
+
+describe("release.yml tag-record can see existing tags", () => {
+  const workflow = readFileSync(join(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
+  const tagRecord = workflow.match(/\n {2}tag-record:\n([\s\S]*?)\n {2}[a-z][\w-]*:\n/)?.[1];
+
+  test("the tag-record job is findable", () => {
+    expect(tagRecord).toBeTruthy();
+    expect(tagRecord).toContain("tag published packages");
+  });
+
+  test("tag-record's checkout fetches tags — the dedupe is git rev-parse $T", () => {
+    // Bare checkout is --depth=1 --no-tags. A tag already on origin is then
+    // invisible, so the job git-tags locally and git-push rejects; continue-
+    // on-error swallows it. Same fetch as plan.
+    expect(tagRecord).toMatch(/actions\/checkout@v6\n\s*with:\n(?:\s*.+\n)*?\s*fetch-depth:\s*0/);
+    expect(tagRecord).toMatch(/fetch-tags:\s*true/);
+  });
+
+  test("tag-record still does not --force the tag push", () => {
+    expect(tagRecord).not.toMatch(/git push --force/);
+    expect(tagRecord).toContain('git tag "$T" && git push origin "$T"');
   });
 });
 
