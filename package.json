@@ -12,7 +12,7 @@
   "scripts": {
     "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/account-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build && bun run --filter '@openparachute/meeting-ingest' build && bun run --filter '@openparachute/meeting-mcp' build",
     "build:admin": "bun run --filter '@openparachute/surface-admin-ui' build",
-    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/account-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ packages/meeting-ingest/server/ packages/meeting-mcp/server/ && bun run --filter \"@openparachute/surface-render\" test",
+    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/account-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ packages/meeting-ingest/server/ packages/meeting-mcp/server/ scripts/release-plan.test.ts && bun run --filter \"@openparachute/surface-render\" test",
     "test:host": "bun test packages/surface-host/src/",
     "test:client": "bun test packages/surface-client/src/",
     "test:server": "bun test packages/surface-server/src/",

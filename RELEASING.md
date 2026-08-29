@@ -13,7 +13,9 @@ The `parachute-surface` repo is a monorepo with seven publishable packages, all 
 
 The workspace root (`@openparachute/surface-monorepo`) is intentionally `private: true` and should NEVER publish. The admin SPA (`web/admin/` → `@openparachute/surface-admin-ui`) is also `private: true` — it's bundled into surface-host's `dist/`, not separately published.
 
-All six packages run on independent release cadences. Each tag pushes only the matching package.
+All six npm packages run on independent release cadences. Merging a version bump to `next` (rc) or `main` (stable) is the release signal — `scripts/release-plan.ts` compares each package.json against npm and publishes what's new. `tag-record` writes the matching git tag afterwards as a record; you do not tag npm packages by hand. An explicit **rc** tag still publishes. A tag push of a stable is refused; stables publish from `main` only.
+
+GitHub-release tarballs (`docs-editor`, `meeting-ingest`, `meeting-mcp`) stay tag-triggered — they are `private: true` and not on npm.
 
 > **notes-ui removal (2026-07-29)**: `@openparachute/notes-ui` was deleted from this repo. Notes is retired (parachute-hub#788) — `@openparachute/app` is the front door now. Published `notes-ui-v*` versions stay on npm for anyone still installing one; nothing new ships from here. Its npm Trusted Publisher rule can be dropped.
 
@@ -36,83 +38,33 @@ Per [governance rule 2](https://github.com/ParachuteComputer/parachute-workspace
 | `server-vX.Y.Z-rc.N` | `@openparachute/surface-server` | `rc` |
 | `server-vX.Y.Z` | `@openparachute/surface-server` | `latest` |
 
-The workflow auto-detects rc vs stable from the `-rc.` substring; jobs gate by tag prefix via `startsWith(github.ref_name, '<prefix>-')`.
+The workflow auto-detects rc vs stable from the **package.json version**, not from the git ref (a merge-triggered run's ref is `next`/`main` — using that would publish every rc to `@latest`, hub#792). On a tag push, jobs also gate by tag prefix via `startsWith(github.ref_name, '<prefix>-')`.
+
+Tag prefixes are aliases, not directory basenames: `packages/surface-host` ships as `v…`, not `surface-host-v…`. The map lives in `scripts/release-plan.ts` (`SURFACE_NPM_TAG_PREFIX`) and is tested against `tag-record`.
 
 ## Release flow
 
-Per [governance rule 2 (updated 2026-05-24)](https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md), PRs do NOT bump version per-commit. Bump + tag together only when you intend to ship.
+Per [governance rule 2 (updated 2026-05-24)](https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md), PRs do NOT bump version per-commit. Bump only when you intend to ship.
 
 ### Releasing `@openparachute/surface`
 
 ```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/surface-host/package.json (rc or drop -rc for stable), commit, push.
-VERSION="v$(bun -e "console.log(require('./packages/surface-host/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
+# rc: bump packages/surface-host/package.json to X.Y.Z-rc.N, PR targeting next.
+# Merge to next publishes @rc. tag-record writes vX.Y.Z-rc.N.
+
+# stable: suffix-drop on a branch off the rc tag, PR targeting main.
+# Merge to main publishes @latest. Never suffix-drop on next.
 ```
 
-CI takes over from there — watch the run at [Actions](https://github.com/ParachuteComputer/parachute-surface/actions). The surface-client publish job skips on these tags (it gates on the `client-` prefix).
+CI takes over from there — watch the run at [Actions](https://github.com/ParachuteComputer/parachute-surface/actions). Same shape for the other five npm packages: bump that package's `package.json` (and changelog / `src/version.ts` where it exists). A merge can publish several packages at once if more than one version moved.
 
-### Releasing `@openparachute/surface-client`
+Package-specific notes that still apply:
 
-```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/surface-client/package.json, commit, push.
-VERSION="client-v$(bun -e "console.log(require('./packages/surface-client/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
-```
-
-The other publish jobs skip on these tags. surface-client's `prepublishOnly` hook builds via `tsc` before packing.
-
-### Releasing `@openparachute/account-client`
-
-```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/account-client/package.json, commit, push.
-VERSION="account-v$(bun -e "console.log(require('./packages/account-client/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
-```
-
-The other publish jobs skip on these tags. account-client's `prepublishOnly` hook builds via `tsc` before packing. It is dependency-free (no workspace siblings), so there's no publish-order constraint.
-
-### Releasing `@openparachute/surface-render`
-
-```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/surface-render/package.json, commit, push.
-VERSION="render-v$(bun -e "console.log(require('./packages/surface-render/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
-```
-
-The other publish jobs skip on these tags. surface-render's `prepublishOnly` hook builds via `tsc` before packing. surface-render depends on `@openparachute/surface-client` (`workspace:^`), so if shipping both, publish surface-client FIRST.
-
-### Releasing `@openparachute/doc-schema`
-
-```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/doc-schema/package.json, commit, push.
-VERSION="doc-schema-v$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
-```
-
-The other publish jobs skip on these tags. doc-schema's `prepublishOnly` hook builds via `tsc` before packing. Its serialization-affecting deps (prosemirror-markdown, prosemirror-model, markdown-it) are exact-pinned — see the package README before bumping them.
-
-### Releasing `@openparachute/surface-server`
-
-```sh
-git fetch && git checkout main && git pull --ff-only
-# Bump packages/surface-server/package.json, commit, push.
-VERSION="server-v$(bun -e "console.log(require('./packages/surface-server/package.json').version)")"
-git tag "$VERSION"
-git push origin "$VERSION"
-```
-
-The other publish jobs skip on these tags. surface-server publishes raw TypeScript sources (no build step). It depends on `@openparachute/surface` and `@openparachute/surface-client` by concrete semver — if shipping those too, publish them FIRST.
+- **surface-client** — `prepublishOnly` builds via `tsc` before packing.
+- **account-client** — same; dependency-free, no publish-order constraint.
+- **surface-render** — `prepublishOnly` builds via `tsc`. Depends on `@openparachute/surface-client`; if shipping both, bump client first (or in the same PR — `plan` publishes each independently, but a host that pins an unpublished client version will fail to install until client lands).
+- **doc-schema** — `prepublishOnly` builds via `tsc`. Serialization-affecting deps (prosemirror-markdown, prosemirror-model, markdown-it) are exact-pinned — see the package README before bumping them.
+- **surface-server** — publishes raw TypeScript sources (no build step). Depends on `@openparachute/surface` and `@openparachute/surface-client` by concrete semver.
 
 ### Releasing the docs-editor tarball (GitHub Release, not npm)
 
