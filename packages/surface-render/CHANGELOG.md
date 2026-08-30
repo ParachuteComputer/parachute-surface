@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.3.1] - 2026-08-30
+
+Stable promotion of `0.3.1-rc.1` — suffix-drop, no code change. Ships the
+`WIKILINK_RE` export (surface#204). The `@openparachute/surface-client`
+exact pin moves to `0.3.7` (stable) in the same commit.
+
 ## [0.3.1-rc.1] - 2026-08-29
 
 ### Added — canonical wikilink matcher export (surface#204)
