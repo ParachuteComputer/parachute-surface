@@ -72,9 +72,85 @@ describe("decidePublish", () => {
     expect(d).toMatchObject({ publish: false });
   });
 
-  test("first-ever release of a package publishes", () => {
-    const d = decidePublish("0.1.0", { versionExists: false }, { branch: "main" });
+  test("a never-published package SKIPS on a branch push — a first publish is deliberate", () => {
+    // surface#220 verbatim: @openparachute/account-client@0.1.0 was on no
+    // registry at all, this read "0.1.0 is not on npm" → should_publish=true,
+    // and the OIDC publish 404'd. Trusted publishing cannot CREATE a package.
+    const d = decidePublish(
+      "0.1.0",
+      { versionExists: false, publishedVersions: [] },
+      { branch: "main" },
+    );
+    expect(d).toMatchObject({ publish: false });
+    expect("reason" in d && d.reason).toMatch(/first publish is a deliberate act/);
+    expect("reason" in d && d.reason).toMatch(/cannot create a package/);
+  });
+
+  test("an rc of a never-published package skips too — it's the package, not the channel", () => {
+    const d = decidePublish(
+      "0.1.0-rc.1",
+      { versionExists: false, publishedVersions: [] },
+      { branch: "next" },
+    );
+    expect(d).toMatchObject({ publish: false });
+    expect("reason" in d && d.reason).toMatch(/nothing is published under this name yet/);
+  });
+
+  test("omitted publishedVersions with no dist-tag reads as never-published — skip, don't publish", () => {
+    // The unplumbed-caller case fails toward a skip. Costing a release is
+    // recoverable; attempting a publish npm structurally refuses is not.
+    const d = decidePublish("0.1.0-rc.1", { versionExists: false });
+    expect(d).toMatchObject({ publish: false });
+    expect("reason" in d && d.reason).toMatch(/nothing is published under this name yet/);
+  });
+
+  test("a never-published package on an rc TAG PUSH still tries — a human said release this", () => {
+    // Kept deliberately: `isTagPush` short-circuits ahead of every registry
+    // check, so the first publish stays possible through the explicit path,
+    // and a failure there surfaces npm's own error rather than ours.
+    const d = decidePublish(
+      "0.1.0-rc.1",
+      { versionExists: false, publishedVersions: [] },
+      { isTagPush: true },
+    );
     expect(d).toMatchObject({ publish: true });
+    expect("reason" in d && d.reason).toMatch(/explicit tag push/);
+  });
+
+  test("a never-published STABLE on a tag push is still refused by the from-main gate", () => {
+    // The stable gate sits above the tag-push short-circuit, so a first
+    // publish via tag has to be an rc. Unchanged by surface#220.
+    const d = decidePublish(
+      "0.1.0",
+      { versionExists: false, publishedVersions: [] },
+      { isTagPush: true },
+    );
+    expect(d).toMatchObject({ publish: false });
+    expect("reason" in d && d.reason).toMatch(/from main only/);
+  });
+
+  test("an existing package is unaffected — one published version is enough", () => {
+    // The carve-out is "never published", not "small". A package with a
+    // single rc on npm keeps publishing on merge exactly as before.
+    const d = decidePublish(
+      "0.1.0-rc.2",
+      {
+        versionExists: false,
+        currentDistTagVersion: "0.1.0-rc.1",
+        publishedVersions: ["0.1.0-rc.1"],
+      },
+      { branch: "next" },
+    );
+    expect(d).toMatchObject({ publish: true });
+    expect("reason" in d && d.reason).toMatch(/is not on npm/);
+  });
+
+  test("an unreadable registry is still a REFUSAL, not a never-published skip", () => {
+    // The two ways to see "nothing" must not collapse: 404 is knowledge and
+    // skips, a 5xx is ignorance and fails the job loudly.
+    const ambiguous = decidePublish("0.1.0-rc.1", { ambiguous: true }, { branch: "next" });
+    expect(ambiguous).toMatchObject({ refuse: true });
+    expect("refuse" in ambiguous && ambiguous.reason).toMatch(/refusing to guess/);
   });
 
   test("REFUSES to move a dist-tag backwards — the parallel-merge hazard", () => {
@@ -358,10 +434,20 @@ describe("readRegistry", () => {
     expect(v).toMatchObject({ currentDistTagVersion: "0.7.8" });
   });
 
-  test("a never-published package is not ambiguous — it's a first release", async () => {
+  test("a never-published package is not ambiguous — a 404 is knowledge", async () => {
     const v = await readRegistry("@openparachute/new", "0.1.0", (() =>
       json({}, 404)) as unknown as typeof fetch);
-    expect(v).toMatchObject({ versionExists: false });
+    // publishedVersions must be present and EMPTY: that pair is what
+    // decidePublish reads as "never published" (surface#220). Dropping it
+    // would make a 404 indistinguishable from an unplumbed caller.
+    expect(v).toMatchObject({ versionExists: false, publishedVersions: [] });
+    expect(v).not.toHaveProperty("ambiguous");
+  });
+
+  test("the 404 view composes into a skip — the two halves of surface#220 line up", async () => {
+    const v = await readRegistry("@openparachute/account-client", "0.1.0", (() =>
+      json({}, 404)) as unknown as typeof fetch);
+    expect(decidePublish("0.1.0", v, { branch: "main" })).toMatchObject({ publish: false });
   });
 
   test("a 5xx is ambiguous", async () => {
