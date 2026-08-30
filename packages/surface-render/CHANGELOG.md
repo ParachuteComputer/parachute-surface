@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## [0.3.1] - 2026-08-30
+
+Stable promotion of `0.3.1-rc.1` — suffix-drop, no code change. Ships the
+`WIKILINK_RE` export (surface#204). The `@openparachute/surface-client`
+exact pin moves to `0.3.7` (stable) in the same commit.
+
+## [0.3.1-rc.1] - 2026-08-29
+
+### Added — canonical wikilink matcher export (surface#204)
+
+`WIKILINK_RE` — the regex the renderer itself uses for `[[target]]` and
+`[[target|alias]]` spans — is now exported from the package root and
+`markdown/` subpath, so consumers matching wikilinks in surrounding code
+(previews, link indexing) use the same definition instead of hand-rolling a
+divergent one. No rendering behavior change.
+
+First surface-render release published by merge-to-`next` (surface#215)
+rather than a tag push. Depends on `@openparachute/surface-client
+0.3.7-rc.2` (exact pin moved with the recut — an exact pin that trails the
+workspace version makes bun resolve the npm tarball instead of the
+workspace package).
+
 ## 0.3.0
 
 Renders a single newline inside a paragraph as a visible line break, matching

@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.54",
-    "@openparachute/surface-client": "0.3.7-rc.1",
+    "@openparachute/surface-client": "0.3.7",
     "@openparachute/scope-guard": "^0.5.0"
   },
   "repository": {

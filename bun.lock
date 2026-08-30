@@ -127,7 +127,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.7-rc.1",
+      "version": "0.3.7",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5",
@@ -145,7 +145,7 @@
       "dependencies": {
         "@anthropic-ai/sandbox-runtime": "0.0.54",
         "@openparachute/scope-guard": "^0.5.0",
-        "@openparachute/surface-client": "0.3.7-rc.1",
+        "@openparachute/surface-client": "0.3.7-rc.2",
       },
       "devDependencies": {
         "@biomejs/biome": "^1.9.4",
@@ -159,9 +159,9 @@
     },
     "packages/surface-render": {
       "name": "@openparachute/surface-render",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
-        "@openparachute/surface-client": "0.3.7-rc.1",
+        "@openparachute/surface-client": "0.3.7",
       },
       "devDependencies": {
         "@testing-library/dom": "^10.4.0",
@@ -204,7 +204,7 @@
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@openparachute/scope-guard": "^0.5.0",
         "@openparachute/surface": "^0.3.4",
-        "@openparachute/surface-client": "0.3.7-rc.1",
+        "@openparachute/surface-client": "0.3.7-rc.2",
         "yjs": "^13.6.27",
       },
       "devDependencies": {
@@ -1282,7 +1282,11 @@
 
     "@openparachute/doc-schema/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
+    "@openparachute/surface/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
+
     "@openparachute/surface-client/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
+
+    "@openparachute/surface-server/@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
     "@testing-library/dom/dom-accessibility-api": ["dom-accessibility-api@0.5.16", "", {}, "sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg=="],
 
@@ -1321,6 +1325,10 @@
     "@openparachute/doc-schema/@types/bun/bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
 
     "@openparachute/surface-client/@types/bun/bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
+
+    "@openparachute/surface-server/@types/bun/bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
+
+    "@openparachute/surface/@types/bun/bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
 
     "accepts/mime-types/mime-db": ["mime-db@1.54.0", "", {}, "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ=="],
 

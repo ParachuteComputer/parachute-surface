@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.7] - 2026-08-30
+
+Stable promotion of `0.3.7-rc.2` — suffix-drop, no code change. See the
+rc entries below for what 0.3.7 ships (refcounted live-list registry,
+surface#205). host / render / server exact pins move to `0.3.7` in the
+same commit.
+
+## [0.3.7-rc.2] - 2026-08-29
+
+**Re-anchor recut; no code change vs 0.3.7-rc.1.** The stable-promotion gate
+(surface#215) diffs the tree against the latest matching rc tag, and
+`client-v0.3.7-rc.1` predates the release pipeline itself — so a 0.3.7
+promotion could never pass from that anchor. This rc re-tags the same
+package content on the pipeline's side of history. First surface-client
+release published by merge-to-`next` (surface#215) rather than a tag push.
+host / render / server exact pins move to `0.3.7-rc.2` in the same commit —
+a trailing exact pin flips bun from workspace resolution to the npm tarball.
+
 ## [0.3.7-rc.1] - 2026-08-26
 
 Same train as the unpublished `0.3.7` cut. Recut to rc **before tag**: protocol is `@rc`, soak on the box, then suffix-drop that same core to `@latest`. `0.3.7` was never published (npm still 0.3.6).

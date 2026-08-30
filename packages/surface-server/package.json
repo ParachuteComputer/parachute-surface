@@ -39,7 +39,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openparachute/scope-guard": "^0.5.0",
     "@openparachute/surface": "^0.3.4",
-    "@openparachute/surface-client": "0.3.7-rc.1",
+    "@openparachute/surface-client": "0.3.7",
     "yjs": "^13.6.27"
   },
   "repository": {

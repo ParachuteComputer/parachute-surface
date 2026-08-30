@@ -1,8 +1,9 @@
-# Release workflow — triggered by pushing a semver tag.
+# Release workflow — triggered by a merge to `next` or `main` (port of
+# hub#790 / #911 / #913), or by pushing a semver tag.
 #
-# This workflow publishes SEVEN packages to npm on different tag namespaces,
-# plus ONE GitHub-release tarball (docs-editor, which is private:true — its
-# distribution is the release asset, not npm):
+# This workflow publishes SIX npm packages on different tag namespaces,
+# plus THREE GitHub-release tarballs (private:true — distribution is the
+# release asset, not npm; those stay tag-triggered):
 #
 #   - @openparachute/surface        ← tag prefix `v...`           (from packages/surface-host)
 #   - @openparachute/surface-client ← tag prefix `client-v...`    (from packages/surface-client)
@@ -10,49 +11,37 @@
 #   - @openparachute/surface-render ← tag prefix `render-v...`    (from packages/surface-render)
 #   - @openparachute/doc-schema     ← tag prefix `doc-schema-v...` (from packages/doc-schema)
 #   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
-#   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (from packages/docs-editor;
-#                                     attaches docs-editor-surface-<v>.tgz to a GitHub Release)
-#   - meeting-ingest release tarball ← tag prefix `meeting-ingest-v...` (from packages/meeting-ingest)
-#   - meeting-mcp release tarball   ← tag prefix `meeting-mcp-v...` (from packages/meeting-mcp;
-#                                     attaches meeting-mcp-surface-<v>.tgz to a GitHub Release)
+#   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (tag-only)
+#   - meeting-ingest release tarball ← tag prefix `meeting-ingest-v...` (tag-only)
+#   - meeting-mcp release tarball   ← tag prefix `meeting-mcp-v...` (tag-only)
 #
 # All npm packages have npm Trusted Publisher rules pointing at this workflow
-# file. Jobs gate on the tag prefix so only one package publishes per tag
-# push. Independent release cadences.
+# file. On a tag push the jobs below gate on the tag prefix so only one package
+# publishes; on a merge each job gates on its own `plan` output, so a merge can
+# publish several packages at once. Independent release cadences either way.
 #
-# Tag conventions (matches governance rule 2, https://github.com/ParachuteComputer/parachute-workspace/blob/main/docs/process/governance.md):
-#   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.2.0-rc.10)
-#                                          (client-v0.1.0-rc.4)
-#                                          (doc-schema-v0.1.0-rc.1)
-#                                          (server-v0.1.0-rc.1)
-#                                          (docs-editor-v0.1.0-rc.1)
-#   - stable: v<X>.<Y>.<Z>                 (e.g. v0.2.0)
-#                                          (client-v0.1.0)
-#                                          (doc-schema-v0.1.0)
-#                                          (server-v0.1.0)
-#                                          (docs-editor-v0.1.0)
+# Tag prefixes are ALIASES, not directory basenames (`packages/surface-host`
+# ships as `v…`, not `surface-host-v…`). `scripts/release-plan.ts` maps them
+# explicitly — inferring the basename re-creates hub#830.
 #
-# Release flow:
-#   1. When ready to ship: bump version in the relevant package.json on main.
-#   2. Push a matching tag:
-#        # for surface
-#        VERSION="v$(bun -e "console.log(require('./packages/surface-host/package.json').version)")"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#        # for surface-client
-#        VERSION="client-v$(bun -e "console.log(require('./packages/surface-client/package.json').version)")"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#        # for doc-schema
-#        VERSION="doc-schema-v$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#        # for surface-server
-#        VERSION="server-v$(bun -e "console.log(require('./packages/surface-server/package.json').version)")"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#        # for docs-editor (GitHub release tarball, not npm)
-#        VERSION="docs-editor-v$(bun -e "console.log(require('./packages/docs-editor/package.json').version)")"
-#        git tag "$VERSION" && git push origin "$VERSION"
-#   3. CI runs tests once (workspace-wide), then publishes the package matching
-#      the tag prefix.
+# Tag conventions (matches governance rule 2):
+#   - rc:     v<X>.<Y>.<Z>-rc.<N>          (e.g. v0.3.9-rc.1, client-v0.3.7-rc.1)
+#   - stable: v<X>.<Y>.<Z>                 (e.g. v0.3.9)
+#
+# Release flow (publish-on-merge — the tag path still works, see `plan`):
+#   1. Cutting an rc: open a release PR bumping `version` to an `-rc.N`
+#      shape, targeting `next` directly. Promoting to stable: same shape,
+#      but the PR targets `main` and drops the `-rc.N` suffix; `plan`
+#      refuses it unless npm already has that core as an rc AND the diff
+#      from that rc tag is version/changelog/lockfile only, AND the trigger
+#      is a branch push of `main`.
+#   2. Merge it. That IS the release signal — `plan` compares each
+#      package.json against npm and publishes what's new.
+#   3. CI runs tests once, then publishes whichever packages `plan` selected.
+#   4. `tag-record` pushes the matching tag afterwards as a RECORD.
+#      Nothing needs to be tagged by hand for npm packages.
+#   Tarball packages (docs-editor / meeting-ingest / meeting-mcp) still
+#   ship by pushing their tag; they are not on npm.
 #
 # Operator setup (one-time) — see RELEASING.md:
 #   - npm Trusted Publisher rules: one per package (surface, surface-client,
@@ -65,6 +54,23 @@ name: Release
 
 on:
   push:
+    # Publish-on-merge. See the `plan` job. `next` publishes rc's directly.
+    # `decidePublish` is idempotent on an already-published version, refuses
+    # to move a dist-tag backwards, refuses a `latest` publish unless npm
+    # already has a matching `-rc.*` and the diff is a pure suffix-drop,
+    # AND refuses a stable unless the trigger is a branch push of `main`.
+    # The `paths` filter means an ordinary feature merge (no version bump)
+    # never even runs this workflow a second time — `ci.yml` already tested it.
+    branches:
+      - main
+      - next
+    paths:
+      - 'packages/surface-host/package.json'
+      - 'packages/surface-client/package.json'
+      - 'packages/account-client/package.json'
+      - 'packages/surface-render/package.json'
+      - 'packages/doc-schema/package.json'
+      - 'packages/surface-server/package.json'
     tags:
       # App release tags
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -100,6 +106,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # What, if anything, needs publishing. Tag-push still honoured for rc's
+  # (`--tag-push`); stables publish from `main` only (hub#913).
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      surface: ${{ steps.surface.outputs.should_publish }}
+      surface_client: ${{ steps.surface_client.outputs.should_publish }}
+      account_client: ${{ steps.account_client.outputs.should_publish }}
+      surface_render: ${{ steps.surface_render.outputs.should_publish }}
+      doc_schema: ${{ steps.doc_schema.outputs.should_publish }}
+      surface_server: ${{ steps.surface_server.outputs.should_publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The drift advisory asks git "what's on this tag that HEAD doesn't
+          # contain?" — a `<tag>..HEAD` range. A bare checkout fetches
+          # `--depth=1 --no-tags`, where that range exits 128 and the advisory
+          # reports nothing, forever (hub#830).
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+      - id: surface
+        run: bun scripts/release-plan.ts packages/surface-host @openparachute/surface ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: surface_client
+        run: bun scripts/release-plan.ts packages/surface-client @openparachute/surface-client ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: account_client
+        run: bun scripts/release-plan.ts packages/account-client @openparachute/account-client ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: surface_render
+        run: bun scripts/release-plan.ts packages/surface-render @openparachute/surface-render ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: doc_schema
+        run: bun scripts/release-plan.ts packages/doc-schema @openparachute/doc-schema ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: surface_server
+        run: bun scripts/release-plan.ts packages/surface-server @openparachute/surface-server ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+
   test:
     name: test
     runs-on: ubuntu-latest
@@ -125,17 +168,11 @@ jobs:
 
   publish-surface-npm:
     name: publish @openparachute/surface to npm
-    needs: test
-    # App-only: skip on client-, account-, render-, doc-schema-,
-    # server-, docs-editor-, meeting-ingest-, and meeting-mcp- tags. (The bare
-    # `v...` namespace is the catch-all: every NEW tag prefix MUST be excluded
-    # here, or its tag would fire this job too. `account-` is a DISTINCT prefix
-    # from `client-` — it does NOT `startsWith` it, so it needs its own
-    # exclusion. `docs-editor-` needs its own exclusion — it does NOT share the
-    # `doc-schema-` prefix. Likewise `meeting-mcp-` and `meeting-ingest-` are
-    # DISTINCT prefixes — neither `startsWith` the other, so each needs its own
-    # exclusion.)
-    if: ${{ !startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-') }}
+    needs: [plan, test]
+    # Plan is consulted on tag pushes too — a tag is not a bypass of the
+    # stable-from-main gate. The prefix clause still stops a client-/account-/…
+    # tag from also publishing surface-host (all six plan steps run --tag-push).
+    if: ${{ needs.plan.outputs.surface == 'true' && (github.ref_type != 'tag' || (!startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-'))) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -158,9 +195,9 @@ jobs:
         # so the `build` step below can build dist/admin/.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Defense against tag-vs-package.json drift. If they don't match,
-        # we'd publish under the wrong version. We pin on surface-host's
-        # package.json — that's the package this workflow publishes.
+        # Tag path only — on a branch push the version comes FROM
+        # package.json, so there is nothing to drift against.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-host/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -198,21 +235,24 @@ jobs:
         # makes the OIDC token available to npm CLI.
         working-directory: packages/surface-host
         run: |
-          # Detect rc vs stable from tag name. Tag pattern in `on:` above
-          # enforces the shape, so this is just disambiguation.
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          # Dist-tag from the VERSION BEING PUBLISHED, not from the ref.
+          # On a merge-triggered run GITHUB_REF_NAME is `next`/`main` —
+          # matching no rc pattern, so every publish-on-merge would land on
+          # `latest` (hub#792).
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/surface with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-surface-client-npm:
     name: publish @openparachute/surface-client to npm
-    needs: test
-    # surface-client-only: skip on surface (`v*`) tags.
-    if: ${{ startsWith(github.ref_name, 'client-') }}
+    needs: [plan, test]
+    # surface-client-only: skip on surface (`v*`) tags. Plan is consulted on
+    # tag pushes too — a tag is not a bypass of the stable-from-main gate.
+    if: ${{ needs.plan.outputs.surface_client == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'client-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -230,8 +270,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against surface-client's package.json — that's the package this
-        # job publishes. Tag prefix is `client-v...`.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-client/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#client-v}"
@@ -258,19 +297,18 @@ jobs:
         # step needed here.
         working-directory: packages/surface-client
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/surface-client with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-account-client-npm:
     name: publish @openparachute/account-client to npm
-    needs: test
-    # account-client-only: gate on the `account-v...` tag prefix.
-    if: ${{ startsWith(github.ref_name, 'account-') }}
+    needs: [plan, test]
+    if: ${{ needs.plan.outputs.account_client == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'account-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -288,8 +326,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against account-client's package.json — that's the package this
-        # job publishes. Tag prefix is `account-v...`.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/account-client/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#account-v}"
@@ -317,19 +354,18 @@ jobs:
         # step needed here.
         working-directory: packages/account-client
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/account-client with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-surface-render-npm:
     name: publish @openparachute/surface-render to npm
-    needs: test
-    # surface-render-only: gate on the `render-v...` tag prefix.
-    if: ${{ startsWith(github.ref_name, 'render-') }}
+    needs: [plan, test]
+    if: ${{ needs.plan.outputs.surface_render == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'render-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -347,8 +383,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against surface-render's package.json — that's the package this
-        # job publishes. Tag prefix is `render-v...`.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-render/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#render-v}"
@@ -375,19 +410,18 @@ jobs:
         # step needed here.
         working-directory: packages/surface-render
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/surface-render with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-doc-schema-npm:
     name: publish @openparachute/doc-schema to npm
-    needs: test
-    # doc-schema-only: gate on the `doc-schema-v...` tag prefix.
-    if: ${{ startsWith(github.ref_name, 'doc-schema-') }}
+    needs: [plan, test]
+    if: ${{ needs.plan.outputs.doc_schema == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'doc-schema-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -405,7 +439,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against doc-schema's package.json; tag prefix is `doc-schema-v...`.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/doc-schema/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#doc-schema-v}"
@@ -431,19 +465,18 @@ jobs:
         # dist/, the published artifact), so `npm publish` builds just-in-time.
         working-directory: packages/doc-schema
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/doc-schema with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
   publish-surface-server-npm:
     name: publish @openparachute/surface-server to npm
-    needs: test
-    # surface-server-only: gate on the `server-v...` tag prefix.
-    if: ${{ startsWith(github.ref_name, 'server-') }}
+    needs: [plan, test]
+    if: ${{ needs.plan.outputs.surface_server == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'server-')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -461,7 +494,7 @@ jobs:
         # Workspace install at root.
         run: bun install --frozen-lockfile
       - name: verify package.json version matches tag
-        # Pin against surface-server's package.json; tag prefix is `server-v...`.
+        if: github.ref_type == 'tag'
         run: |
           PKG_VERSION=$(bun -e "console.log(require('./packages/surface-server/package.json').version)")
           TAG_VERSION="${GITHUB_REF_NAME#server-v}"
@@ -488,13 +521,61 @@ jobs:
         # exports point at src/) — no build step, nothing to compile before pack.
         working-directory: packages/surface-server
         run: |
-          if [[ "$GITHUB_REF_NAME" =~ -rc\. ]]; then
-            DIST_TAG=rc
-          else
-            DIST_TAG=latest
-          fi
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
           echo "publishing @openparachute/surface-server with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
+
+  # Record what shipped as git tags.
+  #
+  # A RECORD, not a trigger — nothing fires off these, which is exactly why
+  # GITHUB_TOKEN pushing them is fine (a token-pushed tag can't start a
+  # workflow, and here it doesn't need to). `always()` with per-package result
+  # checks so one package's publish failure doesn't suppress the others' tags.
+  tag-record:
+    name: tag what shipped
+    needs: [plan, publish-surface-npm, publish-surface-client-npm, publish-account-client-npm, publish-surface-render-npm, publish-doc-schema-npm, publish-surface-server-npm]
+    if: ${{ always() && github.ref_type != 'tag' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # `git rev-parse $T` is the "already tagged" dedupe. A bare checkout
+          # is `--depth=1 --no-tags`, so a tag that already exists on origin
+          # is invisible here; the job then `git tag && git push` and the
+          # rejected push is swallowed by continue-on-error. Same fetch as
+          # `plan` (hub#830 class).
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+      - name: tag published packages
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          tag_if() {  # <prefix> <dir> <published?>
+            [ "$3" = "success" ] || return 0
+            V=$(bun -e "console.log(require('./$2/package.json').version)")
+            T="$1$V"
+            if git rev-parse "$T" >/dev/null 2>&1; then
+              echo "$T already exists"
+            else
+              git tag "$T" && git push origin "$T" && echo "tagged $T"
+            fi
+          }
+          tag_if "v"            "packages/surface-host"    "${{ needs.publish-surface-npm.result }}"
+          tag_if "client-v"     "packages/surface-client"  "${{ needs.publish-surface-client-npm.result }}"
+          tag_if "account-v"    "packages/account-client"  "${{ needs.publish-account-client-npm.result }}"
+          tag_if "render-v"     "packages/surface-render"  "${{ needs.publish-surface-render-npm.result }}"
+          tag_if "doc-schema-v" "packages/doc-schema"      "${{ needs.publish-doc-schema-npm.result }}"
+          tag_if "server-v"     "packages/surface-server"  "${{ needs.publish-surface-server-npm.result }}"
 
   release-docs-editor-tarball:
     name: attach docs-editor installable tarball to a GitHub Release
