@@ -104,7 +104,11 @@ describe("serve ↔ bootstrap integration", () => {
     // Default config is in-process — no config.json on disk means
     // loadConfig returns DEFAULTS which has bootstrap enabled.
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -145,7 +149,11 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -171,7 +179,11 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -202,7 +214,11 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -227,7 +243,11 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -246,7 +266,11 @@ describe("serve ↔ bootstrap integration", () => {
 
   test("npm-fetch failure: daemon stays up, result records failed", async () => {
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
@@ -278,7 +302,11 @@ describe("serve ↔ bootstrap integration", () => {
       return { exitCode: 0, stderr: "", stdout: "" };
     };
     const h = serve({
+      // surface#209: stay hermetic — skip every boot sweep that would sweep
+      // custodied credentials or contact the live hub on :1939.
       skipSurfaceDiscovery: true,
+      skipCredentialRenewal: true,
+      skipRedirectSelfHeal: true,
       port: 0,
       configPath,
       uisDir,
