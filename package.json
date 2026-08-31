@@ -10,7 +10,7 @@
     "web/admin"
   ],
   "scripts": {
-    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/account-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build && bun run --filter '@openparachute/meeting-ingest' build && bun run --filter '@openparachute/meeting-mcp' build && bun run --filter '@openparachute/parachute-mcp' build",
+    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/account-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build && bun run --filter '@openparachute/meeting-ingest' build && bun run --filter '@openparachute/meeting-mcp' build && bun run --filter '@openparachute/mcp' build",
     "build:admin": "bun run --filter '@openparachute/surface-admin-ui' build",
     "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/account-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ packages/meeting-ingest/server/ packages/meeting-mcp/server/ packages/parachute-mcp/src/ scripts/release-plan.test.ts && bun run --filter \"@openparachute/surface-render\" test",
     "test:host": "bun test packages/surface-host/src/",
@@ -39,7 +39,7 @@
     "test:meeting-mcp": "bun test packages/meeting-mcp/server/",
     "build:meeting-mcp": "bun run --filter '@openparachute/meeting-mcp' build",
     "test:parachute-mcp": "bun test packages/parachute-mcp/src/",
-    "build:parachute-mcp": "bun run --filter '@openparachute/parachute-mcp' build"
+    "build:parachute-mcp": "bun run --filter '@openparachute/mcp' build"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
