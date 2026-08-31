@@ -32,16 +32,18 @@ const NAMESPACE_SEP = "__";
 /** Stderr-only logger — stdout is the MCP wire and must stay clean. */
 export type Log = (msg: string) => void;
 
-function isSessionExpiry(err: unknown): boolean {
+function isSessionExpiry(err: unknown, hadSession: boolean): boolean {
   // MCP Streamable HTTP: a server that no longer recognizes the session id
-  // answers 404 and the client MUST re-initialize. (The Parachute hub door is
-  // stateless and never issues a session, so against it this never fires —
-  // it matters for other Streamable-HTTP hubs behind this bridge.)
-  return err instanceof StreamableHTTPError && err.code === 404;
+  // answers 404 and the client MUST re-initialize. Only a 404 on a connection
+  // that actually HOLDS a session id means expiry — a bare 404 (e.g. a typo'd
+  // /mcp path against a sessionless hub like the Parachute door) is a plain
+  // error and re-initializing would just repeat it.
+  return hadSession && err instanceof StreamableHTTPError && err.code === 404;
 }
 
 class HubConnection {
   private client: Client | null = null;
+  private transport: StreamableHTTPClientTransport | null = null;
   private connecting: Promise<Client> | null = null;
 
   constructor(
@@ -71,9 +73,13 @@ class HubConnection {
         throw err;
       }
       client.onclose = () => {
-        if (this.client === client) this.client = null;
+        if (this.client === client) {
+          this.client = null;
+          this.transport = null;
+        }
       };
       this.client = client;
+      this.transport = transport;
       return client;
     })();
     this.connecting = attempt;
@@ -88,6 +94,7 @@ class HubConnection {
   async reset(): Promise<void> {
     const client = this.client;
     this.client = null;
+    this.transport = null;
     if (client) await client.close().catch(() => {});
   }
 
@@ -100,7 +107,7 @@ class HubConnection {
     try {
       return await fn(client);
     } catch (err) {
-      if (!isSessionExpiry(err)) throw err;
+      if (!isSessionExpiry(err, this.transport?.sessionId !== undefined)) throw err;
       this.log(`hub "${this.alias}": session expired (404) — re-initializing and retrying once`);
       await this.reset();
       return await fn(await this.connect());

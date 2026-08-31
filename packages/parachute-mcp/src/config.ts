@@ -33,13 +33,15 @@ export interface ResolvedConfig {
 
 /**
  * Alias grammar: letters, digits, `_` and `-`; must start and end with a
- * letter or digit; no `__` anywhere. Two reasons:
+ * letter or digit; no `__` anywhere; at most 64 characters. Three reasons:
  *  - namespaced names must satisfy the MCP tool-name format (SEP-986:
- *    `^[A-Za-z0-9._-]{1,128}$`), and
+ *    `^[A-Za-z0-9._-]{1,128}$`),
  *  - `__` is the namespace separator, so an alias containing `__` (or ending
- *    in `_`) would make `<alias>__<tool>` ambiguous to route.
+ *    in `_`) would make `<alias>__<tool>` ambiguous to route, and
+ *  - the 64-char cap keeps `<alias>__` at ≤66 chars, leaving ≥62 for the tool
+ *    name so namespacing itself can't push a typical name past SEP-986's 128.
  */
-const ALIAS_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$/;
+const ALIAS_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$/;
 
 export function isValidAlias(alias: string): boolean {
   return ALIAS_RE.test(alias) && !alias.includes("__");

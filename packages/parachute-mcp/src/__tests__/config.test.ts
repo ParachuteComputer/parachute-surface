@@ -33,12 +33,24 @@ describe("expandTilde", () => {
 
 describe("alias grammar (namespace-prefix safety)", () => {
   test("accepts plain aliases", () => {
-    for (const a of ["home", "techne", "hub-2", "a", "my_hub", "A9"]) {
+    for (const a of ["home", "techne", "hub-2", "a", "my_hub", "A9", "x".repeat(64)]) {
       expect(isValidAlias(a)).toBe(true);
     }
   });
   test("rejects aliases that would break <alias>__<tool> routing or SEP-986 names", () => {
-    for (const a of ["", "a__b", "_a", "a_", "-a", "a-", "has space", "dot.ted", "é"]) {
+    // 65 chars: over the 64 cap that keeps `<alias>__<tool>` under SEP-986's 128.
+    for (const a of [
+      "",
+      "a__b",
+      "_a",
+      "a_",
+      "-a",
+      "a-",
+      "has space",
+      "dot.ted",
+      "é",
+      "x".repeat(65),
+    ]) {
       expect(isValidAlias(a)).toBe(false);
     }
   });

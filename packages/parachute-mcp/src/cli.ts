@@ -7,6 +7,8 @@
  * key is read from a file named by config/env, held in memory only, and only
  * ever surfaced as its npub.
  */
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ParachuteBridge } from "./bridge.js";
 import { resolveConfig } from "./config.js";
@@ -88,6 +90,10 @@ async function main(): Promise<void> {
 
   const server = createBridgeServer(bridge);
   const transport = new StdioServerTransport();
+  // This hook must be set BEFORE server.connect: SDK 1.29's Protocol.connect
+  // CHAINS a pre-existing transport.onclose (protocol.js saves and re-invokes
+  // it) rather than overwriting. If a future SDK bump changes that to a plain
+  // overwrite, this orphan cleanup silently stops firing — re-verify on bumps.
   transport.onclose = () => {
     void bridge.close().finally(() => process.exit(0));
   };
@@ -95,7 +101,24 @@ async function main(): Promise<void> {
   log("ready on stdio");
 }
 
-main().catch((err) => {
-  log(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+/**
+ * Only run main() when this file IS the entry point (the bin, or
+ * `node dist/cli.js`), not when imported — tests import `parseArgs` and must
+ * not boot the bridge. Realpaths on both sides so npm's bin symlink matches.
+ */
+function invokedAsEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsEntry()) {
+  main().catch((err) => {
+    log(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}
