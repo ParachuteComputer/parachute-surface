@@ -4,15 +4,16 @@
  * HTTP request with a NIP-98 Nostr auth event.
  *
  * stdout is the MCP wire: ALL human-facing output goes to stderr. The secret
- * key is read from a file named by config/env, held in memory only, and only
- * ever surfaced as its npub.
+ * key is read from a file named by config/env (or, for a Buzz agent, from the
+ * `BUZZ_PRIVATE_KEY` value buzz-acp injects into this subprocess), held in
+ * memory only, and only ever surfaced as its npub.
  */
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ParachuteBridge } from "./bridge.js";
 import { resolveConfig } from "./config.js";
-import { loadKey } from "./key.js";
+import { loadKey, loadKeyValue } from "./key.js";
 import { createBridgeServer } from "./server.js";
 import { makeSigningFetch } from "./signing-fetch.js";
 import { PARACHUTE_MCP_VERSION } from "./version.js";
@@ -21,11 +22,15 @@ const USAGE = `parachute-mcp — stdio MCP bridge to Parachute hubs (NIP-98 sign
 
 Usage:
   parachute-mcp [--config <path>]        bridge the configured hubs
-  parachute-mcp <hub-mcp-url>            single-hub quick path (needs PARACHUTE_NSEC_FILE)
+  parachute-mcp <hub-mcp-url>            single-hub quick path (needs a key: see below)
   parachute-mcp --version | --help
 
 Config resolution order: --config, $PARACHUTE_MCP_CONFIG,
 ~/.config/parachute/mcp.json, then the positional URL quick path.
+
+Key resolution order: config "keyFile", then $PARACHUTE_NSEC_FILE (a file path,
+overrides "keyFile"), then $BUZZ_PRIVATE_KEY (a bech32 nsec value — injected
+automatically for Buzz agents by buzz-acp, so no key file is needed there).
 `;
 
 function log(msg: string): void {
@@ -75,7 +80,9 @@ async function main(): Promise<void> {
   }
 
   const config = resolveConfig({ configFlag: args.config, positionalUrl: args.url, warn: log });
-  const key = loadKey(config.keyFile);
+  // keyFile and keyValue are mutually exclusive (resolveKeySource guarantees
+  // exactly one is set when resolveConfig returns without throwing).
+  const key = config.keyFile ? loadKey(config.keyFile) : loadKeyValue(config.keyValue!);
 
   const bridge = new ParachuteBridge(config.hubs, makeSigningFetch(key.sk), log);
   log(

@@ -140,6 +140,64 @@ describe("key file resolution", () => {
   });
 });
 
+describe("BUZZ_PRIVATE_KEY key source (zero-config, e.g. under buzz-acp)", () => {
+  // resolveConfig only CARRIES the value; parsing/validation is key.ts's job,
+  // so any placeholder string exercises the resolution precedence here.
+  const BUZZ = "nsec1buzzplaceholdervalue";
+
+  test("BUZZ_PRIVATE_KEY is used as keyValue when no key file is resolved", () => {
+    const path = writeConfig("buzz-nokeyfile.json", { hubs: [HUBS[0]] });
+    const cfg = resolveConfig({ configFlag: path, env: { BUZZ_PRIVATE_KEY: BUZZ }, home: dir });
+    expect(cfg.keyValue).toBe(BUZZ);
+    expect(cfg.keyFile).toBeUndefined();
+  });
+
+  test("config keyFile wins over BUZZ_PRIVATE_KEY", () => {
+    const path = writeConfig("buzz-vs-keyfile.json", {
+      keyFile: "~/from-config.nsec",
+      hubs: [HUBS[0]],
+    });
+    const cfg = resolveConfig({ configFlag: path, env: { BUZZ_PRIVATE_KEY: BUZZ }, home: dir });
+    expect(cfg.keyFile).toBe(join(dir, "from-config.nsec"));
+    expect(cfg.keyValue).toBeUndefined();
+  });
+
+  test("PARACHUTE_NSEC_FILE wins over BUZZ_PRIVATE_KEY", () => {
+    const path = writeConfig("buzz-vs-nsecfile.json", { hubs: [HUBS[0]] });
+    const cfg = resolveConfig({
+      configFlag: path,
+      env: { PARACHUTE_NSEC_FILE: "~/from-env.nsec", BUZZ_PRIVATE_KEY: BUZZ },
+      home: dir,
+    });
+    expect(cfg.keyFile).toBe(join(dir, "from-env.nsec"));
+    expect(cfg.keyValue).toBeUndefined();
+  });
+
+  test("positional quick path accepts BUZZ_PRIVATE_KEY with no PARACHUTE_NSEC_FILE", () => {
+    const cfg = resolveConfig({
+      positionalUrl: "https://hub.example.test/mcp",
+      env: { BUZZ_PRIVATE_KEY: BUZZ },
+      home: dir,
+    });
+    expect(cfg.hubs).toEqual([{ alias: "hub", url: "https://hub.example.test/mcp" }]);
+    expect(cfg.keyValue).toBe(BUZZ);
+    expect(cfg.keyFile).toBeUndefined();
+  });
+
+  test("positional quick path with no key at all names both key sources", () => {
+    expect(() =>
+      resolveConfig({ positionalUrl: "https://hub.example.test/mcp", env: {}, home: dir }),
+    ).toThrow(/PARACHUTE_NSEC_FILE.*BUZZ_PRIVATE_KEY|BUZZ_PRIVATE_KEY.*PARACHUTE_NSEC_FILE/s);
+  });
+
+  test("config file with no key of any kind names BUZZ_PRIVATE_KEY too", () => {
+    const path = writeConfig("buzz-nokey.json", { hubs: [HUBS[0]] });
+    expect(() => resolveConfig({ configFlag: path, env: {}, home: dir })).toThrow(
+      /BUZZ_PRIVATE_KEY/,
+    );
+  });
+});
+
 describe("malformed config files", () => {
   test("invalid JSON error names the path, never the contents", () => {
     // The classic user error this guards: pointing --config at the KEY file.

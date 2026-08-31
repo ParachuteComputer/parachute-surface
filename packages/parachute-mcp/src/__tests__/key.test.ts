@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { npubEncode, nsecEncode } from "nostr-tools/nip19";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
-import { loadKey, parseSecretKey } from "../key.js";
+import { loadKey, loadKeyValue, parseSecretKey } from "../key.js";
 
 const sk = generateSecretKey();
 const pubkey = getPublicKey(sk);
@@ -66,6 +66,27 @@ describe("loadKey", () => {
       throw new Error("should have thrown");
     } catch (e) {
       expect((e as Error).message).not.toContain("totally-not-a-key");
+    }
+  });
+});
+
+describe("loadKeyValue (BUZZ_PRIVATE_KEY in-memory nsec value)", () => {
+  test("loads an nsec value and derives pubkey + npub — no file touched", () => {
+    const k = loadKeyValue(nsecEncode(sk));
+    expect(k.pubkey).toBe(pubkey);
+    expect(k.npub).toBe(npubEncode(pubkey));
+    expect(k.sk).toEqual(sk);
+  });
+
+  test("a malformed value errors content-free — never echoes the value", () => {
+    const poison = "nsec1-obviously-not-valid-bech32-secret";
+    try {
+      loadKeyValue(poison);
+      throw new Error("should have thrown");
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).not.toContain(poison);
+      expect(msg).not.toContain("obviously-not-valid");
     }
   });
 });

@@ -1,4 +1,4 @@
-# @openparachute/parachute-mcp
+# @openparachute/mcp
 
 A **stdio MCP bridge** to one or more remote Parachute hubs. It connects local
 MCP clients that speak stdio (Claude Code / claude-agent-sdk, Codex, Grok,
@@ -45,6 +45,23 @@ then just `parachute-mcp`. With one hub configured, tool names pass through
 unchanged; with several, tools are namespaced `<alias>__<tool>`
 (`home__query-notes`, `techne__create-note`) and calls are routed by prefix.
 
+### Buzz agents (zero-config key)
+
+Under Buzz, `buzz-acp` injects the agent's own bech32 nsec as `BUZZ_PRIVATE_KEY`
+into every MCP subprocess it launches. `parachute-mcp` reads it as a fallback
+key source, so a Buzz agent needs **no key file at all** — just a hub URL:
+
+```sh
+parachute-mcp https://uni.taildf9ce2.ts.net/mcp
+```
+
+The key is read from the env value in memory and only ever surfaced as its
+npub. This is per-agent (each agent's own injected key), so it avoids the
+shared-key foot-gun of a global `PARACHUTE_NSEC_FILE`. Non-Buzz harnesses keep
+using a key file. Precedence is always: config `keyFile` → `PARACHUTE_NSEC_FILE`
+(a path, overrides `keyFile`) → `BUZZ_PRIVATE_KEY` (a value, used only when no
+key file is resolved).
+
 ### Claude Code / claude-agent-sdk
 
 ```json
@@ -84,14 +101,21 @@ Resolution order (first match wins):
 1. `--config <path>` — JSON file.
 2. `PARACHUTE_MCP_CONFIG` — env var naming a JSON file.
 3. `~/.config/parachute/mcp.json`, if it exists.
-4. Quick path: `parachute-mcp <hub-mcp-url>` + `PARACHUTE_NSEC_FILE`.
+4. Quick path: `parachute-mcp <hub-mcp-url>` + a key (`PARACHUTE_NSEC_FILE` or `BUZZ_PRIVATE_KEY`).
 
 If a config file resolves *and* a positional URL is given, the file wins and
 the bridge says so on stderr.
 
+**Key resolution** is separate, in strict precedence (first wins):
+
+1. config `keyFile`.
+2. `PARACHUTE_NSEC_FILE` — a file **path**; overrides `keyFile`.
+3. `BUZZ_PRIVATE_KEY` — a bech32 nsec **value** (not a path); used only when no
+   key file is resolved. Injected automatically for Buzz agents by `buzz-acp`.
+
 | Field | Meaning |
 |---|---|
-| `keyFile` | Path to the signing key file (`nsec1…` or 64-char hex, `~` ok). Overridden by `PARACHUTE_NSEC_FILE`. |
+| `keyFile` | Path to the signing key file (`nsec1…` or 64-char hex, `~` ok). Overridden by `PARACHUTE_NSEC_FILE`; falls back to the `BUZZ_PRIVATE_KEY` value if no key file is set. |
 | `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and stays a valid MCP tool name (SEP-986: `^[A-Za-z0-9._-]{1,128}$`). |
 | `hubs[].url` | The hub's Streamable-HTTP MCP door, e.g. `https://hub.example/mcp` or a vault door `https://hub.example/vault/<name>/mcp`. |
 
@@ -107,9 +131,14 @@ handled by re-initializing and retrying once.
 
 ## Security notes
 
-- **The key never leaves the file → memory path.** It is read from a file
-  (never argv, never an env *value*), held in memory, and only ever surfaced
-  as its npub. Keep the key file `chmod 600` and outside any repo.
+- **The key stays in memory and is only ever surfaced as its npub.** It is read
+  from a file (never argv), held in memory, never logged. Keep the key file
+  `chmod 600` and outside any repo. The **one** deliberate exception is
+  `BUZZ_PRIVATE_KEY`: a bech32 nsec read from the env *value*, used only as the
+  last-resort fallback. That is safe precisely under Buzz — `buzz-acp` already
+  injects each agent's own key into this subprocess's environment, so reading
+  it adds no new exposure, and because it is per-agent it avoids the shared-key
+  risk of a global key file. Non-Buzz harnesses never touch this path.
 - **Per-request signing is load-bearing, not paranoia.** The hub's replay
   cache burns each event id on first sight — *including failed auth* — so a
   static `Authorization` header would work exactly once. Every request,

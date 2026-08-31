@@ -1,4 +1,4 @@
-# Changelog — @openparachute/parachute-mcp
+# Changelog — @openparachute/mcp
 
 ## 0.1.0
 
@@ -15,9 +15,14 @@ event.
   multiple hubs → `<alias>__<tool>` namespacing with prefix routing.
   Descriptions and input schemas pass through verbatim.
 - Config: `--config` → `PARACHUTE_MCP_CONFIG` → `~/.config/parachute/mcp.json`
-  → single-hub positional-URL quick path; `PARACHUTE_NSEC_FILE` overrides
-  `keyFile`; `~` expansion. Key from a FILE only — never argv/env values, and
-  never echoed by error paths.
+  → single-hub positional-URL quick path; `~` expansion.
+- Key resolution: config `keyFile` → `PARACHUTE_NSEC_FILE` (a file path,
+  overrides `keyFile`) → `BUZZ_PRIVATE_KEY` (a bech32 nsec *value*, used only
+  when no key file is resolved). The `BUZZ_PRIVATE_KEY` fallback is a deliberate
+  exception to the file-only stance: `buzz-acp` already injects each agent's own
+  key into the MCP subprocess env, so a Buzz agent needs no key file (just a hub
+  URL) and it is per-agent (no shared-key foot-gun). Key material is never argv
+  and never echoed by error paths.
 - Resilience: a hub down at startup is logged (stderr only; stdout is the MCP
   wire) and retried lazily; Streamable-HTTP session expiry (404) →
   re-initialize + retry once.

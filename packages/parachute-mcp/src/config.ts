@@ -4,11 +4,20 @@
  *   1. `--config <path>` CLI flag → JSON file.
  *   2. `PARACHUTE_MCP_CONFIG` env var → JSON file path.
  *   3. `~/.config/parachute/mcp.json`, if it exists.
- *   4. Single-hub quick path with no file: a positional hub-MCP URL plus
- *      `PARACHUTE_NSEC_FILE` for the key.
+ *   4. Single-hub quick path with no file: a positional hub-MCP URL plus a
+ *      key from `PARACHUTE_NSEC_FILE` (a path) or `BUZZ_PRIVATE_KEY` (a value).
  *
- * `PARACHUTE_NSEC_FILE` always overrides the config's `keyFile`. Error
- * messages for a malformed config file name the PATH only, never file
+ * The SIGNING KEY is resolved separately (`resolveKeySource`), in its own
+ * strict precedence:
+ *
+ *   1. an explicit key FILE — `PARACHUTE_NSEC_FILE` env (a path) overrides the
+ *      config file's `keyFile`. (This env-overrides-config order is preserved
+ *      exactly from the original single-source design.)
+ *   2. `BUZZ_PRIVATE_KEY` env (a bech32 nsec VALUE, not a path) — used ONLY
+ *      when no key file was resolved above.
+ *   3. otherwise no key → the caller raises a context-appropriate error.
+ *
+ * Error messages for a malformed config file name the PATH only, never file
  * contents — a user can point `--config` at the wrong file by accident, and
  * that file could hold a key.
  */
@@ -24,8 +33,18 @@ export interface HubEntry {
 }
 
 export interface ResolvedConfig {
-  /** Path of the nsec/hex key file (already ~-expanded). */
-  keyFile: string;
+  /**
+   * Path of the nsec/hex key FILE (already ~-expanded), when a key file was
+   * resolved (config `keyFile` or `PARACHUTE_NSEC_FILE`). Mutually exclusive
+   * with `keyValue`.
+   */
+  keyFile?: string;
+  /**
+   * Inline bech32 nsec VALUE from `BUZZ_PRIVATE_KEY`, used only when no key
+   * file was resolved. Held in memory, NEVER logged. See `resolveKeySource`
+   * for why reading an env VALUE is a deliberate, per-agent-scoped exception.
+   */
+  keyValue?: string;
   hubs: HubEntry[];
   /** Where the config came from, for the startup stderr line. */
   source: string;
@@ -97,6 +116,44 @@ function validateHubUrl(raw: unknown, what: string): string {
   return url.href;
 }
 
+/**
+ * Resolve WHICH signing key to use, in strict precedence (highest first):
+ *
+ *   1. an explicit key FILE — `PARACHUTE_NSEC_FILE` env (a path) OVERRIDES the
+ *      config file's `keyFile`. This env-overrides-config order is preserved
+ *      exactly from the original single-source design; do not reorder it.
+ *   2. `BUZZ_PRIVATE_KEY` env (a bech32 nsec VALUE, not a path) — used ONLY
+ *      when neither key file above is present.
+ *   3. otherwise `{}` — the caller raises the "no key" error with a message
+ *      appropriate to its context (config file vs. quick path).
+ *
+ * SECURITY — why reading `BUZZ_PRIVATE_KEY` (an env VALUE) is a deliberate
+ * exception to this package's otherwise file-path-only key stance:
+ *   (a) For a Buzz agent the key is ALREADY in this subprocess's environment by
+ *       Buzz's own design — buzz-acp's `build_mcp_servers` injects
+ *       `BUZZ_PRIVATE_KEY` into every MCP subprocess it launches, and the
+ *       `buzz` CLI reads the same var — so reading it here adds NO new exposure.
+ *   (b) It is PER-AGENT: buzz-acp injects each agent's OWN key, so unlike a
+ *       shared `PARACHUTE_NSEC_FILE` it does not create a multi-agent same-key
+ *       foot-gun — for the multi-agent case it is strictly SAFER.
+ * Non-Buzz harnesses keep pointing at a key FILE and never reach this branch.
+ * The value is returned raw and parsed in memory by key.ts; it is NEVER logged.
+ */
+export function resolveKeySource(
+  configKeyFile: string | undefined,
+  env: NodeJS.ProcessEnv,
+  home: string,
+): { keyFile?: string; keyValue?: string } {
+  const envKeyFile = env.PARACHUTE_NSEC_FILE;
+  if (envKeyFile) return { keyFile: expandTilde(envKeyFile, home) };
+  if (typeof configKeyFile === "string" && configKeyFile.length > 0) {
+    return { keyFile: expandTilde(configKeyFile, home) };
+  }
+  const buzzKey = env.BUZZ_PRIVATE_KEY;
+  if (buzzKey && buzzKey.length > 0) return { keyValue: buzzKey };
+  return {};
+}
+
 function readConfigFile(
   path: string,
   env: NodeJS.ProcessEnv,
@@ -122,18 +179,17 @@ function readConfigFile(
   const obj = parsed as { keyFile?: unknown; hubs?: unknown };
   const hubs = validateHubs(obj.hubs, path);
 
-  const envKeyFile = env.PARACHUTE_NSEC_FILE;
-  let keyFile: string;
-  if (envKeyFile) {
-    keyFile = expandTilde(envKeyFile, home);
-  } else if (typeof obj.keyFile === "string" && obj.keyFile.length > 0) {
-    keyFile = expandTilde(obj.keyFile, home);
-  } else {
+  const key = resolveKeySource(
+    typeof obj.keyFile === "string" ? obj.keyFile : undefined,
+    env,
+    home,
+  );
+  if (!key.keyFile && !key.keyValue) {
     throw new Error(
-      `config file ${path} has no "keyFile" and PARACHUTE_NSEC_FILE is not set — the bridge needs a key file to sign with`,
+      `config file ${path} has no "keyFile", PARACHUTE_NSEC_FILE is not set, and BUZZ_PRIVATE_KEY is not in the environment — the bridge needs a key to sign with`,
     );
   }
-  return { keyFile, hubs, source };
+  return { ...key, hubs, source };
 }
 
 export function resolveConfig(opts: {
@@ -170,21 +226,18 @@ export function resolveConfig(opts: {
 
   if (opts.positionalUrl) {
     const url = validateHubUrl(opts.positionalUrl, "positional hub URL");
-    const keyFile = env.PARACHUTE_NSEC_FILE;
-    if (!keyFile) {
+    const key = resolveKeySource(undefined, env, home);
+    if (!key.keyFile && !key.keyValue) {
       throw new Error(
-        "no config file found — the single-hub quick path needs PARACHUTE_NSEC_FILE " +
-          "to point at the key file",
+        "no config file found — the single-hub quick path needs a key: set " +
+          "PARACHUTE_NSEC_FILE (a key file path) or BUZZ_PRIVATE_KEY (an injected " +
+          "nsec value, e.g. under buzz-acp)",
       );
     }
-    return {
-      keyFile: expandTilde(keyFile, home),
-      hubs: [{ alias: "hub", url }],
-      source: "positional URL",
-    };
+    return { ...key, hubs: [{ alias: "hub", url }], source: "positional URL" };
   }
 
   throw new Error(
-    `no configuration: pass --config <path>, set PARACHUTE_MCP_CONFIG, create ${defaultConfigPath(home)}, or run \`parachute-mcp <hub-mcp-url>\` with PARACHUTE_NSEC_FILE set`,
+    `no configuration: pass --config <path>, set PARACHUTE_MCP_CONFIG, create ${defaultConfigPath(home)}, or run \`parachute-mcp <hub-mcp-url>\` with PARACHUTE_NSEC_FILE (a key file) or BUZZ_PRIVATE_KEY (an injected nsec) set`,
   );
 }
