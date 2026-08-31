@@ -10,16 +10,16 @@
     "web/admin"
   ],
   "scripts": {
-    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/account-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build && bun run --filter '@openparachute/meeting-ingest' build && bun run --filter '@openparachute/meeting-mcp' build",
+    "build": "bun run --filter '@openparachute/surface-client' build && bun run --filter '@openparachute/account-client' build && bun run --filter '@openparachute/surface-render' build && bun run --filter '@openparachute/surface' build && bun run --filter '@openparachute/pebble-config' build && bun run --filter '@openparachute/doc-schema' build && bun run --filter '@openparachute/docs-editor' build && bun run --filter '@openparachute/meeting-ingest' build && bun run --filter '@openparachute/meeting-mcp' build && bun run --filter '@openparachute/parachute-mcp' build",
     "build:admin": "bun run --filter '@openparachute/surface-admin-ui' build",
-    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/account-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ packages/meeting-ingest/server/ packages/meeting-mcp/server/ scripts/release-plan.test.ts && bun run --filter \"@openparachute/surface-render\" test",
+    "test": "bun test packages/surface-host/src/ packages/surface-client/src/ packages/account-client/src/ packages/surface-server/src/ packages/pebble-config/src/ packages/doc-schema/src/ packages/docs-editor/server/ packages/meeting-ingest/server/ packages/meeting-mcp/server/ packages/parachute-mcp/src/ scripts/release-plan.test.ts && bun run --filter \"@openparachute/surface-render\" test",
     "test:host": "bun test packages/surface-host/src/",
     "test:client": "bun test packages/surface-client/src/",
     "test:server": "bun test packages/surface-server/src/",
     "test:render": "bun run --filter '@openparachute/surface-render' test",
     "test:admin": "bun run --filter '@openparachute/surface-admin-ui' test",
     "test:all": "bun run test && cd web/admin && bun run test",
-    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && tsc -p tsconfig.test.json && cd ../account-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json && cd ../docs-editor && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-ingest && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-mcp && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "cd packages/surface-host && tsc --noEmit && cd ../surface-client && tsc --noEmit && tsc -p tsconfig.test.json && cd ../account-client && tsc --noEmit && cd ../surface-server && tsc --noEmit && cd ../surface-render && tsc --noEmit && cd ../pebble-config && tsc --noEmit && cd ../doc-schema && tsc -p tsconfig.test.json && tsc -p tsconfig.codec.json && cd ../docs-editor && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-ingest && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../meeting-mcp && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && cd ../parachute-mcp && tsc --noEmit",
     "build:render": "bun run --filter '@openparachute/surface-render' build",
     "typecheck:admin": "cd web/admin && bun run typecheck",
     "typecheck:all": "bun run typecheck && bun run typecheck:admin",
@@ -37,7 +37,9 @@
     "test:meeting-ingest": "bun test packages/meeting-ingest/server/",
     "build:meeting-ingest": "bun run --filter '@openparachute/meeting-ingest' build",
     "test:meeting-mcp": "bun test packages/meeting-mcp/server/",
-    "build:meeting-mcp": "bun run --filter '@openparachute/meeting-mcp' build"
+    "build:meeting-mcp": "bun run --filter '@openparachute/meeting-mcp' build",
+    "test:parachute-mcp": "bun test packages/parachute-mcp/src/",
+    "build:parachute-mcp": "bun run --filter '@openparachute/parachute-mcp' build"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

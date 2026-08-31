@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    // NodeNext (not account-client's `bundler`) because this package ships a
+    // RUNNABLE bin: `dist/cli.js` is executed directly by node/bun via the
+    // `bin` shim, not fed through a bundler, so emitted relative imports must
+    // carry real `.js` extensions — NodeNext enforces that at the source.
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "isolatedModules": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/__tests__", "src/**/*.test.ts", "dist", "node_modules"]
+}
