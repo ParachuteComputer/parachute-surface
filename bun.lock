@@ -114,7 +114,7 @@
       },
     },
     "packages/parachute-mcp": {
-      "name": "@openparachute/parachute-mcp",
+      "name": "@openparachute/mcp",
       "version": "0.1.0",
       "bin": {
         "parachute-mcp": "./dist/cli.js",
@@ -428,11 +428,11 @@
 
     "@openparachute/docs-editor": ["@openparachute/docs-editor@workspace:packages/docs-editor"],
 
+    "@openparachute/mcp": ["@openparachute/mcp@workspace:packages/parachute-mcp"],
+
     "@openparachute/meeting-ingest": ["@openparachute/meeting-ingest@workspace:packages/meeting-ingest"],
 
     "@openparachute/meeting-mcp": ["@openparachute/meeting-mcp@workspace:packages/meeting-mcp"],
-
-    "@openparachute/parachute-mcp": ["@openparachute/parachute-mcp@workspace:packages/parachute-mcp"],
 
     "@openparachute/pebble-config": ["@openparachute/pebble-config@workspace:packages/pebble-config"],
 
