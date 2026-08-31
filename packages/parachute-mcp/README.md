@@ -1,0 +1,134 @@
+# @openparachute/parachute-mcp
+
+A **stdio MCP bridge** to one or more remote Parachute hubs. It connects local
+MCP clients that speak stdio (Claude Code / claude-agent-sdk, Codex, Grok,
+Cursor…) to a hub's Streamable-HTTP MCP door (`https://<hub>/mcp`), signing
+**every** HTTP request with a fresh [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md)
+Nostr auth event.
+
+Why a bridge: no MCP client can do per-request Nostr signing natively — MCP
+client auth is OAuth or static headers, and a static header is a *replayed*
+header, which the hub rejects (see [Security](#security-notes)). So the bridge
+holds the key locally and signs on the way out, the same layering as
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (a stdio bridge doing
+OAuth for clients that can't). One bridge process replaces the hand-built
+per-agent loopback signing proxies.
+
+```
+ MCP client (stdio) ──► parachute-mcp ──► https://hub-a/mcp   (NIP-98 signed)
+                              │
+                              └────────► https://hub-b/mcp   (same key, own signature)
+```
+
+## Quickstart
+
+Single hub, no config file:
+
+```sh
+PARACHUTE_NSEC_FILE=~/.config/parachute/agent.nsec \
+  parachute-mcp https://uni.taildf9ce2.ts.net/mcp
+```
+
+Several hubs — create `~/.config/parachute/mcp.json` (picked up automatically):
+
+```json
+{
+  "keyFile": "~/.config/parachute/agent.nsec",
+  "hubs": [
+    { "alias": "home", "url": "https://uni.taildf9ce2.ts.net/mcp" },
+    { "alias": "techne", "url": "https://parachute.techne.coop/mcp" }
+  ]
+}
+```
+
+then just `parachute-mcp`. With one hub configured, tool names pass through
+unchanged; with several, tools are namespaced `<alias>__<tool>`
+(`home__query-notes`, `techne__create-note`) and calls are routed by prefix.
+
+### Claude Code / claude-agent-sdk
+
+```json
+{
+  "mcpServers": {
+    "parachute": {
+      "command": "parachute-mcp",
+      "args": [],
+      "env": { "PARACHUTE_MCP_CONFIG": "/home/me/.config/parachute/mcp.json" }
+    }
+  }
+}
+```
+
+(`claude mcp add parachute -- parachute-mcp` does the same from the CLI; in
+the agent SDK this is an `McpStdioServerConfig`.)
+
+### Codex (`~/.codex/config.toml`)
+
+```toml
+[mcp_servers.parachute]
+command = "parachute-mcp"
+args = []
+env = { "PARACHUTE_MCP_CONFIG" = "/home/me/.config/parachute/mcp.json" }
+```
+
+### Grok / Cursor / anything stdio
+
+Any client that can spawn a stdio MCP server works the same way: command
+`parachute-mcp`, optional `--config <path>` arg or `PARACHUTE_MCP_CONFIG` /
+`PARACHUTE_NSEC_FILE` env.
+
+## Config reference
+
+Resolution order (first match wins):
+
+1. `--config <path>` — JSON file.
+2. `PARACHUTE_MCP_CONFIG` — env var naming a JSON file.
+3. `~/.config/parachute/mcp.json`, if it exists.
+4. Quick path: `parachute-mcp <hub-mcp-url>` + `PARACHUTE_NSEC_FILE`.
+
+If a config file resolves *and* a positional URL is given, the file wins and
+the bridge says so on stderr.
+
+| Field | Meaning |
+|---|---|
+| `keyFile` | Path to the signing key file (`nsec1…` or 64-char hex, `~` ok). Overridden by `PARACHUTE_NSEC_FILE`. |
+| `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and stays a valid MCP tool name (SEP-986: `^[A-Za-z0-9._-]{1,128}$`). |
+| `hubs[].url` | The hub's Streamable-HTTP MCP door, e.g. `https://hub.example/mcp` or a vault door `https://hub.example/vault/<name>/mcp`. |
+
+One key signs for every configured hub; the NIP-98 `u` tag is always the
+target hub's exact URL.
+
+Flags: `--version`, `--help`. Startup prints (to stderr, never stdout — stdout
+is the MCP wire) the version, the signing **npub** (never the key), and the
+hub list. A hub that is down at startup is logged and retried lazily on the
+next `tools/list` / `tools/call`; it never kills the bridge or the hubs that
+did connect. Streamable-HTTP session expiry (HTTP 404 on a live session) is
+handled by re-initializing and retrying once.
+
+## Security notes
+
+- **The key never leaves the file → memory path.** It is read from a file
+  (never argv, never an env *value*), held in memory, and only ever surfaced
+  as its npub. Keep the key file `chmod 600` and outside any repo.
+- **Per-request signing is load-bearing, not paranoia.** The hub's replay
+  cache burns each event id on first sight — *including failed auth* — so a
+  static `Authorization` header would work exactly once. Every request,
+  including byte-identical retries and transport reconnects, gets a fresh
+  event.
+- **The `nonce` tag is mandatory.** Without it, two identical requests signed
+  in the same second produce the same event id and the second is rejected as
+  replayed. MCP clients repeat calls; the nonce (plus fresh `created_at`)
+  makes every signature unique.
+- Config-file parse errors never echo file contents — the classic accident is
+  pointing `--config` at the key file itself.
+
+## Scope (v1)
+
+Tools only: `tools/list` and `tools/call` are bridged, with descriptions and
+input schemas passed through verbatim. TODO: resources and prompts
+passthrough (the hub door currently advertises only tools, so nothing is lost
+against Parachute hubs today).
+
+## License
+
+AGPL-3.0.

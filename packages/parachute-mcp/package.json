@@ -1,0 +1,48 @@
+{
+  "name": "@openparachute/parachute-mcp",
+  "version": "0.1.0",
+  "description": "Stdio MCP bridge to one or more remote Parachute hubs — signs every HTTP request to the hub's Streamable-HTTP MCP door as a NIP-98 Nostr auth event, so any local MCP client (Claude, Codex, Grok, Cursor…) can use a key-authenticated hub without holding the key itself.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "parachute-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "gen-version": "bun scripts/gen-version.ts",
+    "prebuild": "bun scripts/gen-version.ts",
+    "build": "tsc",
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run build",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "nostr-tools": "^2.25.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^5"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ParachuteComputer/parachute-surface.git",
+    "directory": "packages/parachute-mcp"
+  }
+}
