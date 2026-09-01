@@ -1,0 +1,8 @@
+# Compiled single-file executables from `bun run build:binaries`.
+# These are RELEASE ASSETS (attached to the GitHub Release by
+# `release-mcp-binaries` in .github/workflows/release.yml), never commits —
+# each one is ~60–80 MB of embedded Bun runtime.
+release/
+
+# `bun build --compile` scratch files, left behind if a compile is interrupted.
+*.bun-build

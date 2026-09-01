@@ -1,5 +1,32 @@
 # Changelog — @openparachute/mcp
 
+## Unreleased
+
+- **Single-file executables.** `bun run build:binaries`
+  (`scripts/build-binaries.ts`) cross-compiles `dist/cli.js` with
+  `bun build --compile` for linux-x64, linux-arm64, darwin-arm64 and
+  darwin-x64, emitting `release/parachute-mcp-<version>-<os>-<arch>` plus a
+  `SHA256SUMS` file. The version is compiled in (the script runs the package
+  build first, whose `prebuild` regenerates `src/version.ts`), so
+  `--version` prints the package version with nothing to read at runtime.
+  Motivation: agent sandboxes with no Node runtime and no npm egress, where an
+  `npx` MCP command turns every boot into a registry call — one hiccup and the
+  harness crash-loops.
+- `release.yml`: `release-mcp-binaries` builds those binaries (all targets from
+  one Linux runner, then executes the linux-x64 one and asserts on the version
+  it prints) and attaches them to the GitHub Release for `mcp-v<version>`, on
+  the tag path and on the publish-on-merge path alike.
+- `release.yml`: `publish-mcp-npm` publishes `@openparachute/mcp` to npm via
+  OIDC trusted publishing, mirroring the sibling packages (version-matches-tag
+  guard, `workspace:`/`link:` protocol guard, dist-tag from the version being
+  published). `mcp-v` is now wired into `plan` / `tag-record`, so a version
+  bump on `main` cuts the tag like every other package.
+- `invokedAsEntry()` no longer answers "not the entry point" inside a compiled
+  binary: `bun build --compile` runs from a virtual filesystem (`/$bunfs/…`)
+  where `realpathSync` throws for both sides of the comparison, so the binary
+  booted, matched nothing, and exited 0 in silence. It now falls back to
+  comparing the unresolved paths.
+
 ## 0.1.0
 
 Initial release — the official replacement for hand-built per-agent loopback
