@@ -511,12 +511,17 @@ describe("tagPrefixFor", () => {
     expect(tagPrefixFor("packages/surface-host")).not.toBe("surface-host-v");
   });
 
-  test("the other five npm packages use their alias prefixes, not directory basenames", () => {
+  test("the other six npm packages use their alias prefixes, not directory basenames", () => {
     expect(tagPrefixFor("packages/surface-client")).toBe("client-v");
     expect(tagPrefixFor("packages/account-client")).toBe("account-v");
     expect(tagPrefixFor("packages/surface-render")).toBe("render-v");
     expect(tagPrefixFor("packages/doc-schema")).toBe("doc-schema-v");
     expect(tagPrefixFor("packages/surface-server")).toBe("server-v");
+    expect(tagPrefixFor("packages/parachute-mcp")).toBe("mcp-v");
+    expect(tagPrefixFor("packages/parachute-mcp")).not.toBe("parachute-mcp-v");
+    // The mcp npm package and the meeting-mcp tarball live in different tag
+    // namespaces; `meeting-mcp-v…` must never be read as an mcp tag.
+    expect(tagPrefixFor("packages/parachute-mcp")).not.toBe("meeting-mcp-v");
     expect(tagPrefixFor("packages/surface-client")).not.toBe("surface-client-v");
     expect(tagPrefixFor("packages/surface-server")).not.toBe("surface-server-v");
   });
@@ -633,6 +638,7 @@ describe("release.yml tag-push override (hub#841)", () => {
       "bun scripts/release-plan.ts packages/surface-render @openparachute/surface-render",
       "bun scripts/release-plan.ts packages/doc-schema @openparachute/doc-schema",
       "bun scripts/release-plan.ts packages/surface-server @openparachute/surface-server",
+      "bun scripts/release-plan.ts packages/parachute-mcp @openparachute/mcp",
     ]) {
       expect(workflow).toContain(`${cmd} ${flag}`);
     }
@@ -640,7 +646,7 @@ describe("release.yml tag-push override (hub#841)", () => {
 
   test("publish jobs consult plan even on a tag push — a tag is not a bypass of the stable-from-main gate", () => {
     expect(workflow).toContain(
-      "needs.plan.outputs.surface == 'true' && (github.ref_type != 'tag' || (!startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-')))",
+      "needs.plan.outputs.surface == 'true' && (github.ref_type != 'tag' || (!startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'mcp-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-')))",
     );
     expect(workflow).toContain(
       "needs.plan.outputs.surface_client == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'client-'))",
@@ -653,12 +659,24 @@ describe("release.yml tag-push override (hub#841)", () => {
     expect(workflow).toContain("if: ${{ startsWith(github.ref_name, 'meeting-mcp-') }}");
   });
 
+  test("the mcp binaries job covers BOTH release paths — a merge-published version must not ship binary-less", () => {
+    // `tag-record` pushes `mcp-v…` with GITHUB_TOKEN, and a token-pushed tag
+    // cannot start a workflow. If this job were tag-only (the tarball shape),
+    // every publish-on-merge release would land on npm with no binaries.
+    expect(workflow).toContain(
+      "(github.ref_type == 'tag' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')",
+    );
+  });
+
   test("npm dist-tag is derived from package.json version, not github.ref_name (hub#792)", () => {
     // Merge-triggered runs have ref_name `next`/`main`. Reading that for
     // dist-tag published every rc to @latest (hub 0.7.9-rc.3).
     // Tarball jobs still read the tag — they only run on tags.
-    expect(workflow.match(/case "\$PKG_VERSION" in/g)?.length).toBe(6);
+    expect(workflow.match(/case "\$PKG_VERSION" in/g)?.length).toBe(7);
     expect(workflow.match(/if \[\[ "\$GITHUB_REF_NAME" =~ -rc\\\. \]\]/g)?.length).toBe(3);
+    // The mcp binaries job runs on merges too, where GITHUB_REF_NAME is a
+    // BRANCH — so its prerelease flag reads the resolved tag, not the ref.
+    expect(workflow.match(/if \[\[ "\$TAG" =~ -rc\\\. \]\]/g)?.length).toBe(1);
   });
 });
 

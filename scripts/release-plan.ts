@@ -371,6 +371,10 @@ export const SURFACE_NPM_TAG_PREFIX: Readonly<Record<string, string>> = {
   "packages/surface-render": "render-v",
   "packages/doc-schema": "doc-schema-v",
   "packages/surface-server": "server-v",
+  // `mcp-v`, NOT `parachute-mcp-v` — and deliberately unrelated to the
+  // `meeting-mcp-v` tarball prefix, which no `mcp-v` tag can be confused with
+  // (a prefix check on "mcp-" does not match "meeting-mcp-").
+  "packages/parachute-mcp": "mcp-v",
 };
 
 export function tagPrefixFor(dir: string): string {
