@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **`parachute-mcp doctor`** — one command that proves a harness has working
+  Parachute access, and names the layer that broke when it doesn't. Four
+  checks in dependency order, each PASS/FAIL/SKIP with a one-line reason,
+  stopping at the first hard failure: `key` (resolve the signing key exactly as
+  bridge mode does; prints the npub, never the secret and never the key file's
+  path), `hub` (NIP-98-signed `initialize` + `tools/list`, reporting the tool
+  count and the server identity), `vaults` (`list-vaults` — names plus whether
+  the grant covers all of the hub's vaults or a listed subset), and `write` (a
+  real create → byte-exact read-back → delete round-trip). The exit code alone
+  says which layer failed: `1` no key/config, `2` hub unreachable, `3`
+  signature rejected, `4` the hub is fine but the grant is not. `--json` emits
+  one object with per-step results. Motivation: those four failures are
+  indistinguishable from the outside, and the first symptom of any of them used
+  to be a tool call failing deep inside a turn.
+- The write probe writes **only** under `.parachute/doctor/`, to a path
+  namespaced by the caller's npub prefix and a timestamp, re-checked against
+  that prefix immediately before the create AND before the delete. Cleanup runs
+  even when the read-back fails; a door with no `delete-note` gets the note
+  relabelled "doctor probe, safe to delete" and the step says so rather than
+  claiming it tidied up. It only runs with `--vault <name>` or when exactly one
+  vault is reachable — never guessing which of several vaults to write to.
+- The write probe lives under `.doctor/`, NOT `.parachute/` — the latter is the
+  vault's own metadata namespace, and a commit touching only that prefix is
+  treated as metadata-only and skipped (`shouldCommit`, `parachute_meta_only`),
+  so a probe filed there would be invisible to the export path it rides on.
+- A create that TIMES OUT (or fails at the transport) sweeps the probe path
+  before reporting: the hub may have committed the note and lost the answer, so
+  an unknown state must not be allowed to leave litter. A refusal (exit 4) is a
+  decision, not an unknown, and is left alone — a delete against a read-only
+  grant would only add a second, misleading error. A create failure carries
+  `details.path` so a `--json` consumer can locate any orphan.
+- Zero reachable vaults is a FAIL with exit `4`, not a pass with a caveat: exit
+  `0` is documented to mean the grant reaches a vault, and a key that
+  authenticates and can reach nothing has not got working access.
+- `TimeoutError` prints one decimal — `--timeout 0.3` reported "timed out after
+  0s", which reads as a bug in the tool rather than the budget that was asked
+  for.
+- `doctor` checks one hub at a time: several configured and no `--hub` exits `1`
+  naming the aliases rather than silently picking one.
+- The exit-code contract moved to `src/exit.ts` so `doctor.ts` can share it
+  without an import cycle through the CLI runner. `commands.ts` re-exports
+  `EXIT`, `UsageError`, `TimeoutError` and `exitCodeForError` unchanged.
+- README: a new **"Onboarding by harness"** section with a wiring recipe for
+  Claude Code (`claude mcp add` / `.mcp.json`), claude-agent-acp / buzz-host
+  agents (key injected as `BUZZ_PRIVATE_KEY`, so the entry is just the binary
+  and a hub URL), Codex, Grok CLI, Hermes (including the `platform_toolsets`
+  trap — a connected server whose `mcp-parachute` toolset is not listed for the
+  platform is invisible to the agent talking there), OpenClaw / shell-only
+  agents, and sandboxes with no Node. Every recipe ends the same way: run
+  `parachute-mcp doctor` and expect exit `0`. The per-harness snippets that
+  were scattered through Quickstart now live there only.
+
 - **Single-file executables.** `bun run build:binaries`
   (`scripts/build-binaries.ts`) cross-compiles `dist/cli.js` with
   `bun build --compile` for linux-x64, linux-arm64, darwin-arm64 and
