@@ -27,6 +27,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { MCP_TOOL_NAME_MAX_LENGTH, namespacedToolName } from "./bridge.js";
 import {
   type ChannelAction,
   type ChannelResult,
@@ -723,8 +724,15 @@ async function runTools(cmd: ToolsCommand, io: Io): Promise<number> {
     try {
       session = await HubSession.open(hub, signingFetch, cmd.timeout);
       for (const tool of await session.listTools()) {
+        const name = namespaced ? namespacedToolName(hub.alias, tool.name) : tool.name;
+        if (name === null) {
+          io.err(
+            `hub "${hub.alias}": omitting tool "${tool.name}": namespaced name exceeds ${MCP_TOOL_NAME_MAX_LENGTH} characters`,
+          );
+          continue;
+        }
         listed.push({
-          name: namespaced ? `${hub.alias}${NAMESPACE_SEP}${tool.name}` : tool.name,
+          name,
           description: tool.description ?? "",
         });
       }
