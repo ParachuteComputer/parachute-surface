@@ -23,35 +23,41 @@
  * tests can drive real hubs over loopback without spawning subprocesses.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPError,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { type HubEntry, type ResolvedConfig, resolveConfig } from "./config.js";
+import {
+  type DoctorDeps,
+  type DoctorReport,
+  type DoctorSession,
+  renderReport,
+  runDoctor,
+} from "./doctor.js";
+import {
+  EXIT,
+  TimeoutError,
+  UsageError,
+  exitCodeForError,
+  httpStatusOf,
+  isAuthStatus,
+  messageOf,
+} from "./exit.js";
 import { type LoadedKey, loadKey, loadKeyValue } from "./key.js";
 import { buildAuthEvent, signAuthHeader } from "./nip98.js";
 import { makeSigningFetch } from "./signing-fetch.js";
 import { PARACHUTE_MCP_VERSION } from "./version.js";
 
 /**
- * Exit codes. Agents branch on these, so they are part of the contract and
- * are documented in `--help` and the README.
+ * The exit-code contract lives in exit.ts (shared with doctor.ts) and is
+ * re-exported here: `EXIT` and friends have been part of this module's public
+ * surface since the CLI face shipped, and callers should not have to care that
+ * the definitions moved.
  */
-export const EXIT = {
-  ok: 0,
-  /** Bad arguments, bad config, no key, unknown hub/tool name. */
-  usage: 1,
-  /** Could not reach the hub, or an HTTP >= 400 that is not an auth failure. */
-  transport: 2,
-  /** The hub rejected the signature or the key (HTTP 401 / 403). */
-  auth: 3,
-  /** The tool ran and returned `isError: true`. */
-  toolError: 4,
-} as const;
+export { EXIT, UsageError, TimeoutError, exitCodeForError };
 
-export const SUBCOMMANDS = ["tools", "call", "http"] as const;
+export const SUBCOMMANDS = ["tools", "call", "http", "doctor"] as const;
 export type SubcommandName = (typeof SUBCOMMANDS)[number];
 
 export function isSubcommand(arg: string | undefined): arg is SubcommandName {
@@ -71,6 +77,7 @@ const VALUE_FLAGS = new Set([
   "--header",
   "-H",
   "--timeout",
+  "--vault",
 ]);
 
 export interface SubcommandSplit {
@@ -116,21 +123,6 @@ export function splitSubcommand(argv: string[]): SubcommandSplit | undefined {
 export function foldGlobals(split: SubcommandSplit): string[] {
   const [name, ...rest] = split.rest;
   return [name as string, ...split.globals, ...rest];
-}
-
-/** Anything the user could fix by typing a different command line. Exit 1. */
-export class UsageError extends Error {}
-
-/**
- * A hub that accepts the connection and then never answers. Without this every
- * subcommand hangs forever, which for an agent is worse than an error: the
- * shell-out never returns and the turn stalls with no diagnostic at all.
- */
-export class TimeoutError extends Error {
-  constructor(ms: number) {
-    // Content-free by construction — no URL, no arguments, nothing to leak.
-    super(`timed out after ${Math.round(ms / 1000)}s`);
-  }
 }
 
 export const DEFAULT_TIMEOUT_MS = 60_000;
@@ -234,11 +226,23 @@ export interface HttpCommand {
   timeout: number;
 }
 
+export interface DoctorCommand {
+  kind: "doctor";
+  config?: string;
+  hub?: string;
+  /** `--vault <name>`: which vault the write round-trip probes. */
+  vault?: string;
+  /** `--json`: one machine-readable object instead of the PASS/FAIL lines. */
+  json: boolean;
+  /** Per-request budget in ms (`--timeout`, seconds on the wire). */
+  timeout: number;
+}
+
 export interface HelpCommand {
   kind: "help";
 }
 
-export type Command = ToolsCommand | CallCommand | HttpCommand | HelpCommand;
+export type Command = ToolsCommand | CallCommand | HttpCommand | DoctorCommand | HelpCommand;
 
 /** Does `arg` introduce flag `name`, either as `--name` or `--name=value`? */
 function isFlag(arg: string, name: string): boolean {
@@ -320,6 +324,8 @@ export function parseCommand(argv: string[]): Command {
       return parseCall(argv);
     case "http":
       return parseHttp(argv);
+    case "doctor":
+      return parseDoctor(argv);
     default:
       throw new UsageError(`unknown subcommand "${String(name)}"`);
   }
@@ -338,6 +344,24 @@ function parseTools(argv: string[]): ToolsCommand {
       cmd.timeout = parseTimeoutFlag(value);
     } else if (arg.startsWith("-")) throw new UsageError(`tools: unknown flag ${arg}`);
     else throw new UsageError(`tools: unexpected argument "${arg}" (tools takes no positionals)`);
+  }
+  return cmd;
+}
+
+function parseDoctor(argv: string[]): DoctorCommand {
+  const cmd: DoctorCommand = { kind: "doctor", json: false, timeout: DEFAULT_TIMEOUT_MS };
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i] as string;
+    if (arg === "--json") cmd.json = true;
+    else if (isFlag(arg, "--config")) [cmd.config, i] = takeValue(argv, i, "--config");
+    else if (isFlag(arg, "--hub")) [cmd.hub, i] = takeValue(argv, i, "--hub");
+    else if (isFlag(arg, "--vault")) [cmd.vault, i] = takeValue(argv, i, "--vault");
+    else if (isFlag(arg, "--timeout")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--timeout");
+      cmd.timeout = parseTimeoutFlag(value);
+    } else if (arg.startsWith("-")) throw new UsageError(`doctor: unknown flag ${arg}`);
+    else throw new UsageError(`doctor: unexpected argument "${arg}" (doctor takes no positionals)`);
   }
   return cmd;
 }
@@ -536,6 +560,11 @@ class HubSession {
     return (await withTimeout(this.client.listTools(), this.timeoutMs)).tools;
   }
 
+  /** `serverInfo` from the `initialize` handshake, when the hub sent one. */
+  serverInfo(): { name?: string; version?: string } | undefined {
+    return this.client.getServerVersion();
+  }
+
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     return (await withTimeout(
       this.client.callTool({ name, arguments: args }),
@@ -552,28 +581,6 @@ class HubSession {
     await withTimeout(this.transport.terminateSession(), this.timeoutMs).catch(() => {});
     await this.client.close().catch(() => {});
   }
-}
-
-/** HTTP status behind a transport error, if it carries one. */
-function httpStatusOf(err: unknown): number | undefined {
-  if (err instanceof StreamableHTTPError && typeof err.code === "number") return err.code;
-  // Fallback for SDK paths that surface the status only in the message.
-  const match = /\bHTTP (\d{3})\b/.exec(err instanceof Error ? err.message : "");
-  return match ? Number(match[1]) : undefined;
-}
-
-function isAuthStatus(status: number | undefined): boolean {
-  return status === 401 || status === 403;
-}
-
-/** Map any thrown value to this CLI's exit-code contract. */
-export function exitCodeForError(err: unknown): number {
-  if (err instanceof UsageError) return EXIT.usage;
-  return isAuthStatus(httpStatusOf(err)) ? EXIT.auth : EXIT.transport;
-}
-
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -800,6 +807,91 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// doctor
+// ---------------------------------------------------------------------------
+
+/**
+ * Which of the three key sources actually supplied the key, as a LABEL.
+ *
+ * Mirrors `resolveKeySource` exactly (env file path beats config `keyFile`
+ * beats the injected value). The label deliberately does NOT include the key
+ * file's path: `doctor`'s report goes to stdout, which is not passed through
+ * `redactSecrets`, and the classic first-run mistake is pasting an nsec into
+ * `PARACHUTE_NSEC_FILE` where a path belongs — which would put the secret in
+ * the "path" and then into the report.
+ */
+function keySourceLabel(config: ResolvedConfig, env: NodeJS.ProcessEnv): string {
+  if (env.PARACHUTE_NSEC_FILE) return "PARACHUTE_NSEC_FILE (a key file)";
+  if (config.keyFile) return 'config "keyFile"';
+  return "BUZZ_PRIVATE_KEY (injected nsec value)";
+}
+
+/**
+ * Wire the real config, key, MCP session and clock into the step runner in
+ * doctor.ts. Everything here is plumbing; the policy — what a step means, when
+ * it skips, what the probe writes — lives there and is unit-tested against a
+ * fake hub.
+ *
+ * `doctor` targets exactly ONE hub. With several configured and no `--hub`,
+ * the hub step FAILs with a usage error naming the aliases rather than
+ * silently picking one: "prove I have access" has to name which door it
+ * proved.
+ */
+async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
+  const env = io.env ?? process.env;
+  let resolved: Resolved | undefined;
+  const resolveOnce = (): Resolved => {
+    resolved ??= resolveKeyAndConfig(
+      cmd.config,
+      cmd.hub !== undefined && hubFlagIsUrl(cmd.hub) ? cmd.hub : undefined,
+      io,
+    );
+    return resolved;
+  };
+
+  const deps: DoctorDeps = {
+    version: PARACHUTE_MCP_VERSION,
+    now: () => new Date(),
+    resolveKey: () => {
+      const { config, key } = resolveOnce();
+      return { npub: key.npub, source: keySourceLabel(config, env) };
+    },
+    resolveHub: () => {
+      const { config } = resolveOnce();
+      const hubs = targetHubs(config, cmd.hub);
+      const only = hubs[0];
+      if (hubs.length !== 1 || !only) {
+        throw new UsageError(
+          `doctor checks one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
+            .map((h) => h.alias)
+            .join(", ")})`,
+        );
+      }
+      return only;
+    },
+    openSession: async (hub): Promise<DoctorSession> =>
+      await HubSession.open(hub, makeSigningFetch(resolveOnce().key.sk), cmd.timeout),
+    classify: (err, phase) => {
+      // Auth first: a 401/403 is an auth failure whichever phase surfaced it.
+      if (isAuthStatus(httpStatusOf(err))) return EXIT.auth;
+      // A JSON-RPC error out of a tools/call is the TOOL failing (the hub
+      // reports "vault not covered" / "not granted" that way), not the network.
+      if (phase === "tool" && err instanceof McpError) return EXIT.toolError;
+      return exitCodeForError(err);
+    },
+  };
+
+  const report: DoctorReport = await runDoctor(
+    cmd.vault !== undefined ? { vault: cmd.vault } : {},
+    deps,
+  );
+  // The report IS the output, so it goes to stdout — same reasoning as
+  // `--version`. Nothing here can carry key material (see `keySourceLabel`).
+  io.out(cmd.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
+  return report.exitCode;
+}
+
+// ---------------------------------------------------------------------------
 // entry point
 // ---------------------------------------------------------------------------
 
@@ -821,6 +913,8 @@ export async function runCli(argv: string[], rawIo: Io, usage: string): Promise<
         return await runCall(cmd, io);
       case "http":
         return await runHttp(cmd, io);
+      case "doctor":
+        return await runDoctorCommand(cmd, io);
     }
   } catch (err) {
     io.err(`parachute-mcp: ${messageOf(err)}`);

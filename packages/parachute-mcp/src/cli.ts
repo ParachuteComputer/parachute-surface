@@ -32,6 +32,18 @@ Bridge mode (an MCP server on stdio, for MCP clients):
   parachute-mcp --version | --help
 
 CLI mode (one-shot commands, for agents that shell out):
+  parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json]
+      Prove this harness has working Parachute access, in one command. Four
+      checks, each PASS / FAIL / SKIP with a one-line reason, stopping at the
+      first hard failure:
+        key     resolve the signing key; prints the npub, never the secret
+        hub     NIP-98-signed initialize + tools/list against the hub door
+        vaults  list-vaults — which vaults this key can reach
+        write   create a note under .parachute/doctor/, read it back
+                byte-exact, delete it (only with --vault, or when exactly one
+                vault is reachable; it never writes anywhere else)
+      Exit 0 means all of that worked. --json emits one object instead.
+
   parachute-mcp tools [--hub <alias|url>] [--table]
       List the hubs' tools as JSON (name + description) on stdout.
       With several hubs and no --hub, names are namespaced <alias>__<tool>.
@@ -56,6 +68,10 @@ Common flags: --config <path>, --timeout <seconds> (default 60).
   parachute-mcp --config c.json tools     and     parachute-mcp tools --config c.json
 are the same command. All CLI subcommands use the same config and key
 resolution as bridge mode.
+
+Onboarding a new harness? Add the MCP server (or install the binary), then run
+"parachute-mcp doctor" and expect exit 0. Recipes per harness are in the
+README section "Onboarding by harness".
 
 Exit codes:
   0  success

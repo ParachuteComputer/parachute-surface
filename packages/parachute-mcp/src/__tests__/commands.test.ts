@@ -8,8 +8,10 @@ import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamable
 import {
   type CallCommand,
   DEFAULT_TIMEOUT_MS,
+  type DoctorCommand,
   EXIT,
   type HttpCommand,
+  type SubcommandSplit,
   type ToolsCommand,
   UsageError,
   exitCodeForError,
@@ -21,14 +23,16 @@ import {
 } from "../commands.js";
 
 const tools = (argv: string[]) => parseCommand(argv) as ToolsCommand;
+const doctor = (argv: string[]) => parseCommand(argv) as DoctorCommand;
 const call = (argv: string[]) => parseCommand(argv) as CallCommand;
 const http = (argv: string[]) => parseCommand(argv) as HttpCommand;
 
 describe("isSubcommand", () => {
-  test("recognizes exactly the three subcommands", () => {
+  test("recognizes exactly the four subcommands", () => {
     expect(isSubcommand("tools")).toBe(true);
     expect(isSubcommand("call")).toBe(true);
     expect(isSubcommand("http")).toBe(true);
+    expect(isSubcommand("doctor")).toBe(true);
   });
 
   test("bridge-mode argv is never mistaken for a subcommand", () => {
@@ -351,5 +355,84 @@ describe("redactSecrets", () => {
   test("leaves 64-hex alone — event ids and pubkeys look identical to hex keys", () => {
     const id = "a".repeat(64);
     expect(redactSecrets(`event id ${id}`)).toBe(`event id ${id}`);
+  });
+});
+
+describe("parse doctor", () => {
+  test("bare `doctor` uses the shared defaults", () => {
+    const cmd = doctor(["doctor"]);
+    expect(cmd.kind).toBe("doctor");
+    expect(cmd.json).toBe(false);
+    expect(cmd.vault).toBeUndefined();
+    expect(cmd.hub).toBeUndefined();
+    expect(cmd.timeout).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  test("every flag, in both --flag value and --flag=value forms", () => {
+    const spaced = doctor([
+      "doctor",
+      "--hub",
+      "home",
+      "--vault",
+      "uni",
+      "--json",
+      "--timeout",
+      "5",
+      "--config",
+      "/tmp/c.json",
+    ]);
+    expect(spaced).toMatchObject({
+      hub: "home",
+      vault: "uni",
+      json: true,
+      timeout: 5000,
+      config: "/tmp/c.json",
+    });
+    const inline = doctor([
+      "doctor",
+      "--hub=home",
+      "--vault=uni",
+      "--json",
+      "--timeout=5",
+      "--config=/tmp/c.json",
+    ]);
+    expect(inline).toEqual(spaced);
+  });
+
+  test("--hub takes a URL as well as an alias", () => {
+    expect(doctor(["doctor", "--hub", "https://hub.example.test/mcp"]).hub).toBe(
+      "https://hub.example.test/mcp",
+    );
+  });
+
+  test("global flags before the subcommand fold in", () => {
+    const split = splitSubcommand(["--config", "/tmp/c.json", "doctor", "--json"]);
+    expect(split).toEqual({ globals: ["--config", "/tmp/c.json"], rest: ["doctor", "--json"] });
+    expect(doctor(foldGlobals(split as SubcommandSplit))).toMatchObject({
+      config: "/tmp/c.json",
+      json: true,
+    });
+  });
+
+  test("a --vault VALUE is never mistaken for the subcommand", () => {
+    // `--vault doctor` names a vault called "doctor"; the word after a
+    // value-taking flag is a value, not a command.
+    expect(splitSubcommand(["--vault", "doctor"])).toBeUndefined();
+  });
+
+  test("doctor takes no positionals", () => {
+    expect(() => doctor(["doctor", "uni"])).toThrow(UsageError);
+    expect(() => doctor(["doctor", "uni"])).toThrow(/no positionals/);
+  });
+
+  test("unknown flags and empty values are usage errors", () => {
+    expect(() => doctor(["doctor", "--table"])).toThrow(UsageError);
+    expect(() => doctor(["doctor", "--vault"])).toThrow(/--vault needs a value/);
+    expect(() => doctor(["doctor", "--timeout", "0"])).toThrow(/positive number/);
+  });
+
+  test("--help anywhere short-circuits to help", () => {
+    expect(parseCommand(["doctor", "--help"]).kind).toBe("help");
+    expect(parseCommand(["doctor", "--vault", "uni", "-h"]).kind).toBe("help");
   });
 });

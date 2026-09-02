@@ -30,6 +30,13 @@ export interface StubHubOptions {
   port?: number;
   /** Expected signer pubkey (hex); mismatches are recorded as violations. */
   expectPubkey?: string;
+  /**
+   * Answer a `tools/call` with vault-shaped semantics. Return an MCP tool
+   * RESULT (`{ content, isError? }`) to take over the call, or undefined to
+   * fall through to the default echo. Used by the `doctor` integration test,
+   * which needs a hub that really stores and returns a note.
+   */
+  handleCall?: (tool: string, args: Record<string, unknown>) => unknown | undefined;
 }
 
 export interface ToolCallRecord {
@@ -182,6 +189,8 @@ export class StubHub {
         const tool = String(message.params?.name ?? "");
         const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
         this.toolCalls.push({ tool, args });
+        const custom = this.opts.handleCall?.(tool, args);
+        if (custom !== undefined) return respond(custom);
         if (!this.opts.tools.some((t) => t.name === tool)) {
           return respond({
             content: [{ type: "text", text: `Unknown tool: ${tool}` }],

@@ -637,3 +637,193 @@ describe("http: redirects", () => {
     expect(cap.stderr()).toContain(`< location: ${target}`);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+/**
+ * `doctor` end to end: real SDK client, real Streamable-HTTP transport, real
+ * signing fetch, real key file, against an in-process hub that really stores
+ * the probe note. doctor.test.ts covers the step machine's branches against a
+ * fake; this covers the wiring — that the steps run over the SAME signed
+ * session the other subcommands use, and that every request is NIP-98 clean.
+ */
+describe("doctor", () => {
+  const VAULT_TOOLS: StubTool[] = [
+    { name: "list-vaults", description: "list vaults", inputSchema: { type: "object" } },
+    { name: "create-note", description: "make a note", inputSchema: { type: "object" } },
+    { name: "query-notes", description: "read notes", inputSchema: { type: "object" } },
+    { name: "delete-note", description: "remove a note", inputSchema: { type: "object" } },
+  ];
+
+  /** A hub with one vault that really holds what `create-note` writes. */
+  function vaultHub(label: string, vaults: string[]): StubHub {
+    const notes = new Map<string, string>();
+    const hub = new StubHub({
+      label,
+      tools: VAULT_TOOLS,
+      expectPubkey: pubkey,
+      handleCall: (tool, args) => {
+        const json = (value: unknown) => ({
+          content: [{ type: "text", text: JSON.stringify(value) }],
+        });
+        switch (tool) {
+          case "list-vaults":
+            return json({ covered: "listed", vaults: vaults.map((name) => ({ name })) });
+          case "create-note":
+            notes.set(String(args.path), String(args.content));
+            return json({ id: args.path });
+          case "query-notes": {
+            const content = notes.get(String(args.id));
+            return json({
+              vaults_queried: [args.vault],
+              results: [{ vault: args.vault, notes: content === undefined ? [] : { content } }],
+            });
+          }
+          case "delete-note":
+            notes.delete(String(args.id));
+            return json({ deleted: true });
+          default:
+            return undefined;
+        }
+      },
+    });
+    cleanup.push(() => hub.stop());
+    return hub;
+  }
+
+  test("one vault → all four checks pass, exit 0, and the probe is cleaned up", async () => {
+    const hub = vaultHub("solo", ["uni"]);
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    expect(await runCli(["doctor"], cap.io, USAGE)).toBe(EXIT.ok);
+    const out = cap.stdout();
+    expect(out).toContain("PASS  key");
+    expect(out).toContain("PASS  hub");
+    expect(out).toContain("PASS  vaults");
+    expect(out).toContain("PASS  write");
+    expect(out).toContain("4/4 checks passed");
+
+    const called = hub.toolCalls.map((c) => c.tool);
+    expect(called).toEqual(["list-vaults", "create-note", "query-notes", "delete-note"]);
+    for (const call of hub.toolCalls.slice(1)) {
+      expect(String(call.args.path ?? call.args.id)).toStartWith(".parachute/doctor/");
+    }
+    expectCleanAuth(hub);
+  });
+
+  test("the report prints the npub and never any key material", async () => {
+    const hub = vaultHub("solo", ["uni"]);
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    await runCli(["doctor"], cap.io, USAGE);
+    const out = cap.stdout();
+    expect(out).toContain("npub1");
+    expect(out).not.toContain(nsec);
+    expect(out).not.toContain(skHex);
+    expect(cap.stderr()).toBe("");
+  });
+
+  test("--json emits one object with per-step results", async () => {
+    const hub = vaultHub("solo", ["uni"]);
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    expect(await runCli(["doctor", "--json"], cap.io, USAGE)).toBe(EXIT.ok);
+    const report = JSON.parse(cap.stdout());
+    expect(report.ok).toBe(true);
+    expect(report.exitCode).toBe(0);
+    expect(report.steps.map((s: { step: string }) => s.step)).toEqual([
+      "key",
+      "hub",
+      "vaults",
+      "write",
+    ]);
+    expect(report.steps.every((s: { status: string }) => s.status === "pass")).toBe(true);
+    expect(report.npub).toStartWith("npub1");
+    expect(report.hub).toEqual({ alias: "home", url: hub.url });
+  });
+
+  test("several hubs and no --hub is a usage error naming the aliases, exit 1", async () => {
+    const home = vaultHub("home", ["uni"]);
+    const techne = vaultHub("techne", ["team"]);
+    const cap = capture(
+      configFor([
+        { alias: "home", url: home.url },
+        { alias: "techne", url: techne.url },
+      ]),
+    );
+
+    expect(await runCli(["doctor"], cap.io, USAGE)).toBe(EXIT.usage);
+    expect(cap.stdout()).toContain("FAIL  hub");
+    expect(cap.stdout()).toContain("home, techne");
+    // Neither hub was contacted: the ambiguity is resolvable before any I/O.
+    expect(home.authedRequests).toBe(0);
+    expect(techne.authedRequests).toBe(0);
+  });
+
+  test("--hub picks one of several, and --vault picks the vault", async () => {
+    const home = vaultHub("home", ["uni", "team"]);
+    const techne = vaultHub("techne", ["team"]);
+    const cap = capture(
+      configFor([
+        { alias: "home", url: home.url },
+        { alias: "techne", url: techne.url },
+      ]),
+    );
+
+    expect(await runCli(["doctor", "--hub", "home", "--vault", "team"], cap.io, USAGE)).toBe(
+      EXIT.ok,
+    );
+    expect(home.toolCalls.find((c) => c.tool === "create-note")?.args.vault).toBe("team");
+    expect(techne.authedRequests).toBe(0);
+  });
+
+  test("no key at all fails at the key step with the resolution order, exit 1", async () => {
+    const hub = vaultHub("solo", ["uni"]);
+    const dir = mkdtempSync(join(tmpdir(), "parachute-mcp-doctor-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const cap = capture({ env: {}, home: dir });
+
+    expect(await runCli(["doctor", "--hub", hub.url], cap.io, USAGE)).toBe(EXIT.usage);
+    expect(cap.stdout()).toContain("FAIL  key");
+    expect(cap.stdout()).toContain("PARACHUTE_NSEC_FILE");
+    expect(cap.stdout()).toContain("BUZZ_PRIVATE_KEY");
+    expect(hub.authedRequests).toBe(0);
+  });
+
+  test("an unreachable hub fails at the hub step, exit 2", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "parachute-mcp-doctor-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const keyFile = join(dir, "agent.nsec");
+    writeFileSync(keyFile, `${nsec}\n`, { mode: 0o600 });
+    const cap = capture({ env: { PARACHUTE_NSEC_FILE: keyFile }, home: dir });
+
+    const dead = `http://127.0.0.1:${freePort()}/mcp`;
+    expect(await runCli(["doctor", "--hub", dead], cap.io, USAGE)).toBe(EXIT.transport);
+    expect(cap.stdout()).toContain("PASS  key");
+    expect(cap.stdout()).toContain("FAIL  hub");
+  });
+
+  test("a hub that never answers times out at the hub step rather than hanging", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "parachute-mcp-doctor-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const keyFile = join(dir, "agent.nsec");
+    writeFileSync(keyFile, `${nsec}\n`, { mode: 0o600 });
+    const cap = capture({ env: { PARACHUTE_NSEC_FILE: keyFile }, home: dir });
+
+    const code = await runCli(["doctor", "--hub", blackhole(), "--timeout", "0.3"], cap.io, USAGE);
+    expect(code).toBe(EXIT.transport);
+    expect(cap.stdout()).toContain("timed out after");
+  });
+
+  test("BUZZ_PRIVATE_KEY alone is enough — the zero-config Buzz path", async () => {
+    const hub = vaultHub("solo", ["uni"]);
+    const dir = mkdtempSync(join(tmpdir(), "parachute-mcp-doctor-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const cap = capture({ env: { BUZZ_PRIVATE_KEY: nsec }, home: dir });
+
+    expect(await runCli(["doctor", "--hub", hub.url], cap.io, USAGE)).toBe(EXIT.ok);
+    expect(cap.stdout()).toContain("BUZZ_PRIVATE_KEY (injected nsec value)");
+    expect(cap.stdout()).not.toContain(nsec);
+    expectCleanAuth(hub);
+  });
+});
