@@ -1,32 +1,22 @@
 {
-  "name": "@openparachute/account-client",
-  "version": "0.1.0",
-  "description": "Browser-side SDK for the Parachute account/door contract — capability discovery, the cookie→account-token mint (held in memory), and vault lifecycle (list/create/delete/mint-token) against one door origin (Hub or Cloud).",
+  "name": "@openparachute/mcp",
+  "version": "0.2.0-rc.1",
+  "description": "Stdio MCP bridge to one or more remote Parachute hubs — signs every HTTP request to the hub's Streamable-HTTP MCP door as a NIP-98 Nostr auth event, so any local MCP client (Claude, Codex, Grok, Cursor…) can use a key-authenticated hub without holding the key itself.",
   "license": "AGPL-3.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "parachute-mcp": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./account-client": {
-      "types": "./dist/account-client.d.ts",
-      "import": "./dist/account-client.js"
-    },
-    "./errors": {
-      "types": "./dist/errors.d.ts",
-      "import": "./dist/errors.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
-  ],
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public"
   },
@@ -34,10 +24,15 @@
     "gen-version": "bun scripts/gen-version.ts",
     "prebuild": "bun scripts/gen-version.ts",
     "build": "tsc",
+    "build:binaries": "bun scripts/build-binaries.ts",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test src/",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "nostr-tools": "^2.25.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
@@ -49,6 +44,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ParachuteComputer/parachute-surface.git",
-    "directory": "packages/account-client"
+    "directory": "packages/parachute-mcp"
   }
 }

@@ -35,7 +35,7 @@
     "@tiptap/extension-collaboration": "3.26.0",
     "@tiptap/extension-collaboration-caret": "3.26.0",
     "@tiptap/react": "3.26.0",
-    "@types/bun": "latest",
+    "@types/bun": "^1.4.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
