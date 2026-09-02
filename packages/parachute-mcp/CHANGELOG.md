@@ -1,5 +1,95 @@
 # Changelog — @openparachute/mcp
 
+## [0.2.0-rc.2] - 2026-09-02
+
+- **`parachute-mcp doctor`** — one command that proves a harness has working
+  Parachute access, and names the layer that broke when it doesn't. Four
+  checks in dependency order, each PASS/FAIL/SKIP with a one-line reason,
+  stopping at the first hard failure: `key` (resolve the signing key exactly as
+  bridge mode does; prints the npub, never the secret and never the key file's
+  path), `hub` (NIP-98-signed `initialize` + `tools/list`, reporting the tool
+  count and the server identity), `vaults` (`list-vaults` — names plus whether
+  the grant covers all of the hub's vaults or a listed subset), and `write` (a
+  real create → byte-exact read-back → delete round-trip). The exit code alone
+  says which layer failed: `1` no key/config, `2` hub unreachable, `3`
+  signature rejected, `4` the hub is fine but the grant is not. `--json` emits
+  one object with per-step results. Motivation: those four failures are
+  indistinguishable from the outside, and the first symptom of any of them used
+  to be a tool call failing deep inside a turn.
+- The write probe writes **only** under `.parachute/doctor/`, to a path
+  namespaced by the caller's npub prefix and a timestamp, re-checked against
+  that prefix immediately before the create AND before the delete. Cleanup runs
+  even when the read-back fails; a door with no `delete-note` gets the note
+  relabelled "doctor probe, safe to delete" and the step says so rather than
+  claiming it tidied up. It only runs with `--vault <name>` or when exactly one
+  vault is reachable — never guessing which of several vaults to write to.
+- The write probe lives under `.doctor/`, NOT `.parachute/` — the latter is the
+  vault's own metadata namespace, and a commit touching only that prefix is
+  treated as metadata-only and skipped (`shouldCommit`, `parachute_meta_only`),
+  so a probe filed there would be invisible to the export path it rides on.
+- A create that TIMES OUT (or fails at the transport) sweeps the probe path
+  before reporting: the hub may have committed the note and lost the answer, so
+  an unknown state must not be allowed to leave litter. A refusal (exit 4) is a
+  decision, not an unknown, and is left alone — a delete against a read-only
+  grant would only add a second, misleading error. A create failure carries
+  `details.path` so a `--json` consumer can locate any orphan.
+- Zero reachable vaults is a FAIL with exit `4`, not a pass with a caveat: exit
+  `0` is documented to mean the grant reaches a vault, and a key that
+  authenticates and can reach nothing has not got working access.
+- `TimeoutError` prints one decimal — `--timeout 0.3` reported "timed out after
+  0s", which reads as a bug in the tool rather than the budget that was asked
+  for.
+- `doctor` checks one hub at a time: several configured and no `--hub` exits `1`
+  naming the aliases rather than silently picking one.
+- The exit-code contract moved to `src/exit.ts` so `doctor.ts` can share it
+  without an import cycle through the CLI runner. `commands.ts` re-exports
+  `EXIT`, `UsageError`, `TimeoutError` and `exitCodeForError` unchanged.
+- README: a new **"Onboarding by harness"** section with a wiring recipe for
+  Claude Code (`claude mcp add` / `.mcp.json`), claude-agent-acp / buzz-host
+  agents (key injected as `BUZZ_PRIVATE_KEY`, so the entry is just the binary
+  and a hub URL), Codex, Grok CLI, Hermes (including the `platform_toolsets`
+  trap — a connected server whose `mcp-parachute` toolset is not listed for the
+  platform is invisible to the agent talking there), OpenClaw / shell-only
+  agents, and sandboxes with no Node. Every recipe ends the same way: run
+  `parachute-mcp doctor` and expect exit `0`. The per-harness snippets that
+  were scattered through Quickstart now live there only.
+- **`parachute-mcp channel-context <read|append|init>`** — shared per-channel
+  memory for several agents answering in one Buzz channel. One append-only note
+  per channel, `Channels/<relay-host>/<channel-uuid>`: `read` prints the last
+  `--tail` bytes (default 8000) and exits `0` on a channel with no note yet, so
+  a first turn is not a failure; `append` takes the entry from STDIN only (never
+  argv), adds exactly one leading newline, and creates-then-retries against a
+  missing note; `init` writes the runbook header, the channel-log tag and
+  `relay`/`channel_id` metadata, treating a `path_conflict` as SUCCESS so two
+  agents opening the same channel in the same second both end up with the note.
+  Path derives from `--relay`/`$BUZZ_RELAY_URL` and `--channel`/`$BUZZ_CHANNEL_ID`;
+  a channel id that could climb out of `Channels/` is refused, not normalized.
+  Append is atomic in the vault, which is what makes the convention concurrency-
+  safe. No new auth code — the existing config, key resolution and NIP-98 signing
+  are wired in.
+- `channel-context read` asks for 3 bytes of slack: the vault aligns
+  `content_offset` DOWN to a codepoint boundary, so a window of exactly `tail`
+  from an offset landing mid-character dropped the note's NEWEST 1–3 bytes.
+  `relayHostOf` now lower-cases — hostnames are case-insensitive but vault paths
+  are not, and `WSS://…` created a second note beside the first, after which the
+  vault answers either path with `ambiguous_path` and the whole channel is
+  poisoned.
+- **Release path: the single-file binaries are built BEFORE the npm publish.**
+  They used to be built after `publish-mcp-npm` and after `tag-record` cut the
+  tag, so a compile failure left the version on npm and the tag in git with a
+  Release carrying no assets — and the README's `curl`-the-asset sandbox install
+  404s for that version. `build-mcp-binaries` now compiles all four targets,
+  executes the linux-x64 one and asserts on the version it prints, and uploads
+  them plus `SHA256SUMS` as a workflow artifact; `publish-mcp-npm` `needs:` it,
+  and `release-mcp-binaries` only downloads and attaches. The build job holds
+  `contents: read` only; the OIDC `id-token: write` publish is untouched.
+  (Closes #229.)
+- `STABLE_PROMOTION_ALLOWED_PATHS` gains `packages/parachute-mcp` — without it
+  the three files an `0.2.0-rc.N` → `0.2.0` suffix-drop must touch all read as
+  new code, and the first stable mcp release would have been refused. A drift
+  test pins the allow-list to `SURFACE_NPM_TAG_PREFIX` so the next package added
+  cannot repeat it. (Closes #231.)
+
 ## [0.2.0-rc.1] - 2026-09-02
 
 - **Single-file executables.** `bun run build:binaries`

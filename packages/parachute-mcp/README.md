@@ -14,9 +14,14 @@ holds the key locally and signs on the way out, the same layering as
 OAuth for clients that can't). One bridge process replaces the hand-built
 per-agent loopback signing proxies.
 
-The same binary also has a **CLI face** (`tools`, `call`, `http`) for agents
-that shell out rather than run an MCP client — same config, same key, same
-signing. See [CLI use](#cli-use-non-mcp-agents).
+The same binary also has a **CLI face** (`doctor`, `tools`, `call`, `http`) for
+agents that shell out rather than run an MCP client — same config, same key,
+same signing. See [CLI use](#cli-use-non-mcp-agents).
+
+**New harness?** Wire it up with a recipe from
+[Onboarding by harness](#onboarding-by-harness), then run `parachute-mcp
+doctor` and expect exit `0`. That one command proves the key resolved, the hub
+accepts the signature, the grant reaches a vault, and a write round-trips.
 
 ```
  MCP client (stdio) ──► parachute-mcp ──► https://hub-a/mcp   (NIP-98 signed)
@@ -115,24 +120,44 @@ then just `parachute-mcp`. With one hub configured, tool names pass through
 unchanged; with several, tools are namespaced `<alias>__<tool>`
 (`home__query-notes`, `techne__create-note`) and calls are routed by prefix.
 
-### Buzz agents (zero-config key)
+Per-harness recipes — Claude Code, buzz-host agents, Codex, Grok, Hermes,
+shell-only agents, and sandboxes with no Node — are in
+[Onboarding by harness](#onboarding-by-harness) below. Each one ends with the
+same proof: `parachute-mcp doctor`, exit `0`.
 
-Under Buzz, `buzz-acp` injects the agent's own bech32 nsec as `BUZZ_PRIVATE_KEY`
-into every MCP subprocess it launches. `parachute-mcp` reads it as a fallback
-key source, so a Buzz agent needs **no key file at all** — just a hub URL:
+## Onboarding by harness
 
-```sh
-parachute-mcp https://uni.taildf9ce2.ts.net/mcp
+Getting an agent onto a hub is four separate things that fail silently and look
+identical from the outside: the key never resolved; the key resolved but the
+hub rejects the signature; the hub accepts the signature but the grant covers
+no vault; the grant covers a vault but is read-only. **Every recipe below ends
+the same way — run `parachute-mcp doctor` and expect exit `0`.** That is the
+proof; the rest is wiring.
+
+```
+$ parachute-mcp doctor
+PASS  key     signing as npub1abc… (from config "keyFile")
+PASS  hub     https://uni.example.ts.net/mcp: initialize + tools/list ok, 21 tools — server parachute-account 0.1.0
+PASS  vaults  2 reachable: uni, team (grant covers this listed subset)
+PASS  write   uni: created, read back byte-exact, deleted — .doctor/npub1abcdefg-20260902T041500Z
+
+PASS — 4/4 checks passed
+$ echo $?
+0
 ```
 
-The key is read from the env value in memory and only ever surfaced as its
-npub. This is per-agent (each agent's own injected key), so it avoids the
-shared-key foot-gun of a global `PARACHUTE_NSEC_FILE`. Non-Buzz harnesses keep
-using a key file. Precedence is always: config `keyFile` → `PARACHUTE_NSEC_FILE`
-(a path, overrides `keyFile`) → `BUZZ_PRIVATE_KEY` (a value, used only when no
-key file is resolved).
+See [`doctor`](#doctor--prove-the-whole-chain) for what each check does, what
+`SKIP` means, and the `--json` shape.
 
-### Claude Code / claude-agent-sdk
+### Claude Code
+
+```sh
+claude mcp add parachute -- parachute-mcp
+# or, with an explicit config file / key:
+claude mcp add parachute --env PARACHUTE_MCP_CONFIG=/home/me/.config/parachute/mcp.json -- parachute-mcp
+```
+
+That writes an entry a project `.mcp.json` can also carry directly:
 
 ```json
 {
@@ -146,23 +171,140 @@ key file is resolved).
 }
 ```
 
-(`claude mcp add parachute -- parachute-mcp` does the same from the CLI; in
-the agent SDK this is an `McpStdioServerConfig`.)
+In the agent SDK this is an `McpStdioServerConfig` with the same three fields.
+Then: `parachute-mcp doctor` — expect exit `0`.
 
-### Codex (`~/.codex/config.toml`)
+### claude-agent-acp / buzz-host agents
+
+`buzz-acp` injects the agent's **own** bech32 nsec as `BUZZ_PRIVATE_KEY` into
+every MCP subprocess it launches, so there is no key file and no `env` block to
+write. The whole entry is the binary and a hub URL:
+
+```json
+{
+  "mcpServers": {
+    "parachute": { "command": "parachute-mcp", "args": ["https://hub.example/mcp"] }
+  }
+}
+```
+
+The key is read from the env value in memory and only ever surfaced as its
+npub. Because it is per-agent, this avoids the shared-key foot-gun of a global
+`PARACHUTE_NSEC_FILE` — each agent proves its own access. Then:
+`parachute-mcp doctor` — expect exit `0`, with the key step reading
+`from BUZZ_PRIVATE_KEY (injected nsec value)`.
+
+### Codex
+
+```sh
+codex mcp add parachute -- parachute-mcp
+```
+
+which lands in `~/.codex/config.toml` as a `[mcp_servers.<name>]` table. Codex
+takes `env` as its own sub-table:
 
 ```toml
 [mcp_servers.parachute]
 command = "parachute-mcp"
 args = []
-env = { "PARACHUTE_MCP_CONFIG" = "/home/me/.config/parachute/mcp.json" }
+
+[mcp_servers.parachute.env]
+PARACHUTE_MCP_CONFIG = "/home/me/.config/parachute/mcp.json"
 ```
 
-### Grok / Cursor / anything stdio
+`command` may be an absolute path (`/usr/local/bin/parachute-mcp`), and often
+should be — see [the `npx` warning](#reference-the-binary-by-absolute-path-in-your-mcp-config).
+Then: `parachute-mcp doctor` — expect exit `0`.
 
-Any client that can spawn a stdio MCP server works the same way: command
-`parachute-mcp`, optional `--config <path>` arg or `PARACHUTE_MCP_CONFIG` /
-`PARACHUTE_NSEC_FILE` env.
+### Grok CLI
+
+`~/.grok/config.toml` uses the same table name as Codex, plus an `enabled`
+flag:
+
+```toml
+[mcp_servers.parachute]
+command = "parachute-mcp"
+args = []
+enabled = true
+
+[mcp_servers.parachute.env]
+PARACHUTE_MCP_CONFIG = "/home/me/.config/parachute/mcp.json"
+```
+
+Then: `parachute-mcp doctor` — expect exit `0`.
+
+### Hermes
+
+*(Shape from the [Hermes agent docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)
+and `cli-config.yaml.example`, not verified against a running Hermes.)*
+
+Hermes config is YAML, and `command` should be an **absolute path** — Hermes
+passes only explicitly configured `env` plus a safe baseline to the subprocess,
+so it will not inherit your shell's `PATH`:
+
+```yaml
+mcp_servers:
+  parachute:
+    command: /usr/local/bin/parachute-mcp
+    args: []
+    env:
+      PARACHUTE_MCP_CONFIG: /home/me/.config/parachute/mcp.json
+    tools:
+      include: ["list-vaults", "query-notes", "create-note", "update-note"]
+```
+
+**The trap.** Each MCP server becomes a runtime toolset named
+`mcp-<server>` — here `mcp-parachute`. If you have set `platform_toolsets` at
+all, it *replaces* the defaults for that platform, so the agent talking on that
+platform sees the Parachute tools only if the toolset is listed:
+
+```yaml
+platform_toolsets:
+  cli: [hermes-cli, mcp-parachute]
+  telegram: [hermes-telegram, mcp-parachute]
+```
+
+Miss that and the server connects fine, `doctor` passes, and the agent still
+insists it has no Parachute tools — because on that platform it doesn't. Then:
+`parachute-mcp doctor` — expect exit `0` (and check the toolset separately, by
+asking the agent to list its tools).
+
+### OpenClaw and other shell-only agents
+
+Agents that shell out rather than run an MCP client use the
+[CLI face](#cli-use-non-mcp-agents) — same config, same key, same signing. No
+MCP entry at all; just teach the agent three commands:
+
+```sh
+parachute-mcp tools --table                       # what can I call?
+echo '{"vault":"uni","id":"Projects/README"}' \
+  | parachute-mcp call query-notes --args -       # run one
+parachute-mcp http GET https://hub.example/api/…  # a signed curl
+```
+
+Prefer `--args -` over a JSON positional: a literal lands in this process's
+argv, which `ps` shows to every user on the box. Then:
+`parachute-mcp doctor` — expect exit `0`.
+
+### Sandboxes with no Node
+
+Download a [single-file binary](#install-as-a-single-binary-sandboxes-no-node)
+from the GitHub release `mcp-v<version>`, **verify the checksum**, and point
+the harness at the absolute path:
+
+```sh
+VERSION=0.1.0
+PLATFORM=linux-x64
+BASE="https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}"
+curl -fsSL -O "${BASE}/parachute-mcp-${VERSION}-${PLATFORM}"
+curl -fsSL -O "${BASE}/SHA256SUMS"
+grep "parachute-mcp-${VERSION}-${PLATFORM}$" SHA256SUMS | sha256sum -c -   # macOS: shasum -a 256 -c -
+install -m 0755 "parachute-mcp-${VERSION}-${PLATFORM}" /usr/local/bin/parachute-mcp
+```
+
+Never put `npx` in an agent's MCP config —
+[here is what that costs](#reference-the-binary-by-absolute-path-in-your-mcp-config).
+Then: `/usr/local/bin/parachute-mcp doctor` — expect exit `0`.
 
 ## CLI use (non-MCP agents)
 
@@ -173,7 +315,64 @@ nonce per request, `u` equal to the exact URL, a `payload` tag if and only if
 there is a body — get re-derived per agent, and get them subtly wrong.
 
 So the same binary has a CLI face. Same config file, same key resolution, same
-signing code; three one-shot subcommands instead of a stdio server:
+signing code; five one-shot subcommands instead of a stdio server:
+
+### `doctor` — prove the whole chain
+
+```sh
+parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json] [--timeout <s>]
+```
+
+Four checks, in dependency order, each `PASS` / `FAIL` / `SKIP` with a one-line
+reason. The run **stops at the first hard failure** — reporting "vaults: FAIL"
+when the key never loaded is noise, not diagnosis.
+
+| Check | What it proves | How it fails |
+|---|---|---|
+| `key` | A signing key resolved. Prints the **npub** and which of the three sources supplied it — never the secret, never the key file's path. | No key: `FAIL` with the resolution order, exit `1`. |
+| `hub` | A NIP-98-signed `initialize` + `tools/list` against the hub's `/mcp` door. Reports the tool count and the server name/version when the hub sends one. | Unreachable/timeout: exit `2`. Signature rejected (`401`/`403`): exit `3`. |
+| `vaults` | `list-vaults` — which vaults this key can reach, and whether the grant covers **all** of the hub's vaults or a listed subset. | Tool error: exit `4`. **Zero reachable vaults is a FAIL, exit `4`** — the key authenticates and can reach nothing, which is not working access. `SKIP` when the door exposes no `list-vaults` (i.e. it is a vault door, not an account door). |
+| `write` | A real round-trip: create a note, read it back **byte-exact**, delete it. | Refused / mismatch: exit `4`. |
+
+The write probe only runs when `--vault <name>` is given, or exactly one vault
+is reachable — with several vaults and no `--vault` it `SKIP`s and says which
+flag to pass. It writes **only** under `.doctor/`, to a path
+namespaced by the caller's npub prefix and a timestamp
+(`.doctor/npub1abcdefg-20260902T041500Z`), so two agents doctoring
+the same vault in the same second cannot collide. The path is re-checked
+against that prefix immediately before the create *and* before the delete. It
+is deliberately **not** under `.parachute/`, which is the vault's own metadata
+namespace — a commit touching only that prefix is treated as metadata-only and
+skipped.
+Cleanup runs even when the read-back fails, and after a create that timed out
+(the hub may have committed it before the answer was lost), so a failed probe
+leaves nothing behind; if the door exposes no `delete-note`, the note is relabelled
+"doctor probe, safe to delete" and the step says so rather than claiming it
+tidied up.
+
+`doctor` checks **one hub at a time**. With several configured and no `--hub`
+it exits `1` naming the aliases, rather than silently picking one — "prove I
+have access" has to name which door it proved.
+
+`--json` emits one object on stdout instead of the lines:
+
+```json
+{
+  "ok": true,
+  "exitCode": 0,
+  "version": "0.1.0",
+  "npub": "npub1…",
+  "hub": { "alias": "home", "url": "https://hub.example/mcp" },
+  "steps": [
+    { "step": "key", "status": "pass", "reason": "signing as npub1… (from config \"keyFile\")",
+      "details": { "npub": "npub1…", "source": "config \"keyFile\"" } }
+  ],
+  "summary": "PASS — 4/4 checks passed"
+}
+```
+
+A `SKIP` is not a failure and does not change the exit code: `0` still means
+everything that could be checked was checked and worked.
 
 ### `tools` — what can I call?
 
@@ -252,9 +451,56 @@ as-is (like `curl` without `-L`) and **exits `2`**: the request did not do what
 was asked, and an empty body with exit `0` is the worst possible answer for a
 caller that branches on the exit code.
 
+### `channel-context` — shared memory across agents
+
+```sh
+parachute-mcp channel-context <read|append|init> [--vault <name>] \
+    [--relay <wss-url>] [--channel <uuid>] [--tail <bytes>] [--json] [--timeout <s>]
+```
+
+Several agents answering in the same Buzz channel each start their turn blind:
+they see the relay's message tail and nothing about what the *others* actually
+did. The convention that fixes it is one note per channel —
+`Channels/<relay-host>/<channel-uuid>` — that every agent reads the tail of
+before acting and appends one entry to afterwards. It is safe under concurrency
+because `append` is atomic in the vault; a read-modify-write of `content` is
+not. This subcommand *is* that convention, so no agent has to re-derive it.
+
+| Action | What it does |
+|---|---|
+| `read` | print the last `--tail` bytes (default `8000`) of the note. A channel with no note yet prints **nothing** and exits `0` — a first turn is not a failure. |
+| `append` | read one entry from **stdin** and append it, with exactly one leading newline. If the note does not exist yet it is created first, so the channel's first turn lands without a separate step. |
+| `init` | create the note with its header (`# <relay-host> / <channel-uuid>`), tag `channel-log`, and `relay` / `channel_id` / `summary` metadata. Another agent having created it first is **success**, not an error. |
+
+The path comes from `--relay` (default `$BUZZ_RELAY_URL`, scheme and trailing
+slash stripped, **lower-cased** — hostnames are case-insensitive but vault paths
+are not, and a second note differing only in case makes the vault answer either
+path with `ambiguous_path`) and `--channel` (default `$BUZZ_CHANNEL_ID`) — both injected
+into a Buzz agent's environment already, which is what makes this a one-liner
+inside a turn. `--vault` is required for `append` and `init` (the hub requires
+a vault on every tool except `query-notes`). `--json` prints one object:
+`{exists:false}` for a note that is not there yet, otherwise `path`,
+`byteSize`, `updatedAt` and the tail itself.
+
+```sh
+# start of turn: what happened here already?
+$ parachute-mcp channel-context read --vault uni --tail 4000
+
+# end of turn: one entry, from stdin — never argv
+$ printf '## %s · Nou\n- did: fixed the DNS resolver\n- next: nothing\n' "$(date -u +%FT%RZ)" \
+    | parachute-mcp channel-context append --vault uni
+```
+
+`read` fetches the tail as a byte window (`content_offset` / `content_length`),
+which the vault aligns to codepoint boundaries — so a `--tail` in bytes never
+splits a character, and a long-running channel costs the same to read as a new
+one. The request adds 3 bytes of slack, because that alignment moves the window's
+START down and a window of exactly `--tail` would then stop short of the note's
+end — dropping its newest bytes, the one end a tail read must never lose.
+
 ### Common flags
 
-`--config <path>` and `--timeout <seconds>` work on all three subcommands, and
+`--config <path>` and `--timeout <seconds>` work on every subcommand, and
 may go **before or after** the subcommand — these are the same command:
 
 ```sh
@@ -272,7 +518,8 @@ connect, `tools/list`, `tools/call`, the session `DELETE`, and the `http`
 fetch. Without it, a hub that accepts the connection and then never answers
 hangs the command forever, which for an agent is worse than any error: the
 shell-out never returns and there is nothing to report. A timeout exits `2`
-with a content-free `timed out after Ns`.
+with a content-free `timed out after Ns` (one decimal, so a sub-second
+`--timeout 0.3` reports `0.3s` rather than `0s`).
 
 ### Exit codes
 
@@ -285,6 +532,11 @@ Every subcommand uses the same contract:
 | `2` | network / transport failure, a **timeout**, or an HTTP response `>= 300` that is not an auth failure (redirects are deliberately not followed) |
 | `3` | authentication rejected by the hub (HTTP `401` / `403`) |
 | `4` | the tool ran and returned an error result (`isError`) |
+
+`doctor` reports the code of the check that failed, so the exit code alone says
+*which layer* broke: `1` you have no key or no config, `2` the hub is not
+reachable, `3` the hub rejected your signature, `4` the hub is fine but the
+grant is not.
 
 `tools` against several hubs still prints the tools of the hubs that answered
 and names the ones that did not on stderr, but exits with the worst code seen —

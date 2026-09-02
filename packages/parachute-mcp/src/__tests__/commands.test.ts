@@ -5,11 +5,16 @@
  */
 import { describe, expect, test } from "bun:test";
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { DEFAULT_TAIL_BYTES } from "../channel.js";
 import {
   type CallCommand,
+  type ChannelContextCommand,
   DEFAULT_TIMEOUT_MS,
+  type DoctorCommand,
   EXIT,
   type HttpCommand,
+  type SubcommandSplit,
+  TimeoutError,
   type ToolsCommand,
   UsageError,
   exitCodeForError,
@@ -21,14 +26,18 @@ import {
 } from "../commands.js";
 
 const tools = (argv: string[]) => parseCommand(argv) as ToolsCommand;
+const doctor = (argv: string[]) => parseCommand(argv) as DoctorCommand;
 const call = (argv: string[]) => parseCommand(argv) as CallCommand;
 const http = (argv: string[]) => parseCommand(argv) as HttpCommand;
+const channel = (argv: string[]) => parseCommand(argv) as ChannelContextCommand;
 
 describe("isSubcommand", () => {
-  test("recognizes exactly the three subcommands", () => {
+  test("recognizes exactly the five subcommands", () => {
     expect(isSubcommand("tools")).toBe(true);
     expect(isSubcommand("call")).toBe(true);
     expect(isSubcommand("http")).toBe(true);
+    expect(isSubcommand("doctor")).toBe(true);
+    expect(isSubcommand("channel-context")).toBe(true);
   });
 
   test("bridge-mode argv is never mistaken for a subcommand", () => {
@@ -323,6 +332,81 @@ describe("parseCommand: http", () => {
   });
 });
 
+describe("parseCommand: channel-context", () => {
+  test("the action is a positional; the tail defaults to 8000 bytes", () => {
+    expect(channel(["channel-context", "read"])).toEqual({
+      kind: "channel-context",
+      action: "read",
+      tail: DEFAULT_TAIL_BYTES,
+      json: false,
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+  });
+
+  test("every flag, in both spellings", () => {
+    expect(
+      channel([
+        "channel-context",
+        "append",
+        "--vault",
+        "uni",
+        "--relay",
+        "wss://buzz.unforced.org",
+        "--channel",
+        "3d4ee4fa",
+        "--tail",
+        "200",
+        "--json",
+        "--hub=home",
+      ]),
+    ).toEqual({
+      kind: "channel-context",
+      action: "append",
+      vault: "uni",
+      relay: "wss://buzz.unforced.org",
+      channel: "3d4ee4fa",
+      hub: "home",
+      tail: 200,
+      json: true,
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+    expect(channel(["channel-context", "init", "--vault=uni", "--tail=16"]).tail).toBe(16);
+  });
+
+  test("--relay / --channel / --tail are global-position flags too", () => {
+    const split = splitSubcommand([
+      "--vault",
+      "uni",
+      "--channel",
+      "abc",
+      "channel-context",
+      "read",
+    ]);
+    expect(split && foldGlobals(split)).toEqual([
+      "channel-context",
+      "--vault",
+      "uni",
+      "--channel",
+      "abc",
+      "read",
+    ]);
+  });
+
+  test("a missing, unknown or duplicated action is a usage error", () => {
+    expect(() => channel(["channel-context"])).toThrow(/needs an action/);
+    expect(() => channel(["channel-context", "write"])).toThrow(/unknown action "write"/);
+    expect(() => channel(["channel-context", "read", "append"])).toThrow(/unexpected argument/);
+  });
+
+  test("--tail must be a positive whole number of bytes", () => {
+    for (const bad of ["0", "-1", "abc", "1.5"]) {
+      expect(() => channel(["channel-context", "read", "--tail", bad])).toThrow(
+        /--tail needs a positive whole number/,
+      );
+    }
+  });
+});
+
 describe("exitCodeForError", () => {
   test("usage errors are 1", () => {
     expect(exitCodeForError(new UsageError("bad flag"))).toBe(EXIT.usage);
@@ -351,5 +435,91 @@ describe("redactSecrets", () => {
   test("leaves 64-hex alone — event ids and pubkeys look identical to hex keys", () => {
     const id = "a".repeat(64);
     expect(redactSecrets(`event id ${id}`)).toBe(`event id ${id}`);
+  });
+});
+
+describe("parse doctor", () => {
+  test("bare `doctor` uses the shared defaults", () => {
+    const cmd = doctor(["doctor"]);
+    expect(cmd.kind).toBe("doctor");
+    expect(cmd.json).toBe(false);
+    expect(cmd.vault).toBeUndefined();
+    expect(cmd.hub).toBeUndefined();
+    expect(cmd.timeout).toBe(DEFAULT_TIMEOUT_MS);
+  });
+
+  test("every flag, in both --flag value and --flag=value forms", () => {
+    const spaced = doctor([
+      "doctor",
+      "--hub",
+      "home",
+      "--vault",
+      "uni",
+      "--json",
+      "--timeout",
+      "5",
+      "--config",
+      "/tmp/c.json",
+    ]);
+    expect(spaced).toMatchObject({
+      hub: "home",
+      vault: "uni",
+      json: true,
+      timeout: 5000,
+      config: "/tmp/c.json",
+    });
+    const inline = doctor([
+      "doctor",
+      "--hub=home",
+      "--vault=uni",
+      "--json",
+      "--timeout=5",
+      "--config=/tmp/c.json",
+    ]);
+    expect(inline).toEqual(spaced);
+  });
+
+  test("--hub takes a URL as well as an alias", () => {
+    expect(doctor(["doctor", "--hub", "https://hub.example.test/mcp"]).hub).toBe(
+      "https://hub.example.test/mcp",
+    );
+  });
+
+  test("global flags before the subcommand fold in", () => {
+    const split = splitSubcommand(["--config", "/tmp/c.json", "doctor", "--json"]);
+    expect(split).toEqual({ globals: ["--config", "/tmp/c.json"], rest: ["doctor", "--json"] });
+    expect(doctor(foldGlobals(split as SubcommandSplit))).toMatchObject({
+      config: "/tmp/c.json",
+      json: true,
+    });
+  });
+
+  test("a --vault VALUE is never mistaken for the subcommand", () => {
+    // `--vault doctor` names a vault called "doctor"; the word after a
+    // value-taking flag is a value, not a command.
+    expect(splitSubcommand(["--vault", "doctor"])).toBeUndefined();
+  });
+
+  test("doctor takes no positionals", () => {
+    expect(() => doctor(["doctor", "uni"])).toThrow(UsageError);
+    expect(() => doctor(["doctor", "uni"])).toThrow(/no positionals/);
+  });
+
+  test("unknown flags and empty values are usage errors", () => {
+    expect(() => doctor(["doctor", "--table"])).toThrow(UsageError);
+    expect(() => doctor(["doctor", "--vault"])).toThrow(/--vault needs a value/);
+    expect(() => doctor(["doctor", "--timeout", "0"])).toThrow(/positive number/);
+  });
+
+  test("--help anywhere short-circuits to help", () => {
+    expect(parseCommand(["doctor", "--help"]).kind).toBe("help");
+    expect(parseCommand(["doctor", "--vault", "uni", "-h"]).kind).toBe("help");
+  });
+});
+
+describe("TimeoutError", () => {
+  test("reports one decimal, so a sub-second budget is not rendered as 0s", () => {
+    expect(new TimeoutError(300).message).toBe("timed out after 0.3s");
+    expect(new TimeoutError(60_000).message).toBe("timed out after 60.0s");
   });
 });

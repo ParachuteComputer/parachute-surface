@@ -32,6 +32,18 @@ Bridge mode (an MCP server on stdio, for MCP clients):
   parachute-mcp --version | --help
 
 CLI mode (one-shot commands, for agents that shell out):
+  parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json]
+      Prove this harness has working Parachute access, in one command. Four
+      checks, each PASS / FAIL / SKIP with a one-line reason, stopping at the
+      first hard failure:
+        key     resolve the signing key; prints the npub, never the secret
+        hub     NIP-98-signed initialize + tools/list against the hub door
+        vaults  list-vaults — which vaults this key can reach
+        write   create a note under .doctor/, read it back
+                byte-exact, delete it (only with --vault, or when exactly one
+                vault is reachable; it never writes anywhere else)
+      Exit 0 means all of that worked. --json emits one object instead.
+
   parachute-mcp tools [--hub <alias|url>] [--table]
       List the hubs' tools as JSON (name + description) on stdout.
       With several hubs and no --hub, names are namespaced <alias>__<tool>.
@@ -43,6 +55,20 @@ CLI mode (one-shot commands, for agents that shell out):
       positional literal is in this process's argv, which ps shows to every
       user on the box, and it has to survive your shell's quoting. A single
       text result is printed as-is; anything else as the JSON result.
+
+  parachute-mcp channel-context <read|append|init> [--vault <name>]
+      [--relay <wss-url>] [--channel <uuid>] [--tail <bytes>] [--json]
+      The shared, append-only memory several agents on one Buzz channel keep in
+      a vault, as one command. The note is Channels/<relay-host>/<channel-uuid>,
+      derived from --relay (default $BUZZ_RELAY_URL, scheme stripped) and
+      --channel (default $BUZZ_CHANNEL_ID).
+        read    print the last --tail bytes (default 8000) of the note. A note
+                that does not exist yet prints nothing and exits 0.
+        append  read one entry from STDIN (never argv) and append it, creating
+                the note first if this is the channel's first turn.
+        init    create the note with its header. Someone else having created it
+                first is success, not an error.
+      --vault is required for append and init.
 
   parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']...
       One signed HTTP request — a signed curl for hub endpoints that are not
@@ -56,6 +82,10 @@ Common flags: --config <path>, --timeout <seconds> (default 60).
   parachute-mcp --config c.json tools     and     parachute-mcp tools --config c.json
 are the same command. All CLI subcommands use the same config and key
 resolution as bridge mode.
+
+Onboarding a new harness? Add the MCP server (or install the binary), then run
+"parachute-mcp doctor" and expect exit 0. Recipes per harness are in the
+README section "Onboarding by harness".
 
 Exit codes:
   0  success
