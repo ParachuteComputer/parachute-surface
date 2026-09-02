@@ -470,10 +470,12 @@ not. This subcommand *is* that convention, so no agent has to re-derive it.
 |---|---|
 | `read` | print the last `--tail` bytes (default `8000`) of the note. A channel with no note yet prints **nothing** and exits `0` — a first turn is not a failure. |
 | `append` | read one entry from **stdin** and append it, with exactly one leading newline. If the note does not exist yet it is created first, so the channel's first turn lands without a separate step. |
-| `init` | create the note with its header, tag `channel-log`, and `relay` / `channel_id` / `summary` metadata. Another agent having created it first is **success**, not an error. |
+| `init` | create the note with its header (`# <relay-host> / <channel-uuid>`), tag `channel-log`, and `relay` / `channel_id` / `summary` metadata. Another agent having created it first is **success**, not an error. |
 
 The path comes from `--relay` (default `$BUZZ_RELAY_URL`, scheme and trailing
-slash stripped) and `--channel` (default `$BUZZ_CHANNEL_ID`) — both injected
+slash stripped, **lower-cased** — hostnames are case-insensitive but vault paths
+are not, and a second note differing only in case makes the vault answer either
+path with `ambiguous_path`) and `--channel` (default `$BUZZ_CHANNEL_ID`) — both injected
 into a Buzz agent's environment already, which is what makes this a one-liner
 inside a turn. `--vault` is required for `append` and `init` (the hub requires
 a vault on every tool except `query-notes`). `--json` prints one object:
@@ -492,7 +494,9 @@ $ printf '## %s · Nou\n- did: fixed the DNS resolver\n- next: nothing\n' "$(dat
 `read` fetches the tail as a byte window (`content_offset` / `content_length`),
 which the vault aligns to codepoint boundaries — so a `--tail` in bytes never
 splits a character, and a long-running channel costs the same to read as a new
-one.
+one. The request adds 3 bytes of slack, because that alignment moves the window's
+START down and a window of exactly `--tail` would then stop short of the note's
+end — dropping its newest bytes, the one end a tail read must never lose.
 
 ### Common flags
 

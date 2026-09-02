@@ -1038,7 +1038,9 @@ async function runChannelContextCommand(cmd: ChannelContextCommand, io: Io): Pro
     {
       env: io.env ?? process.env,
       openSession: async () => await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout),
-      classify: classifyError,
+      // Tool phase only: a connect failure is thrown before the runner's
+      // guarded region and is mapped by `runCli`.
+      classify: (err) => classifyError(err, "tool"),
       readStdin: io.stdin,
     },
   );

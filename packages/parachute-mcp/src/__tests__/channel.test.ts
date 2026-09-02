@@ -88,7 +88,15 @@ function fakeHub(opts: FakeHubOptions = {}): FakeHub {
           const offset = typeof args.content_offset === "number" ? args.content_offset : 0;
           const length =
             typeof args.content_length === "number" ? args.content_length : bytes.length;
-          const slice = new TextDecoder().decode(bytes.slice(offset, offset + length));
+          // The vault aligns the window to codepoint boundaries: start DOWN,
+          // end DOWN, never over the budget. Modelling that here is what makes
+          // a multi-byte tail read testable at all.
+          const isCont = (b: number | undefined): boolean => b !== undefined && (b & 0xc0) === 0x80;
+          let start = Math.min(offset, bytes.length);
+          while (start > 0 && isCont(bytes[start])) start--;
+          let end = Math.min(start + length, bytes.length);
+          while (end > start && end < bytes.length && isCont(bytes[end])) end--;
+          const slice = new TextDecoder().decode(bytes.slice(start, end));
           // The real hub wraps each vault's answer in a fan-out envelope.
           return text({
             vaults_queried: [args.vault ?? "uni"],
@@ -100,7 +108,7 @@ function fakeHub(opts: FakeHubOptions = {}): FakeHub {
                     id: PATH,
                     path: PATH,
                     content: slice,
-                    content_offset: offset,
+                    content_offset: start,
                     content_total_length: bytes.length,
                     updatedAt: note.updatedAt ?? "2026-09-02T08:00:00.000Z",
                   },
@@ -134,7 +142,7 @@ function fakeHub(opts: FakeHubOptions = {}): FakeHub {
 function deps(hub: FakeHub, over: Partial<ChannelDeps> = {}): ChannelDeps {
   return {
     openSession: async () => hub.session,
-    classify: (_err, phase) => (phase === "tool" ? EXIT.toolError : EXIT.transport),
+    classify: () => EXIT.toolError,
     readStdin: async () => "",
     env: {},
     ...over,
@@ -156,6 +164,21 @@ describe("path derivation", () => {
     expect(relayHostOf("https://buzz.unforced.org///")).toBe("buzz.unforced.org");
     expect(relayHostOf("buzz.unforced.org")).toBe("buzz.unforced.org");
     expect(relayHostOf("  wss://buzz.unforced.org/  ")).toBe("buzz.unforced.org");
+  });
+
+  test("REGRESSION: the relay host is lower-cased", () => {
+    // Hostnames are case-insensitive; vault PATHS are not. A relay typed in
+    // caps used to create a SECOND note beside the first, after which the
+    // vault answers EITHER path with `ambiguous_path` — the whole channel is
+    // poisoned, not just the turn that typed it oddly.
+    expect(relayHostOf("WSS://BUZZ.UNFORCED.ORG")).toBe("buzz.unforced.org");
+    expect(deriveTarget({ relay: "WSS://Buzz.Unforced.ORG/", channel: CHANNEL }, {}).path).toBe(
+      PATH,
+    );
+    expect(
+      deriveTarget({}, { BUZZ_RELAY_URL: "WSS://BUZZ.UNFORCED.ORG", BUZZ_CHANNEL_ID: CHANNEL })
+        .path,
+    ).toBe(PATH);
   });
 
   test("empty-ish relays derive nothing", () => {
@@ -202,7 +225,7 @@ describe("path derivation", () => {
 
   test("the header is the runbook's shape", () => {
     expect(initialContent(deriveTarget({ relay: RELAY, channel: CHANNEL }, {}))).toBe(
-      `# ${CHANNEL} — buzz.unforced.org\n\nShared, append-only channel context. One entry per agent turn. Read the tail before you act. Never rewrite; only \`append\`.\n`,
+      `# buzz.unforced.org / ${CHANNEL}\n\nShared, append-only channel context. One entry per agent turn. Read the tail before you act. Never rewrite; only \`append\`.\n`,
     );
   });
 });
@@ -213,18 +236,28 @@ describe("path derivation", () => {
 
 describe("tail window", () => {
   test("reads the LAST tail bytes of a big note", () => {
-    expect(tailWindow(20_000, 8000)).toEqual({ content_offset: 12_000, content_length: 8000 });
+    expect(tailWindow(20_000, 8000)).toEqual({ content_offset: 12_000, content_length: 8003 });
   });
 
   test("never asks for a negative offset", () => {
-    expect(tailWindow(100, 8000)).toEqual({ content_offset: 0, content_length: 8000 });
-    expect(tailWindow(0, 8000)).toEqual({ content_offset: 0, content_length: 8000 });
+    expect(tailWindow(100, 8000)).toEqual({ content_offset: 0, content_length: 8003 });
+    expect(tailWindow(0, 8000)).toEqual({ content_offset: 0, content_length: 8003 });
   });
 
   test("raises a tiny --tail to the vault's 4-byte floor for content_length", () => {
-    expect(tailWindow(50, 1)).toEqual({ content_offset: 49, content_length: 4 });
+    expect(tailWindow(50, 1)).toEqual({ content_offset: 49, content_length: 7 });
+  });
+
+  test("the window still reaches the note's end when the offset lands mid-codepoint", () => {
+    // The vault aligns `content_offset` down by up to 3 bytes; a window of
+    // exactly `tail` from there would stop short of `totalBytes`.
+    const w = tailWindow(1000, 40);
+    expect(w.content_offset - MAX_ALIGN + w.content_length).toBeGreaterThanOrEqual(1000);
   });
 });
+
+/** How far the vault may align `content_offset` down (largest UTF-8 codepoint). */
+const MAX_ALIGN = 3;
 
 describe("note extraction", () => {
   test("finds the note inside the hub's fan-out envelope", () => {
@@ -274,6 +307,18 @@ describe("read", () => {
     expect(hub.closed()).toBe(1);
   });
 
+  test("the tail of a note whose window lands mid-codepoint still ends at the note's END", async () => {
+    // "…—BBBBB": the em dash is 3 bytes, so a tail of 8 starts inside it. The
+    // vault aligns the start down; without matching slack on content_length
+    // the window would stop 2 bytes short and drop the newest characters.
+    const content = `${"x".repeat(200)}\u2014BBBBB`;
+    const hub = fakeHub({ note: { content } });
+    const result = await runChannelContext(options({ tail: 8 }), deps(hub));
+
+    expect(result.exitCode).toBe(EXIT.ok);
+    expect(result.text.endsWith("BBBBB")).toBe(true);
+  });
+
   test("a note bigger than --tail is re-read at the tail offset", async () => {
     const content = `${"x".repeat(9000)}TAIL-MARKER`;
     const hub = fakeHub({ note: { content } });
@@ -282,7 +327,7 @@ describe("read", () => {
     expect(hub.calls).toHaveLength(2);
     expect(hub.calls[1]?.args).toMatchObject({
       content_offset: content.length - 100,
-      content_length: 100,
+      content_length: 103,
     });
     expect(result.text).toHaveLength(100);
     expect(result.text.endsWith("TAIL-MARKER")).toBe(true);

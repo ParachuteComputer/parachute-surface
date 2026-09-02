@@ -46,6 +46,9 @@ export const DEFAULT_TAIL_BYTES = 8000;
  */
 const MIN_CONTENT_LENGTH = 4;
 
+/** Largest UTF-8 codepoint, in bytes — how far the vault may align a window down. */
+const MAX_CODEPOINT_BYTES = 3;
+
 const QUERY_NOTES_TOOL = "query-notes";
 const CREATE_NOTE_TOOL = "create-note";
 const UPDATE_NOTE_TOOL = "update-note";
@@ -73,11 +76,13 @@ export interface ChannelSession {
 export interface ChannelDeps {
   openSession(): Promise<ChannelSession>;
   /**
-   * Map a thrown value to an exit code. `phase` matters for the same reason it
-   * does in `doctor`: a JSON-RPC error out of a `tools/call` is the tool
-   * failing (4), not the network (2).
+   * Map a thrown value out of a `tools/call` to an exit code — a JSON-RPC
+   * error there is the TOOL failing (4), not the network (2). There is no
+   * transport phase to classify: `openSession` is awaited outside the guarded
+   * region, so a connect failure propagates to `runCli`, which maps auth and
+   * transport itself.
    */
-  classify(err: unknown, phase: "transport" | "tool"): number;
+  classify(err: unknown): number;
   /** The entry text, for `append` only. Read before any session is opened. */
   readStdin(): Promise<string>;
   env: NodeJS.ProcessEnv;
@@ -118,7 +123,12 @@ export function relayHostOf(raw: string | undefined): string | undefined {
   const stripped = raw
     .trim()
     .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-    .replace(/\/+$/, "");
+    .replace(/\/+$/, "")
+    // Hostnames are case-insensitive but vault PATHS are not: a `$BUZZ_RELAY_URL`
+    // that differs only in case would create a SECOND note beside the first, and
+    // the vault then answers every lookup with `ambiguous_path` — both agents
+    // lose the channel, not just the one that typed it oddly.
+    .toLowerCase();
   return stripped === "" ? undefined : stripped;
 }
 
@@ -163,14 +173,17 @@ export function deriveTarget(
 }
 
 /**
- * The header a fresh channel note gets, verbatim from the vault-side runbook
- * "Channel context notes". It is the first thing every agent on the channel
- * reads, so it states the one rule that keeps concurrent turns safe.
+ * The header a fresh channel note gets: the name-less form of the vault-side
+ * runbook's grammar `# [<name> — ]<relay-host> / <channel-uuid>`. A CLI knows
+ * the relay and the uuid, never the channel's human name, so it emits the
+ * right-hand half and leaves the name for whoever adds it. It is the first
+ * thing every agent on the channel reads, so it states the one rule that keeps
+ * concurrent turns safe.
  */
 export function initialContent(target: ChannelTarget): string {
   // One long template on purpose: this string is byte-exact with the runbook's
   // header, and a concatenation invites an editor to "tidy" a space away.
-  return `# ${target.channelId} — ${target.relayHost}\n\nShared, append-only channel context. One entry per agent turn. Read the tail before you act. Never rewrite; only \`append\`.\n`;
+  return `# ${target.relayHost} / ${target.channelId}\n\nShared, append-only channel context. One entry per agent turn. Read the tail before you act. Never rewrite; only \`append\`.\n`;
 }
 
 function initialSummary(target: ChannelTarget): string {
@@ -188,7 +201,13 @@ export function tailWindow(
 ): { content_offset: number; content_length: number } {
   return {
     content_offset: Math.max(0, totalBytes - tail),
-    content_length: Math.max(tail, MIN_CONTENT_LENGTH),
+    // + MAX_CODEPOINT_BYTES: the vault aligns `content_offset` DOWN to a
+    // codepoint boundary, so asking for exactly `tail` bytes from an offset
+    // that landed mid-character ends the window up to 3 bytes SHORT of the
+    // note — silently dropping its newest bytes, which is the one end a tail
+    // read must never lose. The slack costs nothing: the slice is capped at
+    // the note's total length either way.
+    content_length: Math.max(tail, MIN_CONTENT_LENGTH) + MAX_CODEPOINT_BYTES,
   };
 }
 
@@ -356,7 +375,7 @@ async function call(
   try {
     result = await session.callTool(name, args);
   } catch (err) {
-    throw new ChannelFailure(`${name}: ${messageOf(err)}`, deps.classify(err, "tool"));
+    throw new ChannelFailure(`${name}: ${messageOf(err)}`, deps.classify(err));
   }
   if (result.isError) {
     throw new ChannelFailure(
@@ -452,6 +471,8 @@ async function createNote(
       path: target.path,
       tags: [CHANNEL_LOG_TAG],
       metadata: {
+        // Host-only, and lower-cased: exactly what the path derives from, so a
+        // reader can rebuild the path from the metadata and land on THIS note.
         relay: target.relayHost,
         channel_id: target.channelId,
         summary: initialSummary(target),
