@@ -17,7 +17,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ParachuteBridge } from "./bridge.js";
-import { type Io, foldGlobals, runCli, splitSubcommand } from "./commands.js";
+import { type Io, foldGlobals, redactSecrets, runCli, splitSubcommand } from "./commands.js";
 import { resolveConfig } from "./config.js";
 import { loadKey, loadKeyValue } from "./key.js";
 import { createBridgeServer } from "./server.js";
@@ -73,8 +73,25 @@ overrides "keyFile"), then $BUZZ_PRIVATE_KEY (a bech32 nsec value — injected
 automatically for Buzz agents by buzz-acp, so no key file is needed there).
 `;
 
+/**
+ * Render one bridge-mode stderr line, scrubbed.
+ *
+ * The scrub matters most for the error a user is MOST likely to cause with a
+ * key: pointing --config (or PARACHUTE_NSEC_FILE) at the wrong thing. Paste an
+ * nsec where a path belongs and the ENOENT message names it — "cannot read
+ * config file nsec1...: ENOENT" — straight into the harness log. config.ts is
+ * already careful never to echo file CONTENTS; this covers the path itself,
+ * which it cannot.
+ *
+ * CLI mode gets the same treatment inside `runCli`; this brings bridge mode
+ * into line. Exported for the test that pins it.
+ */
+export function formatLogLine(msg: string): string {
+  return `[parachute-mcp] ${redactSecrets(msg)}\n`;
+}
+
 function log(msg: string): void {
-  process.stderr.write(`[parachute-mcp] ${msg}\n`);
+  process.stderr.write(formatLogLine(msg));
 }
 
 interface ParsedArgs {
