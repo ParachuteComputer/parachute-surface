@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **`parachute-mcp channel-context <read|append|init>`** — the shared,
+  append-only memory several agents on one Buzz channel keep in a vault, as one
+  command. The note is `Channels/<relay-host>/<channel-uuid>`, derived from
+  `--relay` (default `$BUZZ_RELAY_URL`, scheme and trailing slash stripped) and
+  `--channel` (default `$BUZZ_CHANNEL_ID`) — both already in a Buzz agent's
+  environment, so a turn can read the tail and append its entry without
+  composing a path. `read` prints the last `--tail` bytes (default 8000) as a
+  byte window (`content_offset`/`content_length`, codepoint-aligned by the
+  vault); `append` takes the entry from **stdin only**, never argv; `init`
+  creates the note with the runbook's header, the `channel-log` tag and
+  `relay`/`channel_id`/`summary` metadata. `--json` on any of them.
+- Three corners of that convention every hand-rolled implementation gets wrong,
+  fixed once here: a channel with **no note yet** reads as empty and exits `0`
+  (a first turn is not a failure, and an agent that branched on a non-zero exit
+  would refuse to start); `append` against a missing note **creates it and
+  retries**, so the channel's first turn lands in one command; and a
+  `path_conflict` on create is **success** (`{existed:true}`, exit `0`) —
+  when two agents open the same channel in the same second, both must end up
+  with the note existing.
+- `channel-context` reuses the package's existing config/key resolution, NIP-98
+  signing and MCP session wholesale — it adds no auth code — and refuses to
+  guess a hub when several are configured, the same way `doctor` does.
 - **`parachute-mcp doctor`** — one command that proves a harness has working
   Parachute access, and names the layer that broke when it doesn't. Four
   checks in dependency order, each PASS/FAIL/SKIP with a one-line reason,

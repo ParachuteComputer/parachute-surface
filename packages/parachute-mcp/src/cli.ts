@@ -56,6 +56,20 @@ CLI mode (one-shot commands, for agents that shell out):
       user on the box, and it has to survive your shell's quoting. A single
       text result is printed as-is; anything else as the JSON result.
 
+  parachute-mcp channel-context <read|append|init> [--vault <name>]
+      [--relay <wss-url>] [--channel <uuid>] [--tail <bytes>] [--json]
+      The shared, append-only memory several agents on one Buzz channel keep in
+      a vault, as one command. The note is Channels/<relay-host>/<channel-uuid>,
+      derived from --relay (default $BUZZ_RELAY_URL, scheme stripped) and
+      --channel (default $BUZZ_CHANNEL_ID).
+        read    print the last --tail bytes (default 8000) of the note. A note
+                that does not exist yet prints nothing and exits 0.
+        append  read one entry from STDIN (never argv) and append it, creating
+                the note first if this is the channel's first turn.
+        init    create the note with its header. Someone else having created it
+                first is success, not an error.
+      --vault is required for append and init.
+
   parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']...
       One signed HTTP request — a signed curl for hub endpoints that are not
       tool calls. The body comes from stdin only, never from argv. The

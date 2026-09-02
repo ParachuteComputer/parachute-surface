@@ -5,8 +5,10 @@
  */
 import { describe, expect, test } from "bun:test";
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { DEFAULT_TAIL_BYTES } from "../channel.js";
 import {
   type CallCommand,
+  type ChannelContextCommand,
   DEFAULT_TIMEOUT_MS,
   type DoctorCommand,
   EXIT,
@@ -27,13 +29,15 @@ const tools = (argv: string[]) => parseCommand(argv) as ToolsCommand;
 const doctor = (argv: string[]) => parseCommand(argv) as DoctorCommand;
 const call = (argv: string[]) => parseCommand(argv) as CallCommand;
 const http = (argv: string[]) => parseCommand(argv) as HttpCommand;
+const channel = (argv: string[]) => parseCommand(argv) as ChannelContextCommand;
 
 describe("isSubcommand", () => {
-  test("recognizes exactly the four subcommands", () => {
+  test("recognizes exactly the five subcommands", () => {
     expect(isSubcommand("tools")).toBe(true);
     expect(isSubcommand("call")).toBe(true);
     expect(isSubcommand("http")).toBe(true);
     expect(isSubcommand("doctor")).toBe(true);
+    expect(isSubcommand("channel-context")).toBe(true);
   });
 
   test("bridge-mode argv is never mistaken for a subcommand", () => {
@@ -324,6 +328,81 @@ describe("parseCommand: http", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(UsageError);
       expect((err as Error).message).not.toContain("s3cr3t");
+    }
+  });
+});
+
+describe("parseCommand: channel-context", () => {
+  test("the action is a positional; the tail defaults to 8000 bytes", () => {
+    expect(channel(["channel-context", "read"])).toEqual({
+      kind: "channel-context",
+      action: "read",
+      tail: DEFAULT_TAIL_BYTES,
+      json: false,
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+  });
+
+  test("every flag, in both spellings", () => {
+    expect(
+      channel([
+        "channel-context",
+        "append",
+        "--vault",
+        "uni",
+        "--relay",
+        "wss://buzz.unforced.org",
+        "--channel",
+        "3d4ee4fa",
+        "--tail",
+        "200",
+        "--json",
+        "--hub=home",
+      ]),
+    ).toEqual({
+      kind: "channel-context",
+      action: "append",
+      vault: "uni",
+      relay: "wss://buzz.unforced.org",
+      channel: "3d4ee4fa",
+      hub: "home",
+      tail: 200,
+      json: true,
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+    expect(channel(["channel-context", "init", "--vault=uni", "--tail=16"]).tail).toBe(16);
+  });
+
+  test("--relay / --channel / --tail are global-position flags too", () => {
+    const split = splitSubcommand([
+      "--vault",
+      "uni",
+      "--channel",
+      "abc",
+      "channel-context",
+      "read",
+    ]);
+    expect(split && foldGlobals(split)).toEqual([
+      "channel-context",
+      "--vault",
+      "uni",
+      "--channel",
+      "abc",
+      "read",
+    ]);
+  });
+
+  test("a missing, unknown or duplicated action is a usage error", () => {
+    expect(() => channel(["channel-context"])).toThrow(/needs an action/);
+    expect(() => channel(["channel-context", "write"])).toThrow(/unknown action "write"/);
+    expect(() => channel(["channel-context", "read", "append"])).toThrow(/unexpected argument/);
+  });
+
+  test("--tail must be a positive whole number of bytes", () => {
+    for (const bad of ["0", "-1", "abc", "1.5"]) {
+      expect(() => channel(["channel-context", "read", "--tail", bad])).toThrow(
+        /--tail needs a positive whole number/,
+      );
     }
   });
 });
