@@ -1,6 +1,6 @@
 # Changelog — @openparachute/mcp
 
-## [0.2.0-rc.1] - 2026-09-02
+## [0.2.0-rc.2] - 2026-09-02
 
 - **`parachute-mcp doctor`** — one command that proves a harness has working
   Parachute access, and names the layer that broke when it doesn't. Four
@@ -53,6 +53,44 @@
   agents, and sandboxes with no Node. Every recipe ends the same way: run
   `parachute-mcp doctor` and expect exit `0`. The per-harness snippets that
   were scattered through Quickstart now live there only.
+- **`parachute-mcp channel-context <read|append|init>`** — shared per-channel
+  memory for several agents answering in one Buzz channel. One append-only note
+  per channel, `Channels/<relay-host>/<channel-uuid>`: `read` prints the last
+  `--tail` bytes (default 8000) and exits `0` on a channel with no note yet, so
+  a first turn is not a failure; `append` takes the entry from STDIN only (never
+  argv), adds exactly one leading newline, and creates-then-retries against a
+  missing note; `init` writes the runbook header, the channel-log tag and
+  `relay`/`channel_id` metadata, treating a `path_conflict` as SUCCESS so two
+  agents opening the same channel in the same second both end up with the note.
+  Path derives from `--relay`/`$BUZZ_RELAY_URL` and `--channel`/`$BUZZ_CHANNEL_ID`;
+  a channel id that could climb out of `Channels/` is refused, not normalized.
+  Append is atomic in the vault, which is what makes the convention concurrency-
+  safe. No new auth code — the existing config, key resolution and NIP-98 signing
+  are wired in.
+- `channel-context read` asks for 3 bytes of slack: the vault aligns
+  `content_offset` DOWN to a codepoint boundary, so a window of exactly `tail`
+  from an offset landing mid-character dropped the note's NEWEST 1–3 bytes.
+  `relayHostOf` now lower-cases — hostnames are case-insensitive but vault paths
+  are not, and `WSS://…` created a second note beside the first, after which the
+  vault answers either path with `ambiguous_path` and the whole channel is
+  poisoned.
+- **Release path: the single-file binaries are built BEFORE the npm publish.**
+  They used to be built after `publish-mcp-npm` and after `tag-record` cut the
+  tag, so a compile failure left the version on npm and the tag in git with a
+  Release carrying no assets — and the README's `curl`-the-asset sandbox install
+  404s for that version. `build-mcp-binaries` now compiles all four targets,
+  executes the linux-x64 one and asserts on the version it prints, and uploads
+  them plus `SHA256SUMS` as a workflow artifact; `publish-mcp-npm` `needs:` it,
+  and `release-mcp-binaries` only downloads and attaches. The build job holds
+  `contents: read` only; the OIDC `id-token: write` publish is untouched.
+  (Closes #229.)
+- `STABLE_PROMOTION_ALLOWED_PATHS` gains `packages/parachute-mcp` — without it
+  the three files an `0.2.0-rc.N` → `0.2.0` suffix-drop must touch all read as
+  new code, and the first stable mcp release would have been refused. A drift
+  test pins the allow-list to `SURFACE_NPM_TAG_PREFIX` so the next package added
+  cannot repeat it. (Closes #231.)
+
+## [0.2.0-rc.1] - 2026-09-02
 
 - **Single-file executables.** `bun run build:binaries`
   (`scripts/build-binaries.ts`) cross-compiles `dist/cli.js` with

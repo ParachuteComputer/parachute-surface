@@ -1,6 +1,6 @@
 {
   "name": "@openparachute/mcp",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0-rc.2",
   "description": "Stdio MCP bridge to one or more remote Parachute hubs — signs every HTTP request to the hub's Streamable-HTTP MCP door as a NIP-98 Nostr auth event, so any local MCP client (Claude, Codex, Grok, Cursor…) can use a key-authenticated hub without holding the key itself.",
   "license": "AGPL-3.0",
   "type": "module",
