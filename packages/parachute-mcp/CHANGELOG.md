@@ -1,6 +1,6 @@
 # Changelog — @openparachute/mcp
 
-## Unreleased
+## [0.2.0-rc.1] - 2026-09-02
 
 - **Single-file executables.** `bun run build:binaries`
   (`scripts/build-binaries.ts`) cross-compiles `dist/cli.js` with
