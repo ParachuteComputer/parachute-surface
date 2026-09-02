@@ -570,7 +570,7 @@ the bridge says so on stderr.
 | Field | Meaning |
 |---|---|
 | `keyFile` | Path to the signing key file (`nsec1…` or 64-char hex, `~` ok). Overridden by `PARACHUTE_NSEC_FILE`; falls back to the `BUZZ_PRIVATE_KEY` value if no key file is set. |
-| `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and stays a valid MCP tool name (SEP-986: `^[A-Za-z0-9._-]{1,128}$`). |
+| `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and satisfies the MCP tool-name character grammar. In multi-hub mode, a namespaced name over the 128-character MCP limit is omitted from `tools/list` and the `tools` command with a warning on stderr. |
 | `hubs[].url` | The hub's Streamable-HTTP MCP door, e.g. `https://hub.example/mcp` or a vault door `https://hub.example/vault/<name>/mcp`. |
 
 One key signs for every configured hub; the NIP-98 `u` tag is always the

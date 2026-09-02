@@ -155,6 +155,23 @@ describe("tools", () => {
     expectCleanAuth(home, techne);
   });
 
+  test("several hubs omit a namespaced tool that exceeds the MCP name cap", async () => {
+    const alias = "a".repeat(64);
+    const tooLong = "x".repeat(63);
+    const home = stub("home", [{ ...ECHO, name: tooLong }]);
+    const techne = stub("techne", []);
+    const cap = capture(
+      configFor([
+        { alias, url: home.url },
+        { alias: "techne", url: techne.url },
+      ]),
+    );
+
+    expect(await runCli(["tools"], cap.io, USAGE)).toBe(EXIT.ok);
+    expect(JSON.parse(cap.stdout())).toEqual([]);
+    expect(cap.stderr()).toContain("namespaced name exceeds 128 characters");
+  });
+
   test("--hub narrows to one hub and drops the namespace", async () => {
     const home = stub("home", [ECHO]);
     const techne = stub("techne", [{ ...ECHO, name: "create-note" }]);
