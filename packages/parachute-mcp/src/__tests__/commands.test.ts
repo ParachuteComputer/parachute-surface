@@ -7,14 +7,17 @@ import { describe, expect, test } from "bun:test";
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   type CallCommand,
+  DEFAULT_TIMEOUT_MS,
   EXIT,
   type HttpCommand,
   type ToolsCommand,
   UsageError,
   exitCodeForError,
+  foldGlobals,
   isSubcommand,
   parseCommand,
   redactSecrets,
+  splitSubcommand,
 } from "../commands.js";
 
 const tools = (argv: string[]) => parseCommand(argv) as ToolsCommand;
@@ -35,6 +38,102 @@ describe("isSubcommand", () => {
   });
 });
 
+describe("splitSubcommand: flags before the subcommand", () => {
+  /** The full argv a CLI-mode invocation ends up parsing. */
+  const folded = (argv: string[]) => {
+    const split = splitSubcommand(argv);
+    return split && foldGlobals(split);
+  };
+
+  test("REGRESSION: --config <path> tools is CLI mode, not a silent bridge boot", () => {
+    // Before splitSubcommand, this fell through to bridge mode with "tools"
+    // as the positional hub URL: the bridge booted, stdout stayed empty, and
+    // it exited 0 — a command that looks like it worked and produced nothing.
+    expect(folded(["--config", "/c.json", "tools"])).toEqual(["tools", "--config", "/c.json"]);
+  });
+
+  test("REGRESSION: --config <path> call foo keeps the subcommand's own args", () => {
+    expect(folded(["--config", "/c.json", "call", "foo", "{}"])).toEqual([
+      "call",
+      "--config",
+      "/c.json",
+      "foo",
+      "{}",
+    ]);
+  });
+
+  test("a global flag before and a subcommand flag after both survive", () => {
+    // This used to fail with a misleading "unknown flag --hub".
+    expect(folded(["--config", "/c.json", "tools", "--hub", "home"])).toEqual([
+      "tools",
+      "--config",
+      "/c.json",
+      "--hub",
+      "home",
+    ]);
+    expect(
+      parseCommand(folded(["--config", "/c.json", "tools", "--hub", "home"]) as string[]),
+    ).toEqual({
+      kind: "tools",
+      table: false,
+      config: "/c.json",
+      hub: "home",
+      timeout: DEFAULT_TIMEOUT_MS,
+    });
+  });
+
+  test("--timeout is global too, and the =form needs no lookahead", () => {
+    expect(folded(["--timeout", "5", "call", "x"])).toEqual(["call", "--timeout", "5", "x"]);
+    expect(folded(["--config=/c.json", "tools"])).toEqual(["tools", "--config=/c.json"]);
+  });
+
+  test("a flag VALUE that happens to be a subcommand word is not a subcommand", () => {
+    // `--config tools` names a file called "tools".
+    expect(splitSubcommand(["--config", "tools"])).toBeUndefined();
+    expect(folded(["--config", "tools", "call", "x"])).toEqual(["call", "--config", "tools", "x"]);
+  });
+
+  test("every bridge-mode argv still returns undefined", () => {
+    for (const argv of [
+      [],
+      ["--config", "/c.json"],
+      ["https://hub.example.test/mcp"],
+      ["--config", "/c.json", "https://hub.example.test/mcp"],
+      ["--version"],
+      ["-v"],
+      ["--help"],
+      ["-h"],
+      ["--version", "tools"], // --version wins, as it always did
+      ["--config"], // missing value — bridge parseArgs reports it
+    ]) {
+      expect(splitSubcommand(argv)).toBeUndefined();
+    }
+  });
+
+  test("an unknown flag before the subcommand reports THAT flag, not a hub boot", () => {
+    expect(() => parseCommand(folded(["--bogus", "tools"]) as string[])).toThrow(
+      /unknown flag --bogus/,
+    );
+  });
+});
+
+describe("parseCommand: --timeout", () => {
+  test("defaults to 60s and accepts seconds", () => {
+    expect(tools(["tools"]).timeout).toBe(60_000);
+    expect(tools(["tools", "--timeout", "5"]).timeout).toBe(5_000);
+    expect(call(["call", "x", "--timeout=0.5"]).timeout).toBe(500);
+    expect(http(["http", "GET", "https://h.test/a", "--timeout", "90"]).timeout).toBe(90_000);
+  });
+
+  test("zero, negative and non-numeric are usage errors", () => {
+    for (const bad of ["0", "-1", "abc", "NaN", "Infinity"]) {
+      expect(() => tools(["tools", "--timeout", bad])).toThrow(
+        /--timeout needs a positive number of seconds/,
+      );
+    }
+  });
+});
+
 describe("parseCommand: --help", () => {
   test("--help / -h anywhere wins, even with required positionals missing", () => {
     expect(parseCommand(["call", "--help"])).toEqual({ kind: "help" });
@@ -45,7 +144,7 @@ describe("parseCommand: --help", () => {
 
 describe("parseCommand: tools", () => {
   test("bare", () => {
-    expect(tools(["tools"])).toEqual({ kind: "tools", table: false });
+    expect(tools(["tools"])).toEqual({ kind: "tools", table: false, timeout: DEFAULT_TIMEOUT_MS });
   });
 
   test("--table, --hub and --config in both spellings", () => {
@@ -54,12 +153,14 @@ describe("parseCommand: tools", () => {
       table: true,
       hub: "home",
       config: "/c.json",
+      timeout: DEFAULT_TIMEOUT_MS,
     });
     expect(tools(["tools", "--hub=techne", "--config=~/c.json"])).toEqual({
       kind: "tools",
       table: false,
       hub: "techne",
       config: "~/c.json",
+      timeout: DEFAULT_TIMEOUT_MS,
     });
   });
 
@@ -85,6 +186,7 @@ describe("parseCommand: call", () => {
       args: { from: "none" },
       config: undefined,
       hub: undefined,
+      timeout: DEFAULT_TIMEOUT_MS,
     });
   });
 
@@ -117,6 +219,7 @@ describe("parseCommand: call", () => {
       args: { from: "literal", json: '{"a":1}' },
       hub: "home",
       config: undefined,
+      timeout: DEFAULT_TIMEOUT_MS,
     });
   });
 
@@ -136,6 +239,7 @@ describe("parseCommand: http", () => {
       headers: [],
       bodyFromStdin: false,
       config: undefined,
+      timeout: DEFAULT_TIMEOUT_MS,
     });
   });
 
@@ -161,6 +265,23 @@ describe("parseCommand: http", () => {
     );
     expect(() => http(["http", "GET", "https://h.test/a", "-H", "nope"])).toThrow(
       /expects "Name: value"/,
+    );
+  });
+
+  test("an invalid header NAME is a usage error, not a TypeError from Headers", () => {
+    // `Headers.set` throws a TypeError for these; unwrapped that surfaced as a
+    // transport failure (exit 2) for what is plainly a command-line typo.
+    for (const bad of ["bad name: v", "na(me): v", "na@me: v"]) {
+      expect(() => http(["http", "GET", "https://h.test/a", "-H", bad])).toThrow(UsageError);
+      expect(() => http(["http", "GET", "https://h.test/a", "-H", bad])).toThrow(
+        /is not a valid HTTP field name/,
+      );
+    }
+  });
+
+  test("a header value containing a newline is refused (response splitting)", () => {
+    expect(() => http(["http", "GET", "https://h.test/a", "-H", "X-A: a\r\nX-B: b"])).toThrow(
+      /contains a newline/,
     );
   });
 

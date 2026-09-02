@@ -58,8 +58,110 @@ export function isSubcommand(arg: string | undefined): arg is SubcommandName {
   return arg !== undefined && (SUBCOMMANDS as readonly string[]).includes(arg);
 }
 
+/**
+ * Flags that consume the NEXT argv entry as their value. Needed only by
+ * `splitSubcommand`, which must not mistake a flag's VALUE for a subcommand:
+ * in `--config tools` the word "tools" is a path, not a command.
+ */
+const VALUE_FLAGS = new Set([
+  "--config",
+  "--hub",
+  "--args",
+  "--body",
+  "--header",
+  "-H",
+  "--timeout",
+]);
+
+export interface SubcommandSplit {
+  /** Flags that appeared BEFORE the subcommand name. */
+  globals: string[];
+  /** argv from the subcommand name onwards. */
+  rest: string[];
+}
+
+/**
+ * Find the subcommand in an argv that may carry flags before it, so that
+ * `parachute-mcp --config x.json tools` works like `git -C dir status` and
+ * `docker --host h ps` — the convention every agent will assume.
+ *
+ * Returns undefined when this argv is BRIDGE mode, which is the load-bearing
+ * half: a positional that is not a subcommand is a hub URL, and `--version` /
+ * `--help` before any subcommand stay exactly the bridge-mode business they
+ * were before CLI mode existed.
+ *
+ * Getting this wrong is not a small bug: before this existed,
+ * `parachute-mcp --config x.json tools` fell through to bridge mode, "tools"
+ * became the positional hub URL, and the bridge booted and sat on stdio with
+ * an empty stdout and exit 0 — a command that looks like it succeeded and
+ * produced nothing.
+ */
+export function splitSubcommand(argv: string[]): SubcommandSplit | undefined {
+  const globals: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] as string;
+    if (isSubcommand(arg)) return { globals, rest: argv.slice(i) };
+    if (arg === "--version" || arg === "-v" || arg === "--help" || arg === "-h") return undefined;
+    if (!arg.startsWith("-")) return undefined;
+    globals.push(arg);
+    if (VALUE_FLAGS.has(arg) && i + 1 < argv.length) globals.push(argv[++i] as string);
+  }
+  return undefined;
+}
+
+/**
+ * Rebuild a subcommand argv with the pre-subcommand flags folded in after the
+ * subcommand name, where the per-subcommand parsers already handle them.
+ */
+export function foldGlobals(split: SubcommandSplit): string[] {
+  const [name, ...rest] = split.rest;
+  return [name as string, ...split.globals, ...rest];
+}
+
 /** Anything the user could fix by typing a different command line. Exit 1. */
 export class UsageError extends Error {}
+
+/**
+ * A hub that accepts the connection and then never answers. Without this every
+ * subcommand hangs forever, which for an agent is worse than an error: the
+ * shell-out never returns and the turn stalls with no diagnostic at all.
+ */
+export class TimeoutError extends Error {
+  constructor(ms: number) {
+    // Content-free by construction — no URL, no arguments, nothing to leak.
+    super(`timed out after ${Math.round(ms / 1000)}s`);
+  }
+}
+
+export const DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * Bound `work` by `ms`. The losing promise is left running with its rejection
+ * swallowed: a hung hub connection has nothing useful to cancel from here, and
+ * the process exits immediately after.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  work.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new TimeoutError(ms)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function parseTimeoutFlag(raw: string): number {
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new UsageError("--timeout needs a positive number of seconds");
+  }
+  return Math.round(seconds * 1000);
+}
 
 const NAMESPACE_SEP = "__";
 
@@ -101,6 +203,8 @@ export interface ToolsCommand {
   config?: string;
   hub?: string;
   table: boolean;
+  /** Per-request budget in ms (`--timeout`, seconds on the wire). */
+  timeout: number;
 }
 
 export interface CallCommand {
@@ -114,6 +218,8 @@ export interface CallCommand {
    * a heredoc into `--args -` has no quoting rules at all.
    */
   args: { from: "none" } | { from: "literal"; json: string } | { from: "stdin" };
+  /** Per-request budget in ms (`--timeout`, seconds on the wire). */
+  timeout: number;
 }
 
 export interface HttpCommand {
@@ -124,6 +230,8 @@ export interface HttpCommand {
   url: string;
   headers: Array<[string, string]>;
   bodyFromStdin: boolean;
+  /** Per-request budget in ms (`--timeout`, seconds on the wire). */
+  timeout: number;
 }
 
 export interface HelpCommand {
@@ -153,12 +261,22 @@ function takeValue(argv: string[], i: number, name: string): [string, number] {
   return [next, i + 1];
 }
 
+/** RFC 9110 field-name token characters. */
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 function parseHeader(raw: string): [string, string] {
   const idx = raw.indexOf(":");
   if (idx <= 0) throw new UsageError(`-H expects "Name: value", got "${raw}"`);
   const name = raw.slice(0, idx).trim();
   const value = raw.slice(idx + 1).trim();
   if (name === "") throw new UsageError(`-H expects "Name: value", got "${raw}"`);
+  // Validate here rather than letting Headers.set throw: its TypeError is not
+  // a UsageError, so it would surface as a transport failure (exit 2) for what
+  // is plainly a typo on the command line.
+  if (!HEADER_NAME_RE.test(name)) {
+    throw new UsageError(`-H header name "${name}" is not a valid HTTP field name`);
+  }
+  if (/[\r\n]/.test(value)) throw new UsageError(`-H header "${name}" value contains a newline`);
   if (name.toLowerCase() === "authorization") {
     // Refusing beats silently overwriting: the whole point of this command is
     // that it sets Authorization itself, from a key the caller does not hold.
@@ -208,13 +326,17 @@ export function parseCommand(argv: string[]): Command {
 }
 
 function parseTools(argv: string[]): ToolsCommand {
-  const cmd: ToolsCommand = { kind: "tools", table: false };
+  const cmd: ToolsCommand = { kind: "tools", table: false, timeout: DEFAULT_TIMEOUT_MS };
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i] as string;
     if (arg === "--table") cmd.table = true;
     else if (isFlag(arg, "--config")) [cmd.config, i] = takeValue(argv, i, "--config");
     else if (isFlag(arg, "--hub")) [cmd.hub, i] = takeValue(argv, i, "--hub");
-    else if (arg.startsWith("-")) throw new UsageError(`tools: unknown flag ${arg}`);
+    else if (isFlag(arg, "--timeout")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--timeout");
+      cmd.timeout = parseTimeoutFlag(value);
+    } else if (arg.startsWith("-")) throw new UsageError(`tools: unknown flag ${arg}`);
     else throw new UsageError(`tools: unexpected argument "${arg}" (tools takes no positionals)`);
   }
   return cmd;
@@ -226,12 +348,17 @@ function parseCall(argv: string[]): CallCommand {
   let fromStdin = false;
   let config: string | undefined;
   let hub: string | undefined;
+  let timeout = DEFAULT_TIMEOUT_MS;
 
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i] as string;
     if (isFlag(arg, "--config")) [config, i] = takeValue(argv, i, "--config");
     else if (isFlag(arg, "--hub")) [hub, i] = takeValue(argv, i, "--hub");
-    else if (isFlag(arg, "--args")) {
+    else if (isFlag(arg, "--timeout")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--timeout");
+      timeout = parseTimeoutFlag(value);
+    } else if (isFlag(arg, "--args")) {
       let value: string;
       [value, i] = takeValue(argv, i, "--args");
       if (value !== "-") {
@@ -256,7 +383,7 @@ function parseCall(argv: string[]): CallCommand {
     : literal !== undefined
       ? { from: "literal", json: literal }
       : { from: "none" };
-  return { kind: "call", tool, args, config, hub };
+  return { kind: "call", tool, args, config, hub, timeout };
 }
 
 const METHOD_RE = /^[A-Za-z]+$/;
@@ -266,12 +393,17 @@ function parseHttp(argv: string[]): HttpCommand {
   let url: string | undefined;
   let config: string | undefined;
   let bodyFromStdin = false;
+  let timeout = DEFAULT_TIMEOUT_MS;
   const headers: Array<[string, string]> = [];
 
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i] as string;
     if (isFlag(arg, "--config")) [config, i] = takeValue(argv, i, "--config");
-    else if (arg === "-H" || isFlag(arg, "--header")) {
+    else if (isFlag(arg, "--timeout")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--timeout");
+      timeout = parseTimeoutFlag(value);
+    } else if (arg === "-H" || isFlag(arg, "--header")) {
       let value: string;
       [value, i] = takeValue(argv, i, arg === "-H" ? "-H" : "--header");
       headers.push(parseHeader(value));
@@ -304,6 +436,7 @@ function parseHttp(argv: string[]): HttpCommand {
     headers,
     bodyFromStdin,
     config,
+    timeout,
   };
 }
 
@@ -380,31 +513,43 @@ class HubSession {
   private constructor(
     private readonly client: Client,
     private readonly transport: StreamableHTTPClientTransport,
+    private readonly timeoutMs: number,
   ) {}
 
-  static async open(hub: HubEntry, signingFetch: FetchLike): Promise<HubSession> {
+  static async open(
+    hub: HubEntry,
+    signingFetch: FetchLike,
+    timeoutMs: number,
+  ): Promise<HubSession> {
     const client = new Client({ name: "parachute-mcp", version: PARACHUTE_MCP_VERSION });
     const transport = new StreamableHTTPClientTransport(new URL(hub.url), { fetch: signingFetch });
     try {
-      await client.connect(transport);
+      await withTimeout(client.connect(transport), timeoutMs);
     } catch (err) {
       await client.close().catch(() => {});
       throw err;
     }
-    return new HubSession(client, transport);
+    return new HubSession(client, transport, timeoutMs);
   }
 
   async listTools(): Promise<Tool[]> {
-    return (await this.client.listTools()).tools;
+    return (await withTimeout(this.client.listTools(), this.timeoutMs)).tools;
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    return (await this.client.callTool({ name, arguments: args })) as CallToolResult;
+    return (await withTimeout(
+      this.client.callTool({ name, arguments: args }),
+      this.timeoutMs,
+    )) as CallToolResult;
   }
 
-  /** DELETE the session (when the hub issued one), then drop the transport. */
+  /**
+   * DELETE the session (when the hub issued one), then drop the transport.
+   * Bounded too: a hub that hangs on the DELETE must not hang the exit, and a
+   * failure to tidy up is never worth failing the command over.
+   */
   async close(): Promise<void> {
-    await this.transport.terminateSession().catch(() => {});
+    await withTimeout(this.transport.terminateSession(), this.timeoutMs).catch(() => {});
     await this.client.close().catch(() => {});
   }
 }
@@ -478,7 +623,7 @@ async function runTools(cmd: ToolsCommand, io: Io): Promise<number> {
   for (const hub of hubs) {
     let session: HubSession | undefined;
     try {
-      session = await HubSession.open(hub, signingFetch);
+      session = await HubSession.open(hub, signingFetch, cmd.timeout);
       for (const tool of await session.listTools()) {
         listed.push({
           name: namespaced ? `${hub.alias}${NAMESPACE_SEP}${tool.name}` : tool.name,
@@ -493,7 +638,13 @@ async function runTools(cmd: ToolsCommand, io: Io): Promise<number> {
     }
   }
 
-  io.out(cmd.table ? renderTable(listed) : `${JSON.stringify(listed, null, 2)}\n`);
+  // Nothing listed AND something failed: stay silent on stdout. Printing `[]`
+  // there is a lie in the shape of data — an agent that pipes stdout to a JSON
+  // parser would read "this hub has no tools" out of a total connection
+  // failure. An honestly empty hub (worst === ok) still prints `[]`.
+  if (listed.length > 0 || worst === EXIT.ok) {
+    io.out(cmd.table ? renderTable(listed) : `${JSON.stringify(listed, null, 2)}\n`);
+  }
   return worst;
 }
 
@@ -569,7 +720,7 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
 
   let session: HubSession | undefined;
   try {
-    session = await HubSession.open(hub, makeSigningFetch(key.sk));
+    session = await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout);
     const result = await session.callTool(toolName, args);
     const text = singleTextBlock(result);
     if (result.isError) {
@@ -593,14 +744,24 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
  *
  * Redirects are NOT followed: the `u` tag pins the signature to one exact URL,
  * so a followed redirect would carry a signature for the wrong target and the
- * hub would reject it. A 3xx is reported as-is, like `curl` without `-L`.
+ * hub would reject it. A 3xx is therefore reported as-is (like `curl` without
+ * `-L`) and exits NON-ZERO: the request did not do what was asked, and an
+ * empty body with exit 0 is the worst of both worlds for a caller that
+ * branches on the exit code.
  */
 async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
   const { key } = resolveKeyAndConfig(cmd.config, cmd.url, io);
   const body = cmd.bodyFromStdin ? new TextEncoder().encode(await io.stdin()) : null;
 
   const headers = new Headers();
-  for (const [name, value] of cmd.headers) headers.set(name, value);
+  try {
+    for (const [name, value] of cmd.headers) headers.set(name, value);
+  } catch (err) {
+    // parseHeader validates the field name already; this catches anything
+    // Headers rejects that the regex does not, and keeps it exit 1 (a typo on
+    // the command line) rather than exit 2 (a transport fault).
+    throw new UsageError(`-H rejected by the HTTP layer: ${messageOf(err)}`);
+  }
   // Set last so no `-H` can shadow it (parseHeader already refuses, belt and
   // braces). `body` is passed explicitly: buildAuthEvent adds the `payload`
   // tag iff the body is non-empty, which is the rule the hub verifies.
@@ -616,9 +777,15 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
       headers,
       body,
       redirect: "manual",
+      signal: AbortSignal.timeout(cmd.timeout),
     });
   } catch (err) {
-    io.err(`http: ${cmd.method} ${cmd.url}: ${messageOf(err)}`);
+    // A server that accepts the connection and never answers is indisting-
+    // uishable from a hang without this; report it as a timeout, not as a
+    // generic fetch failure.
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    const why = timedOut ? new TimeoutError(cmd.timeout).message : messageOf(err);
+    io.err(`http: ${cmd.method} ${cmd.url}: ${why}`);
     return EXIT.transport;
   }
 
@@ -627,7 +794,9 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
   io.out(new Uint8Array(await response.arrayBuffer()));
 
   if (isAuthStatus(response.status)) return EXIT.auth;
-  return response.status >= 400 ? EXIT.transport : EXIT.ok;
+  // >= 300, not just >= 400: redirects are not followed, so a 3xx is an
+  // unfulfilled request with an empty body, not a success.
+  return response.status >= 300 ? EXIT.transport : EXIT.ok;
 }
 
 // ---------------------------------------------------------------------------

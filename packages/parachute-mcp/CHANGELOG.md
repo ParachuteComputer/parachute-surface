@@ -25,9 +25,25 @@
 - Exit-code contract shared by all three, documented in `--help` and the
   README: `0` ok, `1` usage/config, `2` network/transport, `3` auth
   (HTTP 401/403), `4` the tool returned `isError`.
-- Bridge mode is unchanged — the subcommands are dispatched only when argv[0]
-  is `tools`, `call` or `http`, and no hub URL can be one of those words.
-  `--version` is unchanged; `--help` gains the subcommands and exit codes.
+- Global flags may go **before or after** the subcommand
+  (`parachute-mcp --config c.json tools`, the `git -C` / `docker --host`
+  convention), including `--config` and `--timeout`.
+- `--timeout <seconds>` (default 60) bounds every request — MCP connect,
+  `tools/list`, `tools/call`, the session `DELETE`, and the `http` fetch —
+  and exits `2` with a content-free `timed out after Ns`. Without it a hub that
+  accepts the connection and never answers hangs the command forever.
+- `http`: a `3xx` exits `2` rather than `0`-with-an-empty-body (redirects are
+  not followed, so the request was not fulfilled). An invalid `-H` field name
+  is a usage error (exit 1) instead of a `TypeError` surfacing as exit 2.
+- `tools`: when every hub fails, stdout stays empty instead of printing `[]` —
+  which a JSON-consuming agent would read as "this hub has no tools" rather
+  than "the hub is unreachable".
+- A closed stdout pipe (`parachute-mcp tools | head -1`) exits 0 instead of
+  printing an EPIPE stack trace.
+- Bridge mode is unchanged — the subcommands are dispatched only when the first
+  non-flag argument is `tools`, `call` or `http`, and no hub URL can be one of
+  those words. `--version` is unchanged; `--help` gains the subcommands and
+  exit codes.
 
 ## 0.1.0
 

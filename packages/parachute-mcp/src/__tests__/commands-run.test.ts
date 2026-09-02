@@ -15,7 +15,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nsecEncode } from "nostr-tools/nip19";
 import { generateSecretKey, getPublicKey, verifyEvent } from "nostr-tools/pure";
-import { EXIT, type Io, runCli } from "../commands.js";
+import {
+  EXIT,
+  type Io,
+  type SubcommandSplit,
+  foldGlobals,
+  runCli,
+  splitSubcommand,
+} from "../commands.js";
 import { decodeAuthHeader, sha256Hex, tagValue } from "../nip98.js";
 import { StubHub, type StubTool, freePort } from "./stub-hub.js";
 
@@ -42,6 +49,33 @@ function stub(label: string, tools: StubTool[], sessions = false): StubHub {
   const hub = new StubHub({ label, tools, sessions, expectPubkey: pubkey });
   cleanup.push(() => hub.stop());
   return hub;
+}
+
+/**
+ * A server that ACCEPTS the connection and never answers. This is the failure
+ * every subcommand used to hang on forever — worse than an error for an agent,
+ * because the shell-out simply never returns.
+ */
+function blackhole(): string {
+  const held: Array<() => void> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    idleTimeout: 0,
+    fetch: () =>
+      new Promise<Response>((resolve) => {
+        held.push(() => resolve(new Response(null, { status: 503 })));
+      }),
+  });
+  cleanup.push(() => {
+    // Release every held request BEFORE stopping. `server.stop(true)` waits on
+    // in-flight handlers, so a handler that never settles hangs the afterEach
+    // hook itself — which then poisons every test that runs after it, as a
+    // confusing failure somewhere else entirely.
+    for (const release of held) release();
+    server.stop(true);
+  });
+  return `http://127.0.0.1:${server.port}/mcp`;
 }
 
 /** A temp key file + config file; returns the env/home to inject. */
@@ -475,5 +509,131 @@ describe("help", () => {
 
     expect(await runCli(["call", "--help"], cap.io, USAGE)).toBe(EXIT.ok);
     expect(cap.stdout()).toBe(USAGE);
+  });
+});
+
+describe("timeouts (--timeout)", () => {
+  // A hub that accepts and never answers. Each of these used to hang forever.
+  test("tools against a black-hole hub exits 2 with a content-free timeout", async () => {
+    const cap = capture(configFor([{ alias: "home", url: blackhole() }]));
+
+    const started = Date.now();
+    expect(await runCli(["tools", "--timeout", "1"], cap.io, USAGE)).toBe(EXIT.transport);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(cap.stderr()).toContain("timed out after 1s");
+    // Nothing listed and something failed → stdout stays silent.
+    expect(cap.stdout()).toBe("");
+  });
+
+  test("call against a black-hole hub exits 2", async () => {
+    const cap = capture(configFor([{ alias: "home", url: blackhole() }]));
+
+    const started = Date.now();
+    expect(await runCli(["call", "echo", "--timeout", "1"], cap.io, USAGE)).toBe(EXIT.transport);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(cap.stderr()).toContain("timed out after 1s");
+    expect(cap.stdout()).toBe("");
+  });
+
+  test("http against a black-hole server exits 2", async () => {
+    const url = blackhole();
+    const cap = capture(keyOnlyPlace());
+
+    const started = Date.now();
+    expect(await runCli(["http", "GET", url, "--timeout", "1"], cap.io, USAGE)).toBe(
+      EXIT.transport,
+    );
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(cap.stderr()).toContain("timed out after 1s");
+    expect(cap.stdout()).toBe("");
+  });
+
+  test("a timeout message names no URL, arguments or key material", async () => {
+    const cap = capture(configFor([{ alias: "home", url: blackhole() }]), `{"secret":"${nsec}"}`);
+
+    expect(await runCli(["call", "echo", "--args", "-", "--timeout", "1"], cap.io, USAGE)).toBe(
+      EXIT.transport,
+    );
+    expect(cap.stderr()).not.toContain(nsec);
+    expect(cap.stderr()).not.toContain("nsec1");
+    expect(cap.stderr()).not.toContain(skHex);
+  });
+
+  test("a healthy hub is unaffected by a generous timeout", async () => {
+    const hub = stub("solo", [ECHO]);
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    expect(await runCli(["tools", "--timeout", "30"], cap.io, USAGE)).toBe(EXIT.ok);
+    expectCleanAuth(hub);
+  });
+});
+
+describe("flags before the subcommand (end to end)", () => {
+  test("REGRESSION: --config <path> tools lists tools instead of booting the bridge", async () => {
+    const hub = stub("solo", [ECHO]);
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    const configPath = place.env.PARACHUTE_MCP_CONFIG as string;
+    // No PARACHUTE_MCP_CONFIG in the env: the flag is the only way in, so this
+    // fails unless the pre-subcommand flag is really honoured.
+    const cap = capture({ env: {}, home: place.home });
+
+    const argv = foldGlobals(splitSubcommand(["--config", configPath, "tools"]) as SubcommandSplit);
+    expect(await runCli(argv, cap.io, USAGE)).toBe(EXIT.ok);
+    expect(JSON.parse(cap.stdout())).toHaveLength(1);
+  });
+
+  test("REGRESSION: --config <path> call <tool> reaches the hub", async () => {
+    const hub = stub("solo", [ECHO]);
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    const configPath = place.env.PARACHUTE_MCP_CONFIG as string;
+    const cap = capture({ env: {}, home: place.home });
+
+    const argv = foldGlobals(
+      splitSubcommand(["--config", configPath, "call", "echo", '{"text":"hi"}']) as SubcommandSplit,
+    );
+    expect(await runCli(argv, cap.io, USAGE)).toBe(EXIT.ok);
+    expect(hub.toolCalls).toEqual([{ tool: "echo", args: { text: "hi" } }]);
+  });
+});
+
+describe("tools: an empty list is never faked", () => {
+  test("every hub failing prints NOTHING on stdout (not `[]`) and exits non-zero", async () => {
+    const dead = `http://127.0.0.1:${freePort()}/mcp`;
+    const cap = capture(configFor([{ alias: "gone", url: dead }]));
+
+    expect(await runCli(["tools"], cap.io, USAGE)).toBe(EXIT.transport);
+    // `[]` here would read to a JSON-consuming agent as "this hub has no
+    // tools" rather than "the hub is unreachable".
+    expect(cap.stdout()).toBe("");
+    expect(cap.stderr()).toContain('hub "gone"');
+  });
+
+  test("a genuinely empty hub still prints [] and exits 0", async () => {
+    const hub = stub("empty", []);
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    expect(await runCli(["tools"], cap.io, USAGE)).toBe(EXIT.ok);
+    expect(JSON.parse(cap.stdout())).toEqual([]);
+  });
+});
+
+describe("http: redirects", () => {
+  test("a 3xx is NOT followed and exits 2 rather than 0-with-an-empty-body", async () => {
+    const target = "https://elsewhere.example.test/moved";
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch: () => new Response(null, { status: 302, headers: { location: target } }),
+    });
+    cleanup.push(() => server.stop(true));
+    const cap = capture(keyOnlyPlace());
+
+    expect(
+      await runCli(["http", "GET", `http://127.0.0.1:${server.port}/old`], cap.io, USAGE),
+    ).toBe(EXIT.transport);
+    // Reported as-is, like curl without -L, so the caller can see where to go.
+    expect(cap.stderr()).toContain("< 302");
+    expect(cap.stderr()).toContain(`< location: ${target}`);
   });
 });

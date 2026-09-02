@@ -17,7 +17,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ParachuteBridge } from "./bridge.js";
-import { type Io, isSubcommand, runCli } from "./commands.js";
+import { type Io, foldGlobals, runCli, splitSubcommand } from "./commands.js";
 import { resolveConfig } from "./config.js";
 import { loadKey, loadKeyValue } from "./key.js";
 import { createBridgeServer } from "./server.js";
@@ -36,26 +36,32 @@ CLI mode (one-shot commands, for agents that shell out):
       List the hubs' tools as JSON (name + description) on stdout.
       With several hubs and no --hub, names are namespaced <alias>__<tool>.
 
-  parachute-mcp call <tool> [<json-args>] [--hub <alias|url>]
   parachute-mcp call <tool> --args - [--hub <alias|url>]
-      One signed tools/call. Arguments are a JSON object, either as a
-      positional literal or read from stdin with "--args -" (use stdin when
-      shell quoting is in the way). A single text result is printed as-is;
-      anything else is printed as the JSON result.
+  parachute-mcp call <tool> [<json-args>] [--hub <alias|url>]
+      One signed tools/call. Arguments are a JSON object, read from stdin with
+      "--args -" or given as a positional literal. PREFER "--args -": a
+      positional literal is in this process's argv, which ps shows to every
+      user on the box, and it has to survive your shell's quoting. A single
+      text result is printed as-is; anything else as the JSON result.
 
   parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']...
       One signed HTTP request — a signed curl for hub endpoints that are not
       tool calls. The body comes from stdin only, never from argv. The
       response body goes to stdout; the status line and headers to stderr.
-      Redirects are not followed (the signature pins one exact URL).
+      Redirects are not followed (the signature pins one exact URL), so a 3xx
+      exits 2.
 
-All CLI subcommands accept --config and use the same config and key
+Common flags: --config <path>, --timeout <seconds> (default 60).
+--config and --timeout may go before OR after the subcommand:
+  parachute-mcp --config c.json tools     and     parachute-mcp tools --config c.json
+are the same command. All CLI subcommands use the same config and key
 resolution as bridge mode.
 
 Exit codes:
   0  success
   1  usage or configuration error (bad flags, no key, unknown hub or tool)
-  2  network / transport failure, or an HTTP >= 400 that is not an auth failure
+  2  network / transport failure, a timeout, or an HTTP response >= 300 that
+     is not an auth failure (redirects are deliberately not followed)
   3  authentication rejected by the hub (HTTP 401 / 403)
   4  the tool ran and returned an error result (isError)
 
@@ -119,7 +125,21 @@ async function flushStdio(): Promise<void> {
   );
 }
 
+/**
+ * `parachute-mcp tools | head -1` closes the pipe under us. Node's default is
+ * an unhandled EPIPE — a stack trace and exit 1 — for what is the reader
+ * saying "I have enough". Exit 0 instead, the way every well-behaved CLI does.
+ */
+function ignoreEpipe(stream: NodeJS.WriteStream): void {
+  stream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+}
+
 function processIo(): Io {
+  ignoreEpipe(process.stdout);
+  ignoreEpipe(process.stderr);
   return {
     out: (chunk) => process.stdout.write(chunk),
     err: (msg) => process.stderr.write(`${msg}\n`),
@@ -129,10 +149,13 @@ function processIo(): Io {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  // CLI mode. No hub URL can be the word "tools", "call" or "http", so this
-  // never shadows a bridge-mode invocation.
-  if (isSubcommand(argv[0])) {
-    const code = await runCli(argv, processIo(), USAGE);
+  // CLI mode. `splitSubcommand` also accepts flags BEFORE the subcommand
+  // (`--config c.json tools`, the git/docker convention) and returns undefined
+  // for every bridge-mode argv — a positional that is not a subcommand is a
+  // hub URL, and no hub URL can be the word "tools", "call" or "http".
+  const split = splitSubcommand(argv);
+  if (split) {
+    const code = await runCli(foldGlobals(split), processIo(), USAGE);
     process.exitCode = code;
     await flushStdio();
     process.exit(code);

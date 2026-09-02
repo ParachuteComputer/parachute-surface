@@ -126,14 +126,7 @@ namespace).
 
 ### `call` — run one tool
 
-```sh
-$ parachute-mcp call query-notes '{"tag":"guide","limit":2}'
-{"notes":[…]}
-```
-
-A result that is a single text block is printed as-is; anything else is printed
-as the JSON result. **When shell quoting is in the way — and for nested shells
-it usually is — pipe the arguments in instead:**
+**Prefer `--args -`, which reads the JSON object from stdin:**
 
 ```sh
 $ parachute-mcp call create-note --args - <<'JSON'
@@ -141,9 +134,27 @@ $ parachute-mcp call create-note --args - <<'JSON'
 JSON
 ```
 
-`--args -` reads the JSON object from stdin, so there is no quoting layer to get
-wrong. A tool that returns `isError` prints its message to **stderr** and exits
-`4`, so `set -e` and `if` both do the right thing.
+Two reasons, and the second is the one that bites:
+
+1. There is no quoting layer to get wrong. For a nested shell — an agent
+   running `ssh host "…"`, or a tool call inside a heredoc inside a script —
+   getting a JSON literal through intact is genuinely hard.
+2. **A positional literal lands in this process's `argv`, which `ps` shows to
+   every user on the box.** Tool arguments are not automatically harmless:
+   they carry note bodies, tokens, and whatever the agent is working on. This
+   is the same exposure that makes `http` refuse a command-line body — the
+   difference is only that `call` still *allows* the convenient form.
+
+The positional form is fine for short, non-sensitive arguments:
+
+```sh
+$ parachute-mcp call query-notes '{"tag":"guide","limit":2}'
+{"notes":[…]}
+```
+
+A result that is a single text block is printed as-is; anything else is printed
+as the JSON result. A tool that returns `isError` prints its message to
+**stderr** and exits `4`, so `set -e` and `if` both do the right thing.
 
 ### `http` — a signed curl
 
@@ -170,7 +181,32 @@ There is deliberately no way to pass a body on the command line: argv is
 world-readable through `ps`, and bodies to a hub routinely carry secrets. The
 NIP-98 `payload` tag is added if and only if the body is non-empty, and
 redirects are **not** followed — the signature pins one exact URL, so a
-followed redirect would be signed for the wrong target.
+followed redirect would be signed for the wrong target. A `3xx` is reported
+as-is (like `curl` without `-L`) and **exits `2`**: the request did not do what
+was asked, and an empty body with exit `0` is the worst possible answer for a
+caller that branches on the exit code.
+
+### Common flags
+
+`--config <path>` and `--timeout <seconds>` work on all three subcommands, and
+may go **before or after** the subcommand — these are the same command:
+
+```sh
+$ parachute-mcp --config ~/hubs.json tools
+$ parachute-mcp tools --config ~/hubs.json
+```
+
+(That is the `git -C dir status` / `docker --host h ps` convention. It is worth
+stating because the alternative is nasty: a flag placed before the subcommand
+used to fall through to bridge mode, where `tools` was read as a hub URL and
+the process sat there having printed nothing, with exit `0`.)
+
+`--timeout` defaults to **60 seconds** and bounds every request — the MCP
+connect, `tools/list`, `tools/call`, the session `DELETE`, and the `http`
+fetch. Without it, a hub that accepts the connection and then never answers
+hangs the command forever, which for an agent is worse than any error: the
+shell-out never returns and there is nothing to report. A timeout exits `2`
+with a content-free `timed out after Ns`.
 
 ### Exit codes
 
@@ -180,13 +216,19 @@ Every subcommand uses the same contract:
 |---|---|
 | `0` | success |
 | `1` | usage or configuration error (bad flags, no key, unknown hub or tool) |
-| `2` | network / transport failure, or an HTTP `>= 400` that is not an auth failure |
+| `2` | network / transport failure, a **timeout**, or an HTTP response `>= 300` that is not an auth failure (redirects are deliberately not followed) |
 | `3` | authentication rejected by the hub (HTTP `401` / `403`) |
 | `4` | the tool ran and returned an error result (`isError`) |
 
 `tools` against several hubs still prints the tools of the hubs that answered
 and names the ones that did not on stderr, but exits with the worst code seen —
-a partial list never masquerades as a complete one.
+a partial list never masquerades as a complete one. If **every** hub fails it
+prints nothing at all on stdout: an empty `[]` there would read to a
+JSON-consuming agent as "this hub has no tools" rather than "the hub is
+unreachable".
+
+Piping into `head` is safe — a closed pipe (`EPIPE`) exits `0` rather than
+printing a stack trace.
 
 ## Config reference
 
