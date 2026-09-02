@@ -24,6 +24,7 @@
     "gen-version": "bun scripts/gen-version.ts",
     "prebuild": "bun scripts/gen-version.ts",
     "build": "tsc",
+    "build:binaries": "bun scripts/build-binaries.ts",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "bun test src/",

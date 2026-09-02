@@ -10,12 +10,15 @@ The `parachute-surface` repo is a monorepo with seven publishable packages, all 
 | `@openparachute/surface-render` | `packages/surface-render/` | `render-v...` (e.g. `render-v0.1.0-rc.1`) |
 | `@openparachute/doc-schema` | `packages/doc-schema/` | `doc-schema-v...` (e.g. `doc-schema-v0.1.0-rc.1`) |
 | `@openparachute/surface-server` | `packages/surface-server/` | `server-v...` (e.g. `server-v0.1.0-rc.1`) |
+| `@openparachute/mcp` | `packages/parachute-mcp/` | `mcp-v...` (e.g. `mcp-v0.1.1-rc.1`) — npm **and** single-file binaries on the Release |
 
 The workspace root (`@openparachute/surface-monorepo`) is intentionally `private: true` and should NEVER publish. The admin SPA (`web/admin/` → `@openparachute/surface-admin-ui`) is also `private: true` — it's bundled into surface-host's `dist/`, not separately published.
 
-All six npm packages run on independent release cadences. Merging a version bump to `next` (rc) or `main` (stable) is the release signal — `scripts/release-plan.ts` compares each package.json against npm and publishes what's new. `tag-record` writes the matching git tag afterwards as a record; you do not tag npm packages by hand. An explicit **rc** tag still publishes. A tag push of a stable is refused; stables publish from `main` only.
+All seven npm packages run on independent release cadences. Merging a version bump to `next` (rc) or `main` (stable) is the release signal — `scripts/release-plan.ts` compares each package.json against npm and publishes what's new. `tag-record` writes the matching git tag afterwards as a record; you do not tag npm packages by hand. An explicit **rc** tag still publishes. A tag push of a stable is refused; stables publish from `main` only.
 
 GitHub-release tarballs (`docs-editor`, `meeting-ingest`, `meeting-mcp`) stay tag-triggered — they are `private: true` and not on npm.
+
+`@openparachute/mcp` is the one package with **two** distributions: npm, plus `bun build --compile` single-file executables (linux-x64/arm64, darwin-x64/arm64 + `SHA256SUMS`) attached to the same `mcp-v…` GitHub Release by `release-mcp-binaries`. The binaries are how it installs in agent sandboxes that have neither a Node runtime nor npm egress; they ship on both release paths, so a merge-published version is never binary-less. See [packages/parachute-mcp/README.md](./packages/parachute-mcp/README.md).
 
 > **notes-ui removal (2026-07-29)**: `@openparachute/notes-ui` was deleted from this repo. Notes is retired (parachute-hub#788) — `@openparachute/app` is the front door now. Published `notes-ui-v*` versions stay on npm for anyone still installing one; nothing new ships from here. Its npm Trusted Publisher rule can be dropped.
 
@@ -37,6 +40,8 @@ Per [governance rule 2](https://github.com/ParachuteComputer/parachute-workspace
 | `doc-schema-vX.Y.Z` | `@openparachute/doc-schema` | `latest` |
 | `server-vX.Y.Z-rc.N` | `@openparachute/surface-server` | `rc` |
 | `server-vX.Y.Z` | `@openparachute/surface-server` | `latest` |
+| `mcp-vX.Y.Z-rc.N` | `@openparachute/mcp` (+ binaries on the Release) | `rc` |
+| `mcp-vX.Y.Z` | `@openparachute/mcp` (+ binaries on the Release) | `latest` |
 
 The workflow auto-detects rc vs stable from the **package.json version**, not from the git ref (a merge-triggered run's ref is `next`/`main` — using that would publish every rc to `@latest`, hub#792). On a tag push, jobs also gate by tag prefix via `startsWith(github.ref_name, '<prefix>-')`.
 
@@ -65,6 +70,7 @@ Package-specific notes that still apply:
 - **surface-render** — `prepublishOnly` builds via `tsc`. Depends on `@openparachute/surface-client`; if shipping both, bump client first (or in the same PR — `plan` publishes each independently, but a host that pins an unpublished client version will fail to install until client lands).
 - **doc-schema** — `prepublishOnly` builds via `tsc`. Serialization-affecting deps (prosemirror-markdown, prosemirror-model, markdown-it) are exact-pinned — see the package README before bumping them.
 - **surface-server** — publishes raw TypeScript sources (no build step). Depends on `@openparachute/surface` and `@openparachute/surface-client` by concrete semver.
+- **mcp** (`packages/parachute-mcp`) — `prepublishOnly` builds via `tsc`, and `prebuild` regenerates `src/version.ts` from package.json. `release-mcp-binaries` then cross-compiles all four single-file executables from one Linux runner, executes the linux-x64 one and asserts on the version it prints, and attaches them + `SHA256SUMS` to the `mcp-v…` Release. On the TAG path that job also consults `plan`, so the binary channel is under the same stable-from-main gate as npm: a stable `mcp-vX.Y.Z` tag pushed anywhere publishes nothing and cuts no Release — stables ship by merging the bump to `main`.
 
 ### Releasing the docs-editor tarball (GitHub Release, not npm)
 
@@ -108,6 +114,7 @@ Before the workflow can publish, this repo needs **npm Trusted Publisher rules �
 4. Same for `@openparachute/surface-render` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-surface`, workflow `release.yml`, env blank) before the first `render-v...` tag is pushed, or the publish job will fail with 403.
 5. Same for `@openparachute/doc-schema` — **new package, no rule exists yet.** Add a Trusted Publisher rule (org `ParachuteComputer`, repo `parachute-surface`, workflow `release.yml`, env blank) before the first `doc-schema-v...` tag is pushed.
 6. Same for `@openparachute/surface-server` — **new package, no rule exists yet.** Same values, before the first `server-v...` tag is pushed.
+7. Same for `@openparachute/mcp` — 0.1.0 was published BY HAND, so the package exists on npm but has **no Trusted Publisher rule yet.** Add one (org `ParachuteComputer`, repo `parachute-surface`, workflow `release.yml`, env blank) before the first `mcp-v...` release, or `publish-mcp-npm` fails with 403. (The GitHub-Release binaries need no npm rule — only `contents: write`.)
 
 All seven packages share the same `release.yml` file; npm OIDC verification keys on the workflow_ref claim, not the tag content.
 

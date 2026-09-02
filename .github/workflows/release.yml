@@ -1,7 +1,7 @@
 # Release workflow — triggered by a merge to `next` or `main` (port of
 # hub#790 / #911 / #913), or by pushing a semver tag.
 #
-# This workflow publishes SIX npm packages on different tag namespaces,
+# This workflow publishes SEVEN npm packages on different tag namespaces,
 # plus THREE GitHub-release tarballs (private:true — distribution is the
 # release asset, not npm; those stay tag-triggered):
 #
@@ -11,6 +11,11 @@
 #   - @openparachute/surface-render ← tag prefix `render-v...`    (from packages/surface-render)
 #   - @openparachute/doc-schema     ← tag prefix `doc-schema-v...` (from packages/doc-schema)
 #   - @openparachute/surface-server ← tag prefix `server-v...`    (from packages/surface-server)
+#   - @openparachute/mcp            ← tag prefix `mcp-v...`       (from packages/parachute-mcp)
+#                                     ALSO attaches `bun build --compile`
+#                                     single-file binaries to its Release —
+#                                     the install path for sandboxes with
+#                                     neither Node nor registry egress.
 #   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (tag-only)
 #   - meeting-ingest release tarball ← tag prefix `meeting-ingest-v...` (tag-only)
 #   - meeting-mcp release tarball   ← tag prefix `meeting-mcp-v...` (tag-only)
@@ -45,8 +50,8 @@
 #
 # Operator setup (one-time) — see RELEASING.md:
 #   - npm Trusted Publisher rules: one per package (surface, surface-client,
-#     account-client, surface-render, doc-schema, surface-server).
-#     All six rules point at: org=ParachuteComputer, repo=parachute-surface,
+#     account-client, surface-render, doc-schema, surface-server, mcp).
+#     All seven rules point at: org=ParachuteComputer, repo=parachute-surface,
 #     workflow=release.yml, env blank.
 #   - No NPM_TOKEN secret needed; OIDC.
 
@@ -71,6 +76,7 @@ on:
       - 'packages/surface-render/package.json'
       - 'packages/doc-schema/package.json'
       - 'packages/surface-server/package.json'
+      - 'packages/parachute-mcp/package.json'
     tags:
       # App release tags
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -90,6 +96,9 @@ on:
       # Surface-server release tags
       - 'server-v[0-9]+.[0-9]+.[0-9]+'
       - 'server-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
+      # parachute-mcp release tags (npm + single-file binaries on the Release)
+      - 'mcp-v[0-9]+.[0-9]+.[0-9]+'
+      - 'mcp-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
       # Docs-editor release tags (GitHub release tarball, not npm)
       - 'docs-editor-v[0-9]+.[0-9]+.[0-9]+'
       - 'docs-editor-v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
@@ -118,6 +127,7 @@ jobs:
       surface_render: ${{ steps.surface_render.outputs.should_publish }}
       doc_schema: ${{ steps.doc_schema.outputs.should_publish }}
       surface_server: ${{ steps.surface_server.outputs.should_publish }}
+      mcp: ${{ steps.mcp.outputs.should_publish }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -142,6 +152,8 @@ jobs:
         run: bun scripts/release-plan.ts packages/doc-schema @openparachute/doc-schema ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
       - id: surface_server
         run: bun scripts/release-plan.ts packages/surface-server @openparachute/surface-server ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
+      - id: mcp
+        run: bun scripts/release-plan.ts packages/parachute-mcp @openparachute/mcp ${{ github.ref_type == 'tag' && '--tag-push' || '' }}
 
   test:
     name: test
@@ -172,7 +184,7 @@ jobs:
     # Plan is consulted on tag pushes too — a tag is not a bypass of the
     # stable-from-main gate. The prefix clause still stops a client-/account-/…
     # tag from also publishing surface-host (all six plan steps run --tag-push).
-    if: ${{ needs.plan.outputs.surface == 'true' && (github.ref_type != 'tag' || (!startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-'))) }}
+    if: ${{ needs.plan.outputs.surface == 'true' && (github.ref_type != 'tag' || (!startsWith(github.ref_name, 'client-') && !startsWith(github.ref_name, 'account-') && !startsWith(github.ref_name, 'render-') && !startsWith(github.ref_name, 'doc-schema-') && !startsWith(github.ref_name, 'server-') && !startsWith(github.ref_name, 'mcp-') && !startsWith(github.ref_name, 'docs-editor-') && !startsWith(github.ref_name, 'meeting-ingest-') && !startsWith(github.ref_name, 'meeting-mcp-'))) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -529,6 +541,65 @@ jobs:
           echo "publishing @openparachute/surface-server with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
+  publish-mcp-npm:
+    name: publish @openparachute/mcp to npm
+    needs: [plan, test]
+    # mcp-only: gate on the `mcp-v...` tag prefix. `meeting-mcp-v...` does NOT
+    # start with `mcp-`, so the two namespaces cannot collide.
+    if: ${{ needs.plan.outputs.mcp == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'mcp-')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: install deps
+        # Workspace install at root.
+        run: bun install --frozen-lockfile
+      - name: verify package.json version matches tag
+        if: github.ref_type == 'tag'
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/parachute-mcp/package.json').version)")
+          TAG_VERSION="${GITHUB_REF_NAME#mcp-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::packages/parachute-mcp/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+      - name: "guard against workspace:/link: protocol in published manifest"
+        # npm publish does NOT rewrite `workspace:`/`link:` protocols (only bun/pnpm
+        # do, on their own publish path). A leaked protocol breaks every `npm install`
+        # of the published package. parachute-mcp depends on @modelcontextprotocol/sdk
+        # and nostr-tools — both concrete semver today; keep the guard in lock-step
+        # with the sibling jobs so a future workspace dep can't slip one through.
+        working-directory: packages/parachute-mcp
+        run: |
+          if node -e "const p=require('./package.json'); let bad=[]; for (const k of ['dependencies','peerDependencies','optionalDependencies']) { const b=p[k]||{}; for (const [d,v] of Object.entries(b)) if (String(v).startsWith('workspace:')||String(v).startsWith('link:')) bad.push(k+'.'+d+'='+v); } if (bad.length) { console.error(bad.join('\n')); process.exit(1); }"; then
+            echo "no workspace:/link: protocols in published manifest"
+          else
+            echo "::error::packages/parachute-mcp/package.json has workspace:/link: protocol in a published dependency block — convert to concrete semver"
+            exit 1
+          fi
+      - name: publish
+        # parachute-mcp's package.json has `prepublishOnly: bun run build`
+        # (whose `prebuild` regenerates src/version.ts from package.json), so
+        # `npm publish` builds before packing. No explicit build step needed.
+        working-directory: packages/parachute-mcp
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./package.json').version)")
+          case "$PKG_VERSION" in
+            *-rc.*) DIST_TAG=rc ;;
+            *)      DIST_TAG=latest ;;
+          esac
+          echo "publishing @openparachute/mcp with dist-tag=$DIST_TAG"
+          npm publish --tag "$DIST_TAG" --access public --provenance
+
   # Record what shipped as git tags.
   #
   # A RECORD, not a trigger — nothing fires off these, which is exactly why
@@ -537,7 +608,7 @@ jobs:
   # checks so one package's publish failure doesn't suppress the others' tags.
   tag-record:
     name: tag what shipped
-    needs: [plan, publish-surface-npm, publish-surface-client-npm, publish-account-client-npm, publish-surface-render-npm, publish-doc-schema-npm, publish-surface-server-npm]
+    needs: [plan, publish-surface-npm, publish-surface-client-npm, publish-account-client-npm, publish-surface-render-npm, publish-doc-schema-npm, publish-surface-server-npm, publish-mcp-npm]
     if: ${{ always() && github.ref_type != 'tag' }}
     runs-on: ubuntu-latest
     permissions:
@@ -576,6 +647,7 @@ jobs:
           tag_if "render-v"     "packages/surface-render"  "${{ needs.publish-surface-render-npm.result }}"
           tag_if "doc-schema-v" "packages/doc-schema"      "${{ needs.publish-doc-schema-npm.result }}"
           tag_if "server-v"     "packages/surface-server"  "${{ needs.publish-surface-server-npm.result }}"
+          tag_if "mcp-v"        "packages/parachute-mcp"   "${{ needs.publish-mcp-npm.result }}"
 
   release-docs-editor-tarball:
     name: attach docs-editor installable tarball to a GitHub Release
@@ -889,3 +961,117 @@ jobs:
           fi
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             "${{ steps.pack.outputs.tarball }}" --clobber
+
+  release-mcp-binaries:
+    name: attach parachute-mcp single-file binaries to a GitHub Release
+    needs: [plan, test, publish-mcp-npm]
+    # Both release paths, because the binaries are a SECOND distribution of the
+    # same version and must not fall out of step with npm:
+    #   - tag push of `mcp-v...`, but ONLY when `plan` also says publish. The
+    #     binary channel is subject to the same stable-from-main gate as npm:
+    #     without `needs.plan.outputs.mcp == 'true'`, pushing `mcp-v1.0.0` at
+    #     ANY commit would skip npm (plan refuses a stable on a tag push) and
+    #     still cut a GitHub Release with `contents: write` — a release nobody
+    #     reviewed, from code that never went through main. rc tags are
+    #     unaffected: decidePublish short-circuits `isTagPush` to publish:true
+    #     for an rc (release-plan.ts), including a re-push of one already on
+    #     npm, so an rc tag still reaches this job.
+    #   - publish-on-merge, once publish-mcp-npm has actually published. The tag
+    #     `tag-record` pushes uses GITHUB_TOKEN and therefore CANNOT start this
+    #     workflow — without this branch of the condition, every merge-driven
+    #     release would ship to npm with no binaries attached. This is also how
+    #     STABLE binaries ship: a stable tag push can never satisfy the clause
+    #     above, by design.
+    # `always()` is needed only because publish-mcp-npm may be SKIPPED on the
+    # tag path (its own `if` is prefix-gated); the explicit `plan`/`test` result
+    # checks below are what keep a FAILED or SKIPPED upstream job from letting
+    # this one through. `meeting-mcp-v...` does not start with `mcp-`, so the
+    # two tag namespaces cannot collide.
+    if: ${{ always() && needs.test.result == 'success' && needs.plan.result == 'success' && ((github.ref_type == 'tag' && needs.plan.outputs.mcp == 'true' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      # gh release create + upload.
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+      - name: install deps
+        # Workspace install at root — the compile bundles the package's real
+        # dependencies (@modelcontextprotocol/sdk, nostr-tools).
+        run: bun install --frozen-lockfile
+      - name: resolve version and tag
+        id: v
+        # On a tag push the tag is authoritative and must match package.json
+        # (same drift defense as the npm jobs). On the merge path package.json
+        # is authoritative and names the tag `tag-record` will push.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/parachute-mcp/package.json').version)")
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#mcp-v}"
+            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::packages/parachute-mcp/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+              exit 1
+            fi
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="mcp-v$PKG_VERSION"
+          fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: build single-file binaries (all targets, one runner)
+        # `bun build --compile` cross-compiles every target from this x64 Linux
+        # runner — no matrix, no per-platform toolchain. The script runs the
+        # package's own `bun run build` first, so the binaries are compiled from
+        # the exact dist/cli.js the npm `bin` executes.
+        working-directory: packages/parachute-mcp
+        run: bun scripts/build-binaries.ts
+      - name: verify the linux-x64 binary actually runs
+        # The runner IS linux-x64, so one of the four artifacts can be executed
+        # here. A compiled bundle that silently does nothing (the entry-point
+        # trap: realpathSync throws inside bun's virtual filesystem) would still
+        # exit 0 — so assert on the VERSION IT PRINTS, not on the exit code.
+        working-directory: packages/parachute-mcp
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          BIN="release/parachute-mcp-$V-linux-x64"
+          chmod +x "$BIN"
+          OUT="$("$BIN" --version)"
+          if [ "$OUT" != "$V" ]; then
+            echo "::error::$BIN printed '$OUT', expected '$V'"
+            exit 1
+          fi
+          "$BIN" --help > /dev/null
+          echo "linux-x64 binary reports $OUT"
+          ls -l release/
+          cat release/SHA256SUMS
+      - name: create the GitHub Release if none exists, attach the binaries
+        # Tag-triggered runs have no Release object yet; merge-triggered runs
+        # may not even have the tag yet (`tag-record` pushes it after the
+        # publish jobs), so `--target $GITHUB_SHA` creates it at this commit —
+        # the same commit tag-record would tag, which makes the duplicate
+        # push it then attempts a harmless no-op. --clobber makes re-runs
+        # idempotent.
+        working-directory: packages/parachute-mcp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.v.outputs.tag }}"
+          V="${{ steps.v.outputs.version }}"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            PRERELEASE_FLAG=""
+            if [[ "$TAG" =~ -rc\. ]]; then
+              PRERELEASE_FLAG="--prerelease"
+            fi
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" $PRERELEASE_FLAG \
+              --title "parachute-mcp $V" \
+              --notes "Single-file \`parachute-mcp\` executables (no Node, no npm registry needed) for linux-x64, linux-arm64, darwin-arm64, darwin-x64, plus SHA256SUMS. Also on npm as \`@openparachute/mcp@$V\`. Install: download the binary for your platform, \`chmod +x\`, and reference it by ABSOLUTE PATH in your MCP config — never \`npx\`. See packages/parachute-mcp/README.md."
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
+            release/parachute-mcp-"$V"-linux-x64 \
+            release/parachute-mcp-"$V"-linux-arm64 \
+            release/parachute-mcp-"$V"-darwin-arm64 \
+            release/parachute-mcp-"$V"-darwin-x64 \
+            release/SHA256SUMS --clobber

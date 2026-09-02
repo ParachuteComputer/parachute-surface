@@ -20,6 +20,72 @@ per-agent loopback signing proxies.
                               └────────► https://hub-b/mcp   (same key, own signature)
 ```
 
+## Install as a single binary (sandboxes, no Node)
+
+Every release also ships **single-file executables** built with
+`bun build --compile` — a whole Bun runtime plus the bridge in one static file.
+No Node, no `node_modules`, no npm registry: the install is a download.
+
+Two platform caveats, both inherited from Bun's own build targets: the Linux
+binaries are **glibc**, not musl (they will not run on stock Alpine — use a
+`-slim`/glibc base, or build a musl one yourself with
+`bun build --compile --target=bun-linux-x64-musl`), and the x86-64 binary is
+Bun's non-baseline build, which requires **AVX2** (2013+ Intel/AMD; on an older
+or emulated CPU it dies with SIGILL — rebuild with
+`--target=bun-linux-x64-baseline`). The arm64 binaries have neither caveat.
+
+```sh
+# pick your platform: linux-x64 | linux-arm64 | darwin-arm64 | darwin-x64
+VERSION=0.1.0
+PLATFORM=linux-x64
+curl -fsSL -o /usr/local/bin/parachute-mcp \
+  "https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}/parachute-mcp-${VERSION}-${PLATFORM}"
+chmod +x /usr/local/bin/parachute-mcp
+parachute-mcp --version   # → 0.1.0
+```
+
+Verify it before you run it — the same release carries a `SHA256SUMS` file:
+
+```sh
+curl -fsSL -O "https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}/SHA256SUMS"
+# compare against the line for the file you downloaded
+grep "parachute-mcp-${VERSION}-${PLATFORM}$" SHA256SUMS
+sha256sum /usr/local/bin/parachute-mcp     # macOS: shasum -a 256
+```
+
+(To check a whole download directory at once: `sha256sum -c SHA256SUMS`, run
+where the binaries kept their release filenames.)
+
+### Reference the binary by ABSOLUTE PATH in your MCP config
+
+```json
+{
+  "mcpServers": {
+    "parachute": {
+      "command": "/usr/local/bin/parachute-mcp",
+      "args": [],
+      "env": { "PARACHUTE_MCP_CONFIG": "/home/me/.config/parachute/mcp.json" }
+    }
+  }
+}
+```
+
+**Never put `npx` in an agent's MCP config.** A harness that connects its MCP
+servers eagerly at boot turns every start into a registry call: offline, rate
+limited, or behind a proxy that blocks npm, the server fails to start, the
+harness fails to boot, and it retries — a crash-loop whose visible symptom is
+"the agent is down", several layers away from the actual cause. An absolute
+path to a file on disk cannot do that. A bare `parachute-mcp` (PATH lookup) is
+fine interactively but still depends on the environment the harness happens to
+hand the subprocess, which is often not your shell's.
+
+Building the binaries yourself (any platform, cross-compiled from one machine):
+
+```sh
+bun run build:binaries              # all four targets → release/ + SHA256SUMS
+bun run build:binaries darwin-arm64 # just one
+```
+
 ## Quickstart
 
 Single hub, no config file:
