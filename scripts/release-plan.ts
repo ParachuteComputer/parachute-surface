@@ -163,6 +163,16 @@ export function matchingRcVersions(version: string, published: readonly string[]
 /**
  * Files a stable promotion may touch vs the latest matching rc tag.
  * Anything else is "new code" and the publish is refused.
+ *
+ * EVERY publishable package needs its entry here, or its first stable is
+ * refused by a gate that was only ever meant to catch new code: a suffix-drop
+ * necessarily touches that package's version/changelog/version.ts, and an
+ * unlisted path reads as new code. `packages/parachute-mcp` was added to
+ * `SURFACE_NPM_TAG_PREFIX` without being added here, which would have refused
+ * the first stable `mcp-v0.2.0` (surface#231). A test pins this list to
+ * `SURFACE_NPM_TAG_PREFIX` so the next package added cannot drift the same
+ * way — a package's `package.json` is always listed, and its `CHANGELOG.md` /
+ * `src/version.ts` whenever the package actually has one.
  */
 export const STABLE_PROMOTION_ALLOWED_PATHS: readonly string[] = [
   "package.json",
@@ -184,6 +194,9 @@ export const STABLE_PROMOTION_ALLOWED_PATHS: readonly string[] = [
   "packages/doc-schema/src/version.ts",
   "packages/surface-server/package.json",
   "packages/surface-server/CHANGELOG.md",
+  "packages/parachute-mcp/package.json",
+  "packages/parachute-mcp/CHANGELOG.md",
+  "packages/parachute-mcp/src/version.ts",
 ];
 
 export function disallowedStablePromotionPaths(
