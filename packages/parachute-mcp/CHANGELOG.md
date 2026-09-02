@@ -1,5 +1,34 @@
 # Changelog — @openparachute/mcp
 
+## Unreleased
+
+- **A CLI face on the same binary**, for agents that shell out instead of
+  running an MCP client (they were hand-rolling NIP-98 signing — a Python
+  re-implementation, a shell wrapper — to reach the same hubs). One artifact
+  now serves both shapes, over the same config resolution, the same key
+  resolution and the same signing code:
+  - `parachute-mcp tools [--hub <alias|url>] [--table]` — list the hubs' tools
+    as JSON (name + description) or a compact table. Several hubs and no
+    `--hub` → the bridge's `<alias>__<tool>` namespacing, so a name printed
+    here is a name `call` accepts.
+  - `parachute-mcp call <tool> [<json-args>] [--args -] [--hub <alias|url>]` —
+    one signed `tools/call`. A single text result prints as-is, anything else
+    as the JSON result. `--args -` reads the arguments from stdin, because
+    nested-shell JSON quoting is the most common way an agent's call goes
+    wrong.
+  - `parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']…` — a
+    signed curl for hub endpoints that are not tool calls. Response body to
+    stdout, status line and headers to stderr. The request body comes from
+    **stdin only** (never argv, which `ps` exposes); the `payload` tag is
+    present iff the body is non-empty; redirects are not followed, since the
+    signature pins one exact URL.
+- Exit-code contract shared by all three, documented in `--help` and the
+  README: `0` ok, `1` usage/config, `2` network/transport, `3` auth
+  (HTTP 401/403), `4` the tool returned `isError`.
+- Bridge mode is unchanged — the subcommands are dispatched only when argv[0]
+  is `tools`, `call` or `http`, and no hub URL can be one of those words.
+  `--version` is unchanged; `--help` gains the subcommands and exit codes.
+
 ## 0.1.0
 
 Initial release — the official replacement for hand-built per-agent loopback
