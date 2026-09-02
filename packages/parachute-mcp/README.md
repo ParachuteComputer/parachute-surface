@@ -315,7 +315,7 @@ nonce per request, `u` equal to the exact URL, a `payload` tag if and only if
 there is a body — get re-derived per agent, and get them subtly wrong.
 
 So the same binary has a CLI face. Same config file, same key resolution, same
-signing code; four one-shot subcommands instead of a stdio server:
+signing code; five one-shot subcommands instead of a stdio server:
 
 ### `doctor` — prove the whole chain
 
@@ -450,6 +450,53 @@ followed redirect would be signed for the wrong target. A `3xx` is reported
 as-is (like `curl` without `-L`) and **exits `2`**: the request did not do what
 was asked, and an empty body with exit `0` is the worst possible answer for a
 caller that branches on the exit code.
+
+### `channel-context` — shared memory across agents
+
+```sh
+parachute-mcp channel-context <read|append|init> [--vault <name>] \
+    [--relay <wss-url>] [--channel <uuid>] [--tail <bytes>] [--json] [--timeout <s>]
+```
+
+Several agents answering in the same Buzz channel each start their turn blind:
+they see the relay's message tail and nothing about what the *others* actually
+did. The convention that fixes it is one note per channel —
+`Channels/<relay-host>/<channel-uuid>` — that every agent reads the tail of
+before acting and appends one entry to afterwards. It is safe under concurrency
+because `append` is atomic in the vault; a read-modify-write of `content` is
+not. This subcommand *is* that convention, so no agent has to re-derive it.
+
+| Action | What it does |
+|---|---|
+| `read` | print the last `--tail` bytes (default `8000`) of the note. A channel with no note yet prints **nothing** and exits `0` — a first turn is not a failure. |
+| `append` | read one entry from **stdin** and append it, with exactly one leading newline. If the note does not exist yet it is created first, so the channel's first turn lands without a separate step. |
+| `init` | create the note with its header (`# <relay-host> / <channel-uuid>`), tag `channel-log`, and `relay` / `channel_id` / `summary` metadata. Another agent having created it first is **success**, not an error. |
+
+The path comes from `--relay` (default `$BUZZ_RELAY_URL`, scheme and trailing
+slash stripped, **lower-cased** — hostnames are case-insensitive but vault paths
+are not, and a second note differing only in case makes the vault answer either
+path with `ambiguous_path`) and `--channel` (default `$BUZZ_CHANNEL_ID`) — both injected
+into a Buzz agent's environment already, which is what makes this a one-liner
+inside a turn. `--vault` is required for `append` and `init` (the hub requires
+a vault on every tool except `query-notes`). `--json` prints one object:
+`{exists:false}` for a note that is not there yet, otherwise `path`,
+`byteSize`, `updatedAt` and the tail itself.
+
+```sh
+# start of turn: what happened here already?
+$ parachute-mcp channel-context read --vault uni --tail 4000
+
+# end of turn: one entry, from stdin — never argv
+$ printf '## %s · Nou\n- did: fixed the DNS resolver\n- next: nothing\n' "$(date -u +%FT%RZ)" \
+    | parachute-mcp channel-context append --vault uni
+```
+
+`read` fetches the tail as a byte window (`content_offset` / `content_length`),
+which the vault aligns to codepoint boundaries — so a `--tail` in bytes never
+splits a character, and a long-running channel costs the same to read as a new
+one. The request adds 3 bytes of slack, because that alignment moves the window's
+START down and a window of exactly `--tail` would then stop short of the note's
+end — dropping its newest bytes, the one end a tail read must never lose.
 
 ### Common flags
 

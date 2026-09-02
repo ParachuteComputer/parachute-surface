@@ -27,6 +27,12 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  type ChannelAction,
+  type ChannelResult,
+  DEFAULT_TAIL_BYTES,
+  runChannelContext,
+} from "./channel.js";
 import { type HubEntry, type ResolvedConfig, resolveConfig } from "./config.js";
 import {
   type DoctorDeps,
@@ -57,7 +63,7 @@ import { PARACHUTE_MCP_VERSION } from "./version.js";
  */
 export { EXIT, UsageError, TimeoutError, exitCodeForError };
 
-export const SUBCOMMANDS = ["tools", "call", "http", "doctor"] as const;
+export const SUBCOMMANDS = ["tools", "call", "http", "doctor", "channel-context"] as const;
 export type SubcommandName = (typeof SUBCOMMANDS)[number];
 
 export function isSubcommand(arg: string | undefined): arg is SubcommandName {
@@ -78,6 +84,9 @@ const VALUE_FLAGS = new Set([
   "-H",
   "--timeout",
   "--vault",
+  "--relay",
+  "--channel",
+  "--tail",
 ]);
 
 export interface SubcommandSplit {
@@ -238,11 +247,35 @@ export interface DoctorCommand {
   timeout: number;
 }
 
+export interface ChannelContextCommand {
+  kind: "channel-context";
+  action: ChannelAction;
+  config?: string;
+  hub?: string;
+  /** `--vault <name>`: required for append/init, passed through on read. */
+  vault?: string;
+  /** `--relay <wss-url>`: defaults to `$BUZZ_RELAY_URL`. */
+  relay?: string;
+  /** `--channel <uuid>`: defaults to `$BUZZ_CHANNEL_ID`. */
+  channel?: string;
+  /** `--tail <bytes>`: how much of the note's end `read` prints. */
+  tail: number;
+  json: boolean;
+  /** Per-request budget in ms (`--timeout`, seconds on the wire). */
+  timeout: number;
+}
+
 export interface HelpCommand {
   kind: "help";
 }
 
-export type Command = ToolsCommand | CallCommand | HttpCommand | DoctorCommand | HelpCommand;
+export type Command =
+  | ToolsCommand
+  | CallCommand
+  | HttpCommand
+  | DoctorCommand
+  | ChannelContextCommand
+  | HelpCommand;
 
 /** Does `arg` introduce flag `name`, either as `--name` or `--name=value`? */
 function isFlag(arg: string, name: string): boolean {
@@ -326,6 +359,8 @@ export function parseCommand(argv: string[]): Command {
       return parseHttp(argv);
     case "doctor":
       return parseDoctor(argv);
+    case "channel-context":
+      return parseChannelContext(argv);
     default:
       throw new UsageError(`unknown subcommand "${String(name)}"`);
   }
@@ -363,6 +398,62 @@ function parseDoctor(argv: string[]): DoctorCommand {
     } else if (arg.startsWith("-")) throw new UsageError(`doctor: unknown flag ${arg}`);
     else throw new UsageError(`doctor: unexpected argument "${arg}" (doctor takes no positionals)`);
   }
+  return cmd;
+}
+
+const CHANNEL_ACTIONS = ["read", "append", "init"] as const;
+
+function parseTailFlag(raw: string): number {
+  const bytes = Number(raw);
+  if (!Number.isFinite(bytes) || !Number.isInteger(bytes) || bytes <= 0) {
+    throw new UsageError("--tail needs a positive whole number of bytes");
+  }
+  return bytes;
+}
+
+function parseChannelContext(argv: string[]): ChannelContextCommand {
+  const cmd: ChannelContextCommand = {
+    kind: "channel-context",
+    // Overwritten by the positional below; a missing one is a UsageError.
+    action: "read",
+    tail: DEFAULT_TAIL_BYTES,
+    json: false,
+    timeout: DEFAULT_TIMEOUT_MS,
+  };
+  let action: string | undefined;
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i] as string;
+    if (arg === "--json") cmd.json = true;
+    else if (isFlag(arg, "--config")) [cmd.config, i] = takeValue(argv, i, "--config");
+    else if (isFlag(arg, "--hub")) [cmd.hub, i] = takeValue(argv, i, "--hub");
+    else if (isFlag(arg, "--vault")) [cmd.vault, i] = takeValue(argv, i, "--vault");
+    else if (isFlag(arg, "--relay")) [cmd.relay, i] = takeValue(argv, i, "--relay");
+    else if (isFlag(arg, "--channel")) [cmd.channel, i] = takeValue(argv, i, "--channel");
+    else if (isFlag(arg, "--tail")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--tail");
+      cmd.tail = parseTailFlag(value);
+    } else if (isFlag(arg, "--timeout")) {
+      let value: string;
+      [value, i] = takeValue(argv, i, "--timeout");
+      cmd.timeout = parseTimeoutFlag(value);
+    } else if (arg.startsWith("-")) throw new UsageError(`channel-context: unknown flag ${arg}`);
+    else if (action === undefined) action = arg;
+    else {
+      throw new UsageError(
+        `channel-context: unexpected argument "${arg}" (expected one of ${CHANNEL_ACTIONS.join(" | ")})`,
+      );
+    }
+  }
+  if (action === undefined) {
+    throw new UsageError(`channel-context: needs an action (${CHANNEL_ACTIONS.join(" | ")})`);
+  }
+  if (!(CHANNEL_ACTIONS as readonly string[]).includes(action)) {
+    throw new UsageError(
+      `channel-context: unknown action "${action}" (expected ${CHANNEL_ACTIONS.join(" | ")})`,
+    );
+  }
+  cmd.action = action as ChannelAction;
   return cmd;
 }
 
@@ -820,6 +911,22 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
  * `PARACHUTE_NSEC_FILE` where a path belongs — which would put the secret in
  * the "path" and then into the report.
  */
+/**
+ * Map a thrown value to this CLI's exit codes, given WHERE it came from.
+ * Shared by `doctor` and `channel-context`: both drive tool calls through an
+ * injected runner and both must tell "the tool said no" (4) apart from "the
+ * network is down" (2).
+ */
+function classifyError(err: unknown, phase: "transport" | "tool"): number {
+  // Auth first: a 401/403 is an auth failure whichever phase surfaced it.
+  if (isAuthStatus(httpStatusOf(err))) return EXIT.auth;
+  // A JSON-RPC error out of a tools/call is the TOOL failing (the hub reports
+  // "vault not covered" / "not granted" / "not found" that way), not the
+  // network.
+  if (phase === "tool" && err instanceof McpError) return EXIT.toolError;
+  return exitCodeForError(err);
+}
+
 function keySourceLabel(config: ResolvedConfig, env: NodeJS.ProcessEnv): string {
   if (env.PARACHUTE_NSEC_FILE) return "PARACHUTE_NSEC_FILE (a key file)";
   if (config.keyFile) return 'config "keyFile"';
@@ -871,14 +978,7 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
     },
     openSession: async (hub): Promise<DoctorSession> =>
       await HubSession.open(hub, makeSigningFetch(resolveOnce().key.sk), cmd.timeout),
-    classify: (err, phase) => {
-      // Auth first: a 401/403 is an auth failure whichever phase surfaced it.
-      if (isAuthStatus(httpStatusOf(err))) return EXIT.auth;
-      // A JSON-RPC error out of a tools/call is the TOOL failing (the hub
-      // reports "vault not covered" / "not granted" that way), not the network.
-      if (phase === "tool" && err instanceof McpError) return EXIT.toolError;
-      return exitCodeForError(err);
-    },
+    classify: classifyError,
   };
 
   const report: DoctorReport = await runDoctor(
@@ -889,6 +989,69 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
   // `--version`. Nothing here can carry key material (see `keySourceLabel`).
   io.out(cmd.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
   return report.exitCode;
+}
+
+// ---------------------------------------------------------------------------
+// channel-context
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE hub a single-target subcommand talks to. With several configured and
+ * no `--hub` this refuses rather than picking one — an append that silently
+ * landed in the wrong hub's vault is worse than an error.
+ */
+function soleHub(config: ResolvedConfig, hubFlag: string | undefined, what: string): HubEntry {
+  const hubs = targetHubs(config, hubFlag);
+  const only = hubs[0];
+  if (hubs.length !== 1 || !only) {
+    throw new UsageError(
+      `${what} targets one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
+        .map((h) => h.alias)
+        .join(", ")})`,
+    );
+  }
+  return only;
+}
+
+/**
+ * Wire the real config, key and MCP session into the channel-context runner in
+ * channel.ts. Plumbing only; the policy — path derivation, the tail window,
+ * the create-then-append retry, `path_conflict` as success — lives there and
+ * is unit-tested against a fake hub.
+ */
+async function runChannelContextCommand(cmd: ChannelContextCommand, io: Io): Promise<number> {
+  const { config, key } = resolveKeyAndConfig(
+    cmd.config,
+    cmd.hub !== undefined && hubFlagIsUrl(cmd.hub) ? cmd.hub : undefined,
+    io,
+  );
+  const hub = soleHub(config, cmd.hub, "channel-context");
+
+  const result: ChannelResult = await runChannelContext(
+    {
+      action: cmd.action,
+      tail: cmd.tail,
+      ...(cmd.vault !== undefined ? { vault: cmd.vault } : {}),
+      ...(cmd.relay !== undefined ? { relay: cmd.relay } : {}),
+      ...(cmd.channel !== undefined ? { channel: cmd.channel } : {}),
+    },
+    {
+      env: io.env ?? process.env,
+      openSession: async () => await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout),
+      // Tool phase only: a connect failure is thrown before the runner's
+      // guarded region and is mapped by `runCli`.
+      classify: (err) => classifyError(err, "tool"),
+      readStdin: io.stdin,
+    },
+  );
+
+  if (result.error !== undefined) io.err(`channel-context: ${result.error}`);
+  // The human face prints the note's bytes verbatim, so a `--json` consumer
+  // and a `read | tail` consumer see exactly what they asked for and nothing
+  // else. A missing note prints nothing at all.
+  const out = cmd.json ? `${JSON.stringify(result.json, null, 2)}\n` : result.text;
+  if (out !== "") io.out(out);
+  return result.exitCode;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,6 +1078,8 @@ export async function runCli(argv: string[], rawIo: Io, usage: string): Promise<
         return await runHttp(cmd, io);
       case "doctor":
         return await runDoctorCommand(cmd, io);
+      case "channel-context":
+        return await runChannelContextCommand(cmd, io);
     }
   } catch (err) {
     io.err(`parachute-mcp: ${messageOf(err)}`);
