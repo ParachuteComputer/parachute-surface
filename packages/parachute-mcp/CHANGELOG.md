@@ -23,6 +23,22 @@
   relabelled "doctor probe, safe to delete" and the step says so rather than
   claiming it tidied up. It only runs with `--vault <name>` or when exactly one
   vault is reachable — never guessing which of several vaults to write to.
+- The write probe lives under `.doctor/`, NOT `.parachute/` — the latter is the
+  vault's own metadata namespace, and a commit touching only that prefix is
+  treated as metadata-only and skipped (`shouldCommit`, `parachute_meta_only`),
+  so a probe filed there would be invisible to the export path it rides on.
+- A create that TIMES OUT (or fails at the transport) sweeps the probe path
+  before reporting: the hub may have committed the note and lost the answer, so
+  an unknown state must not be allowed to leave litter. A refusal (exit 4) is a
+  decision, not an unknown, and is left alone — a delete against a read-only
+  grant would only add a second, misleading error. A create failure carries
+  `details.path` so a `--json` consumer can locate any orphan.
+- Zero reachable vaults is a FAIL with exit `4`, not a pass with a caveat: exit
+  `0` is documented to mean the grant reaches a vault, and a key that
+  authenticates and can reach nothing has not got working access.
+- `TimeoutError` prints one decimal — `--timeout 0.3` reported "timed out after
+  0s", which reads as a bug in the tool rather than the budget that was asked
+  for.
 - `doctor` checks one hub at a time: several configured and no `--hub` exits `1`
   naming the aliases rather than silently picking one.
 - The exit-code contract moved to `src/exit.ts` so `doctor.ts` can share it

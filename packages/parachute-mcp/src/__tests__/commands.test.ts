@@ -12,6 +12,7 @@ import {
   EXIT,
   type HttpCommand,
   type SubcommandSplit,
+  TimeoutError,
   type ToolsCommand,
   UsageError,
   exitCodeForError,
@@ -434,5 +435,12 @@ describe("parse doctor", () => {
   test("--help anywhere short-circuits to help", () => {
     expect(parseCommand(["doctor", "--help"]).kind).toBe("help");
     expect(parseCommand(["doctor", "--vault", "uni", "-h"]).kind).toBe("help");
+  });
+});
+
+describe("TimeoutError", () => {
+  test("reports one decimal, so a sub-second budget is not rendered as 0s", () => {
+    expect(new TimeoutError(300).message).toBe("timed out after 0.3s");
+    expect(new TimeoutError(60_000).message).toBe("timed out after 60.0s");
   });
 });

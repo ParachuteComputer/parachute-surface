@@ -159,7 +159,10 @@ describe("probe path and content", () => {
   test("the path is npub-prefixed, timestamped, and inside the probe namespace", () => {
     const path = probePath(NPUB, NOW);
     expect(path).toBe(`${PROBE_PATH_PREFIX}npub1doctorp-20260902T041500Z`);
-    expect(path.startsWith(".parachute/doctor/")).toBe(true);
+    expect(path.startsWith(".doctor/")).toBe(true);
+    // NOT `.parachute/` — that is the vault's own metadata namespace, and a
+    // commit touching only that prefix is skipped as metadata-only.
+    expect(path.startsWith(".parachute/")).toBe(false);
     // No colons: the path becomes a filename in the vault's export.
     expect(path).not.toContain(":");
   });
@@ -383,13 +386,25 @@ describe("runDoctor — vaults step", () => {
     expect(step(report, "vaults")?.reason).toContain("not a hub account door");
   });
 
-  test("zero reachable vaults PASSES with an honest reason — the key just has no grant", async () => {
+  test("zero reachable vaults FAILS with exit 4 — authenticating is not access", async () => {
     const hub = fakeHub({ vaults: [] });
     const report = await runDoctor({}, deps(hub));
-    expect(report.exitCode).toBe(EXIT.ok);
-    expect(step(report, "vaults")?.status).toBe("pass");
+    // Exit 0 is documented to mean the grant reaches a vault, so a key that
+    // can reach nothing must not report success.
+    expect(report.exitCode).toBe(EXIT.toolError);
+    expect(statuses(report)).toBe("key:pass hub:pass vaults:fail");
     expect(step(report, "vaults")?.reason).toContain("no vault grant");
-    expect(step(report, "write")?.status).toBe("skip");
+    expect(step(report, "vaults")?.reason).toContain("grant-access");
+    expect(step(report, "vaults")?.details?.vaults).toEqual([]);
+    // The run stops there — no probe is attempted against a vault-less grant.
+    expect(hub.calls.map((c) => c.name)).toEqual(["list-vaults"]);
+  });
+
+  test("--vault against a hub reporting zero vaults still fails at the vaults step", async () => {
+    const hub = fakeHub({ vaults: [] });
+    const report = await runDoctor({ vault: "uni" }, deps(hub));
+    expect(report.exitCode).toBe(EXIT.toolError);
+    expect(step(report, "write")).toBeUndefined();
   });
 
   test("a list-vaults tool error is exit 4 and stops the run", async () => {
@@ -444,6 +459,36 @@ describe("runDoctor — write step", () => {
     expect(step(report, "write")?.reason).toContain("byte-exact");
     expect(hub.calls.map((c) => c.name)).toContain("delete-note");
     expect(hub.notes.size).toBe(0);
+  });
+
+  test("a create that TIMES OUT sweeps the probe path — unknown state, not a no", async () => {
+    // The hub may have committed the note and lost the answer. A refusal is a
+    // decision; a timeout is an unknown, and the unknown must not leave litter.
+    const hub = fakeHub({
+      respond: (name, args) => {
+        if (name !== "create-note") return undefined;
+        // Write it, then fail the call — exactly the lost-answer shape.
+        hub.notes.set(String(args.path), String(args.content));
+        throw new Error("timed out after 0.3s");
+      },
+    });
+    const report = await runDoctor({}, deps(hub));
+    expect(report.exitCode).toBe(EXIT.transport);
+    expect(hub.calls.map((c) => c.name)).toContain("delete-note");
+    expect(hub.notes.size).toBe(0);
+  });
+
+  test("a create failure carries the path in details, so --json can find an orphan", async () => {
+    const hub = fakeHub({
+      respond: (name) => {
+        if (name !== "create-note") return undefined;
+        throw new Error("connection reset");
+      },
+    });
+    const report = await runDoctor({}, deps(hub));
+    const details = step(report, "write")?.details as { vault?: string; path?: string };
+    expect(details?.vault).toBe("uni");
+    expect(details?.path).toStartWith(PROBE_PATH_PREFIX);
   });
 
   test("a create that the hub refuses is exit 4, and nothing is deleted", async () => {

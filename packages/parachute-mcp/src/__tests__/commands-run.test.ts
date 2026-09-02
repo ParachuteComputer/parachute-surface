@@ -520,7 +520,7 @@ describe("timeouts (--timeout)", () => {
     const started = Date.now();
     expect(await runCli(["tools", "--timeout", "1"], cap.io, USAGE)).toBe(EXIT.transport);
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(cap.stderr()).toContain("timed out after 1s");
+    expect(cap.stderr()).toContain("timed out after 1.0s");
     // Nothing listed and something failed → stdout stays silent.
     expect(cap.stdout()).toBe("");
   });
@@ -531,7 +531,7 @@ describe("timeouts (--timeout)", () => {
     const started = Date.now();
     expect(await runCli(["call", "echo", "--timeout", "1"], cap.io, USAGE)).toBe(EXIT.transport);
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(cap.stderr()).toContain("timed out after 1s");
+    expect(cap.stderr()).toContain("timed out after 1.0s");
     expect(cap.stdout()).toBe("");
   });
 
@@ -544,7 +544,7 @@ describe("timeouts (--timeout)", () => {
       EXIT.transport,
     );
     expect(Date.now() - started).toBeLessThan(10_000);
-    expect(cap.stderr()).toContain("timed out after 1s");
+    expect(cap.stderr()).toContain("timed out after 1.0s");
     expect(cap.stdout()).toBe("");
   });
 
@@ -706,7 +706,7 @@ describe("doctor", () => {
     const called = hub.toolCalls.map((c) => c.tool);
     expect(called).toEqual(["list-vaults", "create-note", "query-notes", "delete-note"]);
     for (const call of hub.toolCalls.slice(1)) {
-      expect(String(call.args.path ?? call.args.id)).toStartWith(".parachute/doctor/");
+      expect(String(call.args.path ?? call.args.id)).toStartWith(".doctor/");
     }
     expectCleanAuth(hub);
   });

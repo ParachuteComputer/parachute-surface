@@ -139,7 +139,7 @@ $ parachute-mcp doctor
 PASS  key     signing as npub1abc… (from config "keyFile")
 PASS  hub     https://uni.example.ts.net/mcp: initialize + tools/list ok, 21 tools — server parachute-account 0.1.0
 PASS  vaults  2 reachable: uni, team (grant covers this listed subset)
-PASS  write   uni: created, read back byte-exact, deleted — .parachute/doctor/npub1abcdefg-20260902T041500Z
+PASS  write   uni: created, read back byte-exact, deleted — .doctor/npub1abcdefg-20260902T041500Z
 
 PASS — 4/4 checks passed
 $ echo $?
@@ -331,18 +331,22 @@ when the key never loaded is noise, not diagnosis.
 |---|---|---|
 | `key` | A signing key resolved. Prints the **npub** and which of the three sources supplied it — never the secret, never the key file's path. | No key: `FAIL` with the resolution order, exit `1`. |
 | `hub` | A NIP-98-signed `initialize` + `tools/list` against the hub's `/mcp` door. Reports the tool count and the server name/version when the hub sends one. | Unreachable/timeout: exit `2`. Signature rejected (`401`/`403`): exit `3`. |
-| `vaults` | `list-vaults` — which vaults this key can reach, and whether the grant covers **all** of the hub's vaults or a listed subset. Zero vaults is a `PASS` with an honest reason: the key authenticates and holds no grant. | Tool error: exit `4`. `SKIP` when the door exposes no `list-vaults` (i.e. it is a vault door, not an account door). |
+| `vaults` | `list-vaults` — which vaults this key can reach, and whether the grant covers **all** of the hub's vaults or a listed subset. | Tool error: exit `4`. **Zero reachable vaults is a FAIL, exit `4`** — the key authenticates and can reach nothing, which is not working access. `SKIP` when the door exposes no `list-vaults` (i.e. it is a vault door, not an account door). |
 | `write` | A real round-trip: create a note, read it back **byte-exact**, delete it. | Refused / mismatch: exit `4`. |
 
 The write probe only runs when `--vault <name>` is given, or exactly one vault
 is reachable — with several vaults and no `--vault` it `SKIP`s and says which
-flag to pass. It writes **only** under `.parachute/doctor/`, to a path
+flag to pass. It writes **only** under `.doctor/`, to a path
 namespaced by the caller's npub prefix and a timestamp
-(`.parachute/doctor/npub1abcdefg-20260902T041500Z`), so two agents doctoring
+(`.doctor/npub1abcdefg-20260902T041500Z`), so two agents doctoring
 the same vault in the same second cannot collide. The path is re-checked
-against that prefix immediately before the create *and* before the delete.
-Cleanup runs even when the read-back fails, so a failed probe leaves nothing
-behind; if the door exposes no `delete-note`, the note is relabelled
+against that prefix immediately before the create *and* before the delete. It
+is deliberately **not** under `.parachute/`, which is the vault's own metadata
+namespace — a commit touching only that prefix is treated as metadata-only and
+skipped.
+Cleanup runs even when the read-back fails, and after a create that timed out
+(the hub may have committed it before the answer was lost), so a failed probe
+leaves nothing behind; if the door exposes no `delete-note`, the note is relabelled
 "doctor probe, safe to delete" and the step says so rather than claiming it
 tidied up.
 
@@ -467,7 +471,8 @@ connect, `tools/list`, `tools/call`, the session `DELETE`, and the `http`
 fetch. Without it, a hub that accepts the connection and then never answers
 hangs the command forever, which for an agent is worse than any error: the
 shell-out never returns and there is nothing to report. A timeout exits `2`
-with a content-free `timed out after Ns`.
+with a content-free `timed out after Ns` (one decimal, so a sub-second
+`--timeout 0.3` reports `0.3s` rather than `0s`).
 
 ### Exit codes
 

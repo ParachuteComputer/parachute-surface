@@ -34,7 +34,10 @@ export class UsageError extends Error {}
 export class TimeoutError extends Error {
   constructor(ms: number) {
     // Content-free by construction — no URL, no arguments, nothing to leak.
-    super(`timed out after ${Math.round(ms / 1000)}s`);
+    // One decimal, not a whole second: `--timeout 0.3` used to report "timed
+    // out after 0s", which reads as a bug in the tool rather than as the
+    // sub-second budget the caller actually asked for.
+    super(`timed out after ${(ms / 1000).toFixed(1)}s`);
   }
 }
 

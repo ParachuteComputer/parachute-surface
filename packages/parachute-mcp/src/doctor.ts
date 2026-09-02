@@ -11,6 +11,10 @@
  * README's exit-code table for why that matters) is not evidence. `doctor`
  * turns all four into one exit code and four PASS/FAIL lines.
  *
+ * Exit 0 therefore means all four: a key resolved, the hub accepts its
+ * signature, the grant reaches at least one vault, and (when there is one
+ * vault to aim at) a note round-trips. A grant that reaches nothing exits 4.
+ *
  * The steps run in dependency order and STOP at the first hard failure —
  * reporting "vaults: FAIL" when the key never loaded is noise, not diagnosis.
  * A step that cannot apply (no `list-vaults` tool; no single vault to write
@@ -51,8 +55,14 @@ const UPDATE_NOTE_TOOL = "update-note";
  * before the create AND before the delete: a probe that wrote to, or worse
  * deleted, a real note because a name got composed wrong would be a far larger
  * failure than the one it was diagnosing.
+ *
+ * NOT `.parachute/` — that is the vault's own metadata namespace, and the
+ * vault treats a commit touching only `.parachute/` as metadata-only and skips
+ * it (parachute-vault `shouldCommit`, reason `parachute_meta_only`). A probe
+ * filed there would be invisible to the export/commit path it rides on, which
+ * is the opposite of what a diagnostic wants.
  */
-export const PROBE_PATH_PREFIX = ".parachute/doctor/";
+export const PROBE_PATH_PREFIX = ".doctor/";
 
 export type StepName = "key" | "hub" | "vaults" | "write";
 export type StepStatus = "pass" | "fail" | "skip";
@@ -277,15 +287,26 @@ async function callOrFail(
   step: StepName,
   name: string,
   args: Record<string, unknown>,
+  /**
+   * Carried onto the FAILURE, not just the pass. For the write probe this is
+   * `{ vault, path }`, so a `--json` consumer whose create timed out can find
+   * the note that may have been left behind without parsing the reason string.
+   */
+  details?: Record<string, unknown>,
 ): Promise<CallToolResult> {
   let result: CallToolResult;
   try {
     result = await session.callTool(name, args);
   } catch (err) {
-    throw fail(step, `${name}: ${messageOf(err)}`, deps.classify(err, "tool"));
+    throw fail(step, `${name}: ${messageOf(err)}`, deps.classify(err, "tool"), details);
   }
   if (result.isError) {
-    throw fail(step, `${name}: ${anyText(result) || "tool returned an error"}`, EXIT.toolError);
+    throw fail(
+      step,
+      `${name}: ${anyText(result) || "tool returned an error"}`,
+      EXIT.toolError,
+      details,
+    );
   }
   return result;
 }
@@ -368,8 +389,21 @@ export async function runDoctor(opts: DoctorOptions, deps: DoctorDeps): Promise<
           EXIT.toolError,
         );
       }
-      // An empty list is a real, actionable answer, not an error: the key
-      // authenticated and holds no vault grant. Say exactly that.
+      // Zero vaults is a FAILURE, not a pass with a caveat. Exit 0 is
+      // documented to mean "the grant reaches a vault and a write round-trips";
+      // a key that authenticates and can reach nothing has not got working
+      // access, and reporting PASS here would make `doctor` agree with the
+      // exact confusion it exists to remove. Exit 4 — the hub is fine, the
+      // grant is not.
+      if (listing.names.length === 0) {
+        throw fail(
+          "vaults",
+          "0 vaults reachable — the key authenticates but holds no vault grant; " +
+            "ask a hub admin for a grant (grant-access) on this npub",
+          EXIT.toolError,
+          { vaults: [], ...(listing.covered ? { covered: listing.covered } : {}) },
+        );
+      }
       const scope =
         listing.covered === "all"
           ? "grant covers ALL vaults on this hub"
@@ -379,9 +413,7 @@ export async function runDoctor(opts: DoctorOptions, deps: DoctorDeps): Promise<
       steps.push(
         pass(
           "vaults",
-          listing.names.length === 0
-            ? `0 vaults reachable — the key authenticates but holds no vault grant (${scope})`
-            : `${listing.names.length} reachable: ${listing.names.join(", ")} (${scope})`,
+          `${listing.names.length} reachable: ${listing.names.join(", ")} (${scope})`,
           {
             vaults: listing.names,
             ...(listing.covered ? { covered: listing.covered } : {}),
@@ -399,9 +431,7 @@ export async function runDoctor(opts: DoctorOptions, deps: DoctorDeps): Promise<
           "write",
           listing === undefined
             ? "no vault listing and no --vault <name> — nothing to write to"
-            : listing.names.length === 0
-              ? "no reachable vault to write to"
-              : `${listing.names.length} vaults reachable — pass --vault <name> to test a write`,
+            : `${listing.names.length} vaults reachable — pass --vault <name> to test a write`,
         ),
       );
     } else if (!has(CREATE_NOTE_TOOL) || !has(READ_NOTES_TOOL)) {
@@ -443,7 +473,30 @@ async function writeRoundTrip(
   const content = probeContent(now);
   assertProbePath(path);
 
-  await callOrFail(session, deps, "write", CREATE_NOTE_TOOL, { vault, path, content });
+  try {
+    await callOrFail(
+      session,
+      deps,
+      "write",
+      CREATE_NOTE_TOOL,
+      { vault, path, content },
+      { vault, path },
+    );
+  } catch (err) {
+    // A REFUSAL (exit 4 — "read-only grant", "vault not covered") means the hub
+    // decided not to write: there is nothing to sweep, and a delete against a
+    // read-only grant would only add a second, misleading error.
+    //
+    // A TIMEOUT or transport failure is an UNKNOWN, not a no. The hub may have
+    // committed the note and lost the answer, which fails the step with the
+    // probe still sitting in the vault — exactly the litter this command must
+    // not leave. Sweep the path; `removeProbe` re-asserts the namespace, and
+    // deleting something that was never written is harmless.
+    if (err instanceof StepFailure && err.exitCode !== EXIT.toolError) {
+      await removeProbe(session, deps, vault, path, has);
+    }
+    throw err;
+  }
 
   let cleanup = "";
   try {

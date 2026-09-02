@@ -39,7 +39,7 @@ CLI mode (one-shot commands, for agents that shell out):
         key     resolve the signing key; prints the npub, never the secret
         hub     NIP-98-signed initialize + tools/list against the hub door
         vaults  list-vaults — which vaults this key can reach
-        write   create a note under .parachute/doctor/, read it back
+        write   create a note under .doctor/, read it back
                 byte-exact, delete it (only with --vault, or when exactly one
                 vault is reachable; it never writes anywhere else)
       Exit 0 means all of that worked. --json emits one object instead.
