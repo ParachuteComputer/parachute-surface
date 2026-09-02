@@ -210,10 +210,16 @@ async function main(): Promise<void> {
 function invokedAsEntry(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
   try {
-    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+    return realpathSync(self) === realpathSync(entry);
   } catch {
-    return false;
+    // A `bun build --compile` single-file binary runs out of a VIRTUAL
+    // filesystem (`/$bunfs/root/<name>`), where realpathSync throws ENOENT for
+    // BOTH sides — so the resolved compare above can never answer "yes" and the
+    // binary would exit 0 in silence, having done nothing. Both sides still
+    // name the same virtual path, so fall back to comparing them unresolved.
+    return self === entry;
   }
 }
 
