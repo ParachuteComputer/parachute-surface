@@ -45,7 +45,7 @@ or emulated CPU it dies with SIGILL — rebuild with
 
 ```sh
 # pick your platform: linux-x64 | linux-arm64 | darwin-arm64 | darwin-x64
-VERSION=0.1.0
+VERSION=0.2.0-rc.2
 PLATFORM=linux-x64
 curl -fsSL -o /usr/local/bin/parachute-mcp \
   "https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}/parachute-mcp-${VERSION}-${PLATFORM}"
@@ -293,7 +293,7 @@ from the GitHub release `mcp-v<version>`, **verify the checksum**, and point
 the harness at the absolute path:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.2.0-rc.2
 PLATFORM=linux-x64
 BASE="https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}"
 curl -fsSL -O "${BASE}/parachute-mcp-${VERSION}-${PLATFORM}"
