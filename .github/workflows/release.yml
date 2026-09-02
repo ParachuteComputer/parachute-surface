@@ -16,6 +16,12 @@
 #                                     single-file binaries to its Release —
 #                                     the install path for sandboxes with
 #                                     neither Node nor registry egress.
+#                                     Those binaries are BUILT FIRST
+#                                     (`build-mcp-binaries`), and the npm
+#                                     publish depends on that build: a compile
+#                                     failure must not be able to leave a
+#                                     version on npm whose Release has no
+#                                     assets (#229).
 #   - docs-editor release tarball   ← tag prefix `docs-editor-v...` (tag-only)
 #   - meeting-ingest release tarball ← tag prefix `meeting-ingest-v...` (tag-only)
 #   - meeting-mcp release tarball   ← tag prefix `meeting-mcp-v...` (tag-only)
@@ -541,9 +547,108 @@ jobs:
           echo "publishing @openparachute/surface-server with dist-tag=$DIST_TAG"
           npm publish --tag "$DIST_TAG" --access public --provenance
 
+  # Build the four single-file binaries BEFORE anything is published (#229).
+  #
+  # The ordering IS the fix. The cross-compile is the fallible half of an mcp
+  # release; `npm publish` and `gh release upload` are the near-infallible
+  # half. Building first means a compile failure aborts the release while it is
+  # still abortable. Before this, binaries were built AFTER the publish, so a
+  # build failure left the version on npm and the tag in git with a Release
+  # carrying no assets — the README's sandbox install path (`curl` the release
+  # asset) then 404s for that version, which is the exact "released without
+  # binaries" state this job exists to prevent, reached from the other side.
+  #
+  # This job holds no write permission of any kind: it publishes nothing and
+  # cuts no Release, it only hands `release-mcp-binaries` an artifact.
+  #
+  # Its `if` is character-for-character `publish-mcp-npm`'s, so the build and
+  # the publish can never disagree about whether this run is an mcp release —
+  # and the #227 stable-from-main gate (a stable tag push makes `plan` output
+  # `mcp=false`) now stops the build too, one job earlier than before.
+  build-mcp-binaries:
+    name: build parachute-mcp single-file binaries
+    needs: [plan, test]
+    if: ${{ needs.plan.outputs.mcp == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'mcp-')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+      - name: install deps
+        # Workspace install at root — the compile bundles the package's real
+        # dependencies (@modelcontextprotocol/sdk, nostr-tools).
+        run: bun install --frozen-lockfile
+      - name: resolve version and tag
+        id: v
+        # On a tag push the tag is authoritative and must match package.json
+        # (same drift defense as the npm jobs). On the merge path package.json
+        # is authoritative and names the tag `tag-record` will push.
+        # Both values are job outputs: `release-mcp-binaries` reads them
+        # instead of re-deriving them from a second checkout.
+        run: |
+          PKG_VERSION=$(bun -e "console.log(require('./packages/parachute-mcp/package.json').version)")
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#mcp-v}"
+            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::packages/parachute-mcp/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+              exit 1
+            fi
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="mcp-v$PKG_VERSION"
+          fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: build single-file binaries (all targets, one runner)
+        # `bun build --compile` cross-compiles every target from this x64 Linux
+        # runner — no matrix, no per-platform toolchain. The script runs the
+        # package's own `bun run build` first, so the binaries are compiled from
+        # the exact dist/cli.js the npm `bin` executes.
+        working-directory: packages/parachute-mcp
+        run: bun scripts/build-binaries.ts
+      - name: verify the linux-x64 binary actually runs
+        # The runner IS linux-x64, so one of the four artifacts can be executed
+        # here. A compiled bundle that silently does nothing (the entry-point
+        # trap: realpathSync throws inside bun's virtual filesystem) would still
+        # exit 0 — so assert on the VERSION IT PRINTS, not on the exit code.
+        # This runs BEFORE the npm publish now: a binary that doesn't work is a
+        # release that never happens, rather than a version already on npm.
+        working-directory: packages/parachute-mcp
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          BIN="release/parachute-mcp-$V-linux-x64"
+          chmod +x "$BIN"
+          OUT="$("$BIN" --version)"
+          if [ "$OUT" != "$V" ]; then
+            echo "::error::$BIN printed '$OUT', expected '$V'"
+            exit 1
+          fi
+          "$BIN" --help > /dev/null
+          echo "linux-x64 binary reports $OUT"
+          ls -l release/
+          cat release/SHA256SUMS
+      - name: upload the binaries for the release job
+        # The artifact zip does NOT preserve the executable bit — which costs
+        # nothing, because `gh release upload` stores bytes and the README
+        # already tells operators to `chmod +x` what they download. The one
+        # place the bit matters (running the binary) happened in the step
+        # above, on the machine that built it.
+        uses: actions/upload-artifact@v4
+        with:
+          name: parachute-mcp-binaries-${{ steps.v.outputs.version }}
+          path: packages/parachute-mcp/release/
+          if-no-files-found: error
+          retention-days: 7
+
   publish-mcp-npm:
     name: publish @openparachute/mcp to npm
-    needs: [plan, test]
+    needs: [plan, test, build-mcp-binaries]
     # mcp-only: gate on the `mcp-v...` tag prefix. `meeting-mcp-v...` does NOT
     # start with `mcp-`, so the two namespaces cannot collide.
     if: ${{ needs.plan.outputs.mcp == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'mcp-')) }}
@@ -964,7 +1069,12 @@ jobs:
 
   release-mcp-binaries:
     name: attach parachute-mcp single-file binaries to a GitHub Release
-    needs: [plan, test, publish-mcp-npm]
+    needs: [plan, test, build-mcp-binaries, publish-mcp-npm]
+    # Attach-only since #229: every binary was compiled and executed by
+    # `build-mcp-binaries` before `publish-mcp-npm` ran, so all that is left
+    # here is downloading an artifact and uploading it. Nothing fallible is
+    # left downstream of the npm publish.
+    #
     # Both release paths, because the binaries are a SECOND distribution of the
     # same version and must not fall out of step with npm:
     #   - tag push of `mcp-v...`, but ONLY when `plan` also says publish. The
@@ -972,10 +1082,12 @@ jobs:
     #     without `needs.plan.outputs.mcp == 'true'`, pushing `mcp-v1.0.0` at
     #     ANY commit would skip npm (plan refuses a stable on a tag push) and
     #     still cut a GitHub Release with `contents: write` — a release nobody
-    #     reviewed, from code that never went through main. rc tags are
-    #     unaffected: decidePublish short-circuits `isTagPush` to publish:true
-    #     for an rc (release-plan.ts), including a re-push of one already on
-    #     npm, so an rc tag still reaches this job.
+    #     reviewed, from code that never went through main. That gate now also
+    #     stops `build-mcp-binaries` (same `if`), so a stable tag at a non-main
+    #     commit produces no artifact to attach either. rc tags are unaffected:
+    #     decidePublish short-circuits `isTagPush` to publish:true for an rc
+    #     (release-plan.ts), including a re-push of one already on npm, so an
+    #     rc tag still reaches this job.
     #   - publish-on-merge, once publish-mcp-npm has actually published. The tag
     #     `tag-record` pushes uses GITHUB_TOKEN and therefore CANNOT start this
     #     workflow — without this branch of the condition, every merge-driven
@@ -983,82 +1095,40 @@ jobs:
     #     STABLE binaries ship: a stable tag push can never satisfy the clause
     #     above, by design.
     # `always()` is needed only because publish-mcp-npm may be SKIPPED on the
-    # tag path (its own `if` is prefix-gated); the explicit `plan`/`test` result
-    # checks below are what keep a FAILED or SKIPPED upstream job from letting
-    # this one through. `meeting-mcp-v...` does not start with `mcp-`, so the
-    # two tag namespaces cannot collide.
-    if: ${{ always() && needs.test.result == 'success' && needs.plan.result == 'success' && ((github.ref_type == 'tag' && needs.plan.outputs.mcp == 'true' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')) }}
+    # tag path (its own `if` is prefix-gated); the explicit `plan`/`test`/
+    # `build-mcp-binaries` result checks below are what keep a FAILED or
+    # SKIPPED upstream job from letting this one through — in particular a
+    # failed compile can no longer be carried past by `always()`.
+    # `meeting-mcp-v...` does not start with `mcp-`, so the two tag namespaces
+    # cannot collide.
+    if: ${{ always() && needs.test.result == 'success' && needs.plan.result == 'success' && needs.build-mcp-binaries.result == 'success' && ((github.ref_type == 'tag' && needs.plan.outputs.mcp == 'true' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       # gh release create + upload.
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
+      # No checkout: every `gh` call below names --repo explicitly and the
+      # binaries arrive as an artifact, so this job touches no source at all.
+      - name: download the pre-built binaries
+        uses: actions/download-artifact@v4
         with:
-          bun-version: 1.4
-      - name: install deps
-        # Workspace install at root — the compile bundles the package's real
-        # dependencies (@modelcontextprotocol/sdk, nostr-tools).
-        run: bun install --frozen-lockfile
-      - name: resolve version and tag
-        id: v
-        # On a tag push the tag is authoritative and must match package.json
-        # (same drift defense as the npm jobs). On the merge path package.json
-        # is authoritative and names the tag `tag-record` will push.
-        run: |
-          PKG_VERSION=$(bun -e "console.log(require('./packages/parachute-mcp/package.json').version)")
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG_VERSION="${GITHUB_REF_NAME#mcp-v}"
-            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-              echo "::error::packages/parachute-mcp/package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
-              exit 1
-            fi
-            TAG="$GITHUB_REF_NAME"
-          else
-            TAG="mcp-v$PKG_VERSION"
-          fi
-          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: build single-file binaries (all targets, one runner)
-        # `bun build --compile` cross-compiles every target from this x64 Linux
-        # runner — no matrix, no per-platform toolchain. The script runs the
-        # package's own `bun run build` first, so the binaries are compiled from
-        # the exact dist/cli.js the npm `bin` executes.
-        working-directory: packages/parachute-mcp
-        run: bun scripts/build-binaries.ts
-      - name: verify the linux-x64 binary actually runs
-        # The runner IS linux-x64, so one of the four artifacts can be executed
-        # here. A compiled bundle that silently does nothing (the entry-point
-        # trap: realpathSync throws inside bun's virtual filesystem) would still
-        # exit 0 — so assert on the VERSION IT PRINTS, not on the exit code.
-        working-directory: packages/parachute-mcp
-        run: |
-          V="${{ steps.v.outputs.version }}"
-          BIN="release/parachute-mcp-$V-linux-x64"
-          chmod +x "$BIN"
-          OUT="$("$BIN" --version)"
-          if [ "$OUT" != "$V" ]; then
-            echo "::error::$BIN printed '$OUT', expected '$V'"
-            exit 1
-          fi
-          "$BIN" --help > /dev/null
-          echo "linux-x64 binary reports $OUT"
-          ls -l release/
-          cat release/SHA256SUMS
+          name: parachute-mcp-binaries-${{ needs.build-mcp-binaries.outputs.version }}
+          path: release
       - name: create the GitHub Release if none exists, attach the binaries
         # Tag-triggered runs have no Release object yet; merge-triggered runs
         # may not even have the tag yet (`tag-record` pushes it after the
         # publish jobs), so `--target $GITHUB_SHA` creates it at this commit —
         # the same commit tag-record would tag, which makes the duplicate
         # push it then attempts a harmless no-op. --clobber makes re-runs
-        # idempotent.
-        working-directory: packages/parachute-mcp
+        # idempotent. The version and tag come from `build-mcp-binaries`, which
+        # resolved them against package.json and (on a tag push) the tag.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ steps.v.outputs.tag }}"
-          V="${{ steps.v.outputs.version }}"
+          TAG="${{ needs.build-mcp-binaries.outputs.tag }}"
+          V="${{ needs.build-mcp-binaries.outputs.version }}"
+          ls -l release/
+          cat release/SHA256SUMS
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             PRERELEASE_FLAG=""
             if [[ "$TAG" =~ -rc\. ]]; then

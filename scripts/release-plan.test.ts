@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -381,6 +381,117 @@ describe("disallowedStablePromotionPaths", () => {
       ]),
     ).toEqual([]);
   });
+
+  test("the mcp suffix-drop is a suffix-drop too (surface#231)", () => {
+    // packages/parachute-mcp reached SURFACE_NPM_TAG_PREFIX in #227 without
+    // reaching the allow-list. These are the exact three files an
+    // `0.2.0-rc.N` → `0.2.0` promotion has to touch; unlisted, ALL THREE read
+    // as new code and the first stable `mcp-v0.2.0` is refused by a gate meant
+    // to catch source changes.
+    expect(
+      disallowedStablePromotionPaths([
+        "packages/parachute-mcp/package.json",
+        "packages/parachute-mcp/CHANGELOG.md",
+        "packages/parachute-mcp/src/version.ts",
+        "bun.lock",
+      ]),
+    ).toEqual([]);
+  });
+
+  test("mcp SOURCE is still new code — the list widened, it did not open", () => {
+    expect(
+      disallowedStablePromotionPaths([
+        "packages/parachute-mcp/package.json",
+        "packages/parachute-mcp/src/server.ts",
+      ]),
+    ).toEqual(["packages/parachute-mcp/src/server.ts"]);
+  });
+
+  test("every publishable package's suffix-drop files are allowed — pins the list to SURFACE_NPM_TAG_PREFIX", () => {
+    // The drift guard surface#231 asks for. Adding a package to the tag-prefix
+    // map without adding it here doesn't fail anything until that package's
+    // FIRST STABLE, possibly months later, in a job nobody is watching.
+    const repoRoot = join(import.meta.dir, "..");
+    for (const dir of Object.keys(SURFACE_NPM_TAG_PREFIX)) {
+      const suffixDropFiles = [`${dir}/package.json`];
+      for (const rel of ["CHANGELOG.md", "src/version.ts"]) {
+        // Optional per package — doc-schema has no changelog; surface-host and
+        // surface-server have no generated version.ts. Required the moment the
+        // file exists, because a suffix-drop necessarily rewrites it.
+        if (existsSync(join(repoRoot, dir, rel))) suffixDropFiles.push(`${dir}/${rel}`);
+      }
+      for (const path of suffixDropFiles) {
+        // Asserted one path at a time so a miss names the offending file.
+        expect(disallowedStablePromotionPaths([path])).toEqual([]);
+      }
+    }
+  });
+});
+
+/**
+ * The stable mcp promotion, through both halves of the gate (surface#231).
+ *
+ * `decidePublish` and the allow-list are separate checks in the
+ * `import.meta.main` block, and #231 was a hole in the second one only — the
+ * first said publish, the second called the version bump "new code". A test
+ * that exercises one half cannot see that.
+ */
+describe("@openparachute/mcp promotion", () => {
+  const suffixDropDiff = [
+    "packages/parachute-mcp/package.json",
+    "packages/parachute-mcp/CHANGELOG.md",
+    "packages/parachute-mcp/src/version.ts",
+    "bun.lock",
+  ];
+
+  test("a stable mcp-v0.2.0 is ACCEPTED by both halves when merged to main", () => {
+    expect(disallowedStablePromotionPaths(suffixDropDiff)).toEqual([]);
+    const d = decidePublish(
+      "0.2.0",
+      {
+        versionExists: false,
+        currentDistTagVersion: "0.1.0",
+        publishedVersions: ["0.1.0", "0.2.0-rc.1"],
+      },
+      { branch: "main" },
+    );
+    expect(d).toMatchObject({ publish: true });
+    expect(distTagFor("0.2.0")).toBe("latest");
+    expect(`${tagPrefixFor("packages/parachute-mcp")}0.2.0`).toBe("mcp-v0.2.0");
+  });
+
+  test("an rc still routes to the rc dist-tag — widening the allow-list changed nothing there", () => {
+    expect(distTagFor("0.2.0-rc.2")).toBe("rc");
+    const onNext = decidePublish(
+      "0.2.0-rc.2",
+      {
+        versionExists: false,
+        currentDistTagVersion: "0.2.0-rc.1",
+        publishedVersions: ["0.1.0", "0.2.0-rc.1"],
+      },
+      { branch: "next" },
+    );
+    expect(onNext).toMatchObject({ publish: true });
+    // An rc never consults the allow-list at all (it is not a promotion), and
+    // an explicit rc tag push still short-circuits the registry guards.
+    expect(decidePublish("0.2.0-rc.2", { ambiguous: true }, { isTagPush: true })).toMatchObject({
+      publish: true,
+    });
+    expect(`${tagPrefixFor("packages/parachute-mcp")}0.2.0-rc.2`).toBe("mcp-v0.2.0-rc.2");
+  });
+
+  test("a stable mcp TAG PUSH is still refused — the allow-list is not a way around from-main", () => {
+    const d = decidePublish(
+      "0.2.0",
+      {
+        versionExists: false,
+        currentDistTagVersion: "0.1.0",
+        publishedVersions: ["0.1.0", "0.2.0-rc.1"],
+      },
+      { isTagPush: true },
+    );
+    expect(d).toMatchObject({ publish: false });
+  });
 });
 
 describe("rcTagListArgs / stablePromotionDiffArgs", () => {
@@ -628,6 +739,15 @@ describe("release.yml tag-record can see existing tags", () => {
  */
 describe("release.yml tag-push override (hub#841)", () => {
   const workflow = readFileSync(join(import.meta.dir, "../.github/workflows/release.yml"), "utf8");
+  /** Drop `#` comment lines — they name jobs and commands they don't run. */
+  const withoutComments = (yaml: string | undefined): string =>
+    (yaml ?? "")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+  /** One job's body, up to the next job key (2-space indent, not a comment). */
+  const jobBody = (name: string): string | undefined =>
+    workflow.match(new RegExp(`\\n {2}${name}:\\n([\\s\\S]*?)(?=\\n {2}[a-z][\\w-]*:\\n|$)`))?.[1];
 
   test("every plan step passes --tag-push on a tag push, nothing on a merge", () => {
     const flag = "${{ github.ref_type == 'tag' && '--tag-push' || '' }}";
@@ -673,13 +793,73 @@ describe("release.yml tag-push override (hub#841)", () => {
     // `mcp-v1.0.0` at any commit skips npm (plan refuses a stable on a tag
     // push) yet still cuts a GitHub Release with `contents: write`. And
     // `always()` must not be allowed to carry a FAILED plan through.
-    const job = workflow.match(
-      /\n {2}release-mcp-binaries:\n([\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
-    )?.[1];
+    const job = jobBody("release-mcp-binaries");
     expect(job).toBeTruthy();
     expect(job).toContain("needs.plan.outputs.mcp == 'true'");
     expect(job).toContain("needs.plan.result == 'success'");
     expect(job).toContain("needs.test.result == 'success'");
+    // And, since #229, a FAILED compile is not something `always()` can carry
+    // past either.
+    expect(job).toContain("needs.build-mcp-binaries.result == 'success'");
+  });
+
+  /**
+   * surface#229 — the binaries are built BEFORE the npm publish.
+   *
+   * The old order put the only fallible step (a four-target cross-compile)
+   * AFTER `npm publish` and after `tag-record` cut the tag. A build failure
+   * then left @openparachute/mcp@X on npm and `mcp-vX` in git with a Release
+   * carrying no assets — the README's sandbox install path (`curl` the release
+   * asset) 404s for that version. That is the "released without binaries"
+   * state the job exists to prevent, reached from the other side.
+   */
+  test("the binaries are built BEFORE the npm publish, which depends on that build (#229)", () => {
+    expect(workflow).toContain(
+      "  publish-mcp-npm:\n    name: publish @openparachute/mcp to npm\n    needs: [plan, test, build-mcp-binaries]\n",
+    );
+    const build = jobBody("build-mcp-binaries");
+    expect(build).toBeTruthy();
+    expect(build).toContain("bun scripts/build-binaries.ts");
+    expect(build).toContain("actions/upload-artifact");
+    // The fallible half holds no write token and ships nothing itself.
+    // Comments stripped — they discuss the release job by name.
+    expect(build).toContain("contents: read");
+    expect(build).not.toContain("contents: write");
+    expect(withoutComments(build)).not.toContain("gh release");
+    expect(withoutComments(build)).not.toContain("npm publish");
+  });
+
+  test("the release job only ATTACHES — nothing fallible is left downstream of the publish (#229)", () => {
+    const rel = jobBody("release-mcp-binaries");
+    expect(rel).toContain("needs: [plan, test, build-mcp-binaries, publish-mcp-npm]");
+    expect(rel).toContain("actions/download-artifact");
+    expect(rel).toContain("gh release upload");
+    // The compile must not have moved back down here.
+    expect(rel).not.toContain("bun scripts/build-binaries.ts");
+    // The artifact the release job downloads is the one the build job made.
+    expect(jobBody("build-mcp-binaries")).toContain(
+      "name: parachute-mcp-binaries-${{ steps.v.outputs.version }}",
+    );
+    expect(rel).toContain(
+      "name: parachute-mcp-binaries-${{ needs.build-mcp-binaries.outputs.version }}",
+    );
+  });
+
+  test("the build job is under the SAME gate as the npm publish — #227's gate, one job earlier", () => {
+    // A stable `mcp-vX.Y.Z` tag pushed at any commit makes `plan` output
+    // mcp=false, so the build skips, so the publish skips (needs), so the
+    // release job skips: `gh release create` is still unreachable on that path.
+    const gate =
+      "needs.plan.outputs.mcp == 'true' && (github.ref_type != 'tag' || startsWith(github.ref_name, 'mcp-'))";
+    expect(jobBody("build-mcp-binaries")).toContain(gate);
+    expect(jobBody("publish-mcp-npm")).toContain(gate);
+  });
+
+  test("the mcp publish is still OIDC/trusted-publishing, unchanged by the reorder", () => {
+    const publish = jobBody("publish-mcp-npm");
+    expect(publish).toContain("id-token: write");
+    expect(publish).toContain('npm publish --tag "$DIST_TAG" --access public --provenance');
+    expect(publish).not.toContain("NPM_TOKEN");
   });
 
   test("npm dist-tag is derived from package.json version, not github.ref_name (hub#792)", () => {
