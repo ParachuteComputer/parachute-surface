@@ -3,7 +3,10 @@
  * file is the process entry point (invokedAsEntry guard), never on import.
  */
 import { describe, expect, test } from "bun:test";
-import { parseArgs } from "../cli.js";
+import { nsecEncode } from "nostr-tools/nip19";
+import { generateSecretKey } from "nostr-tools/pure";
+import { formatLogLine, parseArgs } from "../cli.js";
+import { resolveConfig } from "../config.js";
 
 describe("parseArgs", () => {
   test("no args → no config, no url, no flags", () => {
@@ -51,5 +54,36 @@ describe("parseArgs", () => {
       version: true,
       help: false,
     });
+  });
+});
+
+describe("bridge-mode stderr is scrubbed", () => {
+  test("a --config value that is actually an nsec is never echoed", () => {
+    // The likeliest way a key ends up in a log: pasting an nsec where a PATH
+    // belongs. config.ts is careful never to echo file CONTENTS, but the path
+    // itself lands in the ENOENT message, and bridge mode writes that straight
+    // to stderr. CLI mode already scrubbed; this pins bridge mode too.
+    const nsec = nsecEncode(generateSecretKey());
+    let message = "";
+    try {
+      resolveConfig({ configFlag: nsec, env: {}, home: "/nonexistent", warn: () => {} });
+      throw new Error("expected resolveConfig to throw");
+    } catch (err) {
+      message = (err as Error).message;
+    }
+
+    // The raw error DOES carry it — which is exactly why the wrapper exists.
+    expect(message).toContain(nsec);
+
+    const line = formatLogLine(message);
+    expect(line).not.toContain(nsec);
+    expect(line).toContain("nsec1[redacted]");
+    // Still a usable diagnostic, not a blanked-out line.
+    expect(line).toContain("cannot read config file");
+    expect(line.startsWith("[parachute-mcp] ")).toBe(true);
+  });
+
+  test("an ordinary bridge-mode line passes through untouched", () => {
+    expect(formatLogLine("ready on stdio")).toBe("[parachute-mcp] ready on stdio\n");
   });
 });

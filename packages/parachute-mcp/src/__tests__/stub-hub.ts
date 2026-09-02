@@ -42,6 +42,8 @@ export class StubHub {
   readonly seenEventIds = new Set<string>();
   readonly toolCalls: ToolCallRecord[] = [];
   readonly issuedSessions: string[] = [];
+  /** Every HTTP method seen, in order — lets a test assert the session DELETE. */
+  readonly methods: string[] = [];
   /** Requests that carried an Authorization header (each must sign fresh). */
   authedRequests = 0;
 
@@ -118,6 +120,7 @@ export class StubHub {
   }
 
   private async handle(req: Request): Promise<Response> {
+    this.methods.push(req.method);
     const body =
       req.method === "GET" || req.method === "DELETE"
         ? new Uint8Array()

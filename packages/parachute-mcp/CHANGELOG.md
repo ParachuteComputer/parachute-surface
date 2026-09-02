@@ -34,6 +34,49 @@
   booted, matched nothing, and exited 0 in silence. It now falls back to
   comparing the unresolved paths.
 
+- **A CLI face on the same binary**, for agents that shell out instead of
+  running an MCP client (they were hand-rolling NIP-98 signing — a Python
+  re-implementation, a shell wrapper — to reach the same hubs). One artifact
+  now serves both shapes, over the same config resolution, the same key
+  resolution and the same signing code:
+  - `parachute-mcp tools [--hub <alias|url>] [--table]` — list the hubs' tools
+    as JSON (name + description) or a compact table. Several hubs and no
+    `--hub` → the bridge's `<alias>__<tool>` namespacing, so a name printed
+    here is a name `call` accepts.
+  - `parachute-mcp call <tool> [<json-args>] [--args -] [--hub <alias|url>]` —
+    one signed `tools/call`. A single text result prints as-is, anything else
+    as the JSON result. `--args -` reads the arguments from stdin, because
+    nested-shell JSON quoting is the most common way an agent's call goes
+    wrong.
+  - `parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']…` — a
+    signed curl for hub endpoints that are not tool calls. Response body to
+    stdout, status line and headers to stderr. The request body comes from
+    **stdin only** (never argv, which `ps` exposes); the `payload` tag is
+    present iff the body is non-empty; redirects are not followed, since the
+    signature pins one exact URL.
+- Exit-code contract shared by all three, documented in `--help` and the
+  README: `0` ok, `1` usage/config, `2` network/transport, `3` auth
+  (HTTP 401/403), `4` the tool returned `isError`.
+- Global flags may go **before or after** the subcommand
+  (`parachute-mcp --config c.json tools`, the `git -C` / `docker --host`
+  convention), including `--config` and `--timeout`.
+- `--timeout <seconds>` (default 60) bounds every request — MCP connect,
+  `tools/list`, `tools/call`, the session `DELETE`, and the `http` fetch —
+  and exits `2` with a content-free `timed out after Ns`. Without it a hub that
+  accepts the connection and never answers hangs the command forever.
+- `http`: a `3xx` exits `2` rather than `0`-with-an-empty-body (redirects are
+  not followed, so the request was not fulfilled). An invalid `-H` field name
+  is a usage error (exit 1) instead of a `TypeError` surfacing as exit 2.
+- `tools`: when every hub fails, stdout stays empty instead of printing `[]` —
+  which a JSON-consuming agent would read as "this hub has no tools" rather
+  than "the hub is unreachable".
+- A closed stdout pipe (`parachute-mcp tools | head -1`) exits 0 instead of
+  printing an EPIPE stack trace.
+- Bridge mode is unchanged — the subcommands are dispatched only when the first
+  non-flag argument is `tools`, `call` or `http`, and no hub URL can be one of
+  those words. `--version` is unchanged; `--help` gains the subcommands and
+  exit codes.
+
 ## 0.1.0
 
 Initial release — the official replacement for hand-built per-agent loopback

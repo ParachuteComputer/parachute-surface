@@ -14,6 +14,10 @@ holds the key locally and signs on the way out, the same layering as
 OAuth for clients that can't). One bridge process replaces the hand-built
 per-agent loopback signing proxies.
 
+The same binary also has a **CLI face** (`tools`, `call`, `http`) for agents
+that shell out rather than run an MCP client — same config, same key, same
+signing. See [CLI use](#cli-use-non-mcp-agents).
+
 ```
  MCP client (stdio) ──► parachute-mcp ──► https://hub-a/mcp   (NIP-98 signed)
                               │
@@ -159,6 +163,138 @@ env = { "PARACHUTE_MCP_CONFIG" = "/home/me/.config/parachute/mcp.json" }
 Any client that can spawn a stdio MCP server works the same way: command
 `parachute-mcp`, optional `--config <path>` arg or `PARACHUTE_MCP_CONFIG` /
 `PARACHUTE_NSEC_FILE` env.
+
+## CLI use (non-MCP agents)
+
+Not every agent runs an MCP client — plenty of them just *shell out*. Those
+agents were re-implementing NIP-98 signing to reach the same hubs (a Python
+port, a shell wrapper), which means the rules that actually matter — a fresh
+nonce per request, `u` equal to the exact URL, a `payload` tag if and only if
+there is a body — get re-derived per agent, and get them subtly wrong.
+
+So the same binary has a CLI face. Same config file, same key resolution, same
+signing code; three one-shot subcommands instead of a stdio server:
+
+### `tools` — what can I call?
+
+```sh
+$ parachute-mcp tools --table
+query-notes   Query notes in the vault by tag, text, metadata or graph distance
+create-note   Create a new note
+vault-info    Full schema + tag projection for this vault
+```
+
+Without `--table` it prints JSON (`[{ "name", "description" }, …]`) on stdout.
+With several hubs configured and no `--hub`, names are namespaced
+`<alias>__<tool>` exactly as the bridge namespaces them, so a name printed here
+is a name `call` accepts. `--hub <alias|url>` narrows to one hub (and drops the
+namespace).
+
+### `call` — run one tool
+
+**Prefer `--args -`, which reads the JSON object from stdin:**
+
+```sh
+$ parachute-mcp call create-note --args - <<'JSON'
+{"path": "Notes/From a shell.md", "content": "Quotes \" and $dollars and `ticks` survive."}
+JSON
+```
+
+Two reasons, and the second is the one that bites:
+
+1. There is no quoting layer to get wrong. For a nested shell — an agent
+   running `ssh host "…"`, or a tool call inside a heredoc inside a script —
+   getting a JSON literal through intact is genuinely hard.
+2. **A positional literal lands in this process's `argv`, which `ps` shows to
+   every user on the box.** Tool arguments are not automatically harmless:
+   they carry note bodies, tokens, and whatever the agent is working on. This
+   is the same exposure that makes `http` refuse a command-line body — the
+   difference is only that `call` still *allows* the convenient form.
+
+The positional form is fine for short, non-sensitive arguments:
+
+```sh
+$ parachute-mcp call query-notes '{"tag":"guide","limit":2}'
+{"notes":[…]}
+```
+
+A result that is a single text block is printed as-is; anything else is printed
+as the JSON result. A tool that returns `isError` prints its message to
+**stderr** and exits `4`, so `set -e` and `if` both do the right thing.
+
+### `http` — a signed curl
+
+For anything the hub serves under Nostr auth that isn't a tool call:
+
+```sh
+$ parachute-mcp http GET 'https://uni.example.ts.net/vault/uni/api/notes?tag=guide'
+< 200 OK
+< content-type: application/json
+{"notes":[…]}
+```
+
+The response body goes to **stdout**, the status line and headers to **stderr**,
+so `parachute-mcp http … | jq .` works unchanged. Request bodies come from
+**stdin only**:
+
+```sh
+$ jq -n '{path:"Notes/x.md",content:"hi"}' \
+    | parachute-mcp http POST https://uni.example.ts.net/vault/uni/api/notes \
+        --body - -H 'Content-Type: application/json'
+```
+
+There is deliberately no way to pass a body on the command line: argv is
+world-readable through `ps`, and bodies to a hub routinely carry secrets. The
+NIP-98 `payload` tag is added if and only if the body is non-empty, and
+redirects are **not** followed — the signature pins one exact URL, so a
+followed redirect would be signed for the wrong target. A `3xx` is reported
+as-is (like `curl` without `-L`) and **exits `2`**: the request did not do what
+was asked, and an empty body with exit `0` is the worst possible answer for a
+caller that branches on the exit code.
+
+### Common flags
+
+`--config <path>` and `--timeout <seconds>` work on all three subcommands, and
+may go **before or after** the subcommand — these are the same command:
+
+```sh
+$ parachute-mcp --config ~/hubs.json tools
+$ parachute-mcp tools --config ~/hubs.json
+```
+
+(That is the `git -C dir status` / `docker --host h ps` convention. It is worth
+stating because the alternative is nasty: a flag placed before the subcommand
+used to fall through to bridge mode, where `tools` was read as a hub URL and
+the process sat there having printed nothing, with exit `0`.)
+
+`--timeout` defaults to **60 seconds** and bounds every request — the MCP
+connect, `tools/list`, `tools/call`, the session `DELETE`, and the `http`
+fetch. Without it, a hub that accepts the connection and then never answers
+hangs the command forever, which for an agent is worse than any error: the
+shell-out never returns and there is nothing to report. A timeout exits `2`
+with a content-free `timed out after Ns`.
+
+### Exit codes
+
+Every subcommand uses the same contract:
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | usage or configuration error (bad flags, no key, unknown hub or tool) |
+| `2` | network / transport failure, a **timeout**, or an HTTP response `>= 300` that is not an auth failure (redirects are deliberately not followed) |
+| `3` | authentication rejected by the hub (HTTP `401` / `403`) |
+| `4` | the tool ran and returned an error result (`isError`) |
+
+`tools` against several hubs still prints the tools of the hubs that answered
+and names the ones that did not on stderr, but exits with the worst code seen —
+a partial list never masquerades as a complete one. If **every** hub fails it
+prints nothing at all on stdout: an empty `[]` there would read to a
+JSON-consuming agent as "this hub has no tools" rather than "the hub is
+unreachable".
+
+Piping into `head` is safe — a closed pipe (`EPIPE`) exits `0` rather than
+printing a stack trace.
 
 ## Config reference
 
