@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7] - 2026-08-30
+
+Stable promotion of `0.3.7-rc.2` — suffix-drop, no code change. See the
+rc entries below for what 0.3.7 ships (refcounted live-list registry,
+surface#205). host / render / server exact pins move to `0.3.7` in the
+same commit.
+
 ## [0.3.7-rc.2] - 2026-08-29
 
 **Re-anchor recut; no code change vs 0.3.7-rc.1.** The stable-promotion gate

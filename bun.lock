@@ -115,7 +115,7 @@
     },
     "packages/parachute-mcp": {
       "name": "@openparachute/mcp",
-      "version": "0.1.0",
+      "version": "0.2.0-rc.1",
       "bin": {
         "parachute-mcp": "./dist/cli.js",
       },
@@ -145,7 +145,7 @@
     },
     "packages/surface-client": {
       "name": "@openparachute/surface-client",
-      "version": "0.3.7-rc.2",
+      "version": "0.3.7",
       "devDependencies": {
         "@types/bun": "^1.4.0",
         "typescript": "^5",
@@ -177,9 +177,9 @@
     },
     "packages/surface-render": {
       "name": "@openparachute/surface-render",
-      "version": "0.3.1-rc.1",
+      "version": "0.3.1",
       "dependencies": {
-        "@openparachute/surface-client": "0.3.7-rc.2",
+        "@openparachute/surface-client": "0.3.7",
       },
       "devDependencies": {
         "@testing-library/dom": "^10.4.0",

@@ -1,6 +1,6 @@
 # Changelog — @openparachute/mcp
 
-## Unreleased
+## [0.2.0-rc.1] - 2026-09-02
 
 - **`parachute-mcp doctor`** — one command that proves a harness has working
   Parachute access, and names the layer that broke when it doesn't. Four

@@ -2,4 +2,4 @@
 // Source of truth: package.json "version". Regenerated on every build
 // (prebuild). Mirrors account-client / surface-client #57 — keeps
 // PARACHUTE_MCP_VERSION from drifting.
-export const PARACHUTE_MCP_VERSION = "0.1.0";
+export const PARACHUTE_MCP_VERSION = "0.2.0-rc.1";
