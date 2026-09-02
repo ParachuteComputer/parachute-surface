@@ -87,7 +87,25 @@ for (const target of targets) {
   const outfile = join(outDir, name);
   console.log(`compiling ${target.bunTarget} → release/${name}`);
   await run(
-    ["bun", "build", "--compile", `--target=${target.bunTarget}`, entry, "--outfile", outfile],
+    [
+      "bun",
+      "build",
+      "--compile",
+      // A compiled Bun binary autoloads `.env` AND `bunfig.toml` from the
+      // PROCESS CWD by default (both default to true). That is a key-resolution
+      // hole this package must not have: a `.env` sitting in whatever directory
+      // the harness happens to launch from could set PARACHUTE_NSEC_FILE and
+      // redirect which key the bridge signs with — behaviour the Node path
+      // (`node dist/cli.js`) does not have at all. Config and key still come
+      // only from explicit flags/env/config file. (tsconfig/package.json
+      // autoload already default to false.)
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
+      `--target=${target.bunTarget}`,
+      entry,
+      "--outfile",
+      outfile,
+    ],
     pkgRoot,
   );
   built.push(name);

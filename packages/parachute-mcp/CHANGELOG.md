@@ -12,6 +12,13 @@
   Motivation: agent sandboxes with no Node runtime and no npm egress, where an
   `npx` MCP command turns every boot into a registry call — one hiccup and the
   harness crash-loops.
+- The compile disables Bun's `.env` and `bunfig.toml` autoload
+  (`--no-compile-autoload-dotenv`, `--no-compile-autoload-bunfig`). Both
+  default to ON for standalone binaries and read the **process cwd**, so a
+  `.env` in whatever directory a harness launched from could set
+  `PARACHUTE_NSEC_FILE` and redirect which key the bridge signs with — a hole
+  the Node path does not have. Explicit env vars, `--config` and the config
+  file are unaffected.
 - `release.yml`: `release-mcp-binaries` builds those binaries (all targets from
   one Linux runner, then executes the linux-x64 one and asserts on the version
   it prints) and attaches them to the GitHub Release for `mcp-v<version>`, on

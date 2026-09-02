@@ -664,8 +664,22 @@ describe("release.yml tag-push override (hub#841)", () => {
     // cannot start a workflow. If this job were tag-only (the tarball shape),
     // every publish-on-merge release would land on npm with no binaries.
     expect(workflow).toContain(
-      "(github.ref_type == 'tag' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')",
+      "(github.ref_type == 'tag' && needs.plan.outputs.mcp == 'true' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')",
     );
+  });
+
+  test("the mcp binaries job consults plan on the TAG path — the binary channel is not a stable-from-main bypass", () => {
+    // Without `needs.plan.outputs.mcp == 'true'` in the tag clause, pushing
+    // `mcp-v1.0.0` at any commit skips npm (plan refuses a stable on a tag
+    // push) yet still cuts a GitHub Release with `contents: write`. And
+    // `always()` must not be allowed to carry a FAILED plan through.
+    const job = workflow.match(
+      /\n {2}release-mcp-binaries:\n([\s\S]*?)(?=\n {2}[a-z][\w-]*:\n|$)/,
+    )?.[1];
+    expect(job).toBeTruthy();
+    expect(job).toContain("needs.plan.outputs.mcp == 'true'");
+    expect(job).toContain("needs.plan.result == 'success'");
+    expect(job).toContain("needs.test.result == 'success'");
   });
 
   test("npm dist-tag is derived from package.json version, not github.ref_name (hub#792)", () => {

@@ -967,16 +967,27 @@ jobs:
     needs: [plan, test, publish-mcp-npm]
     # Both release paths, because the binaries are a SECOND distribution of the
     # same version and must not fall out of step with npm:
-    #   - tag push of `mcp-v...` (the manual path, same shape as the tarball jobs);
+    #   - tag push of `mcp-v...`, but ONLY when `plan` also says publish. The
+    #     binary channel is subject to the same stable-from-main gate as npm:
+    #     without `needs.plan.outputs.mcp == 'true'`, pushing `mcp-v1.0.0` at
+    #     ANY commit would skip npm (plan refuses a stable on a tag push) and
+    #     still cut a GitHub Release with `contents: write` — a release nobody
+    #     reviewed, from code that never went through main. rc tags are
+    #     unaffected: decidePublish short-circuits `isTagPush` to publish:true
+    #     for an rc (release-plan.ts), including a re-push of one already on
+    #     npm, so an rc tag still reaches this job.
     #   - publish-on-merge, once publish-mcp-npm has actually published. The tag
     #     `tag-record` pushes uses GITHUB_TOKEN and therefore CANNOT start this
     #     workflow — without this branch of the condition, every merge-driven
-    #     release would ship to npm with no binaries attached.
-    # `always()` is needed only because publish-mcp-npm is SKIPPED on a tag
-    # re-push (plan sees the version already on npm); the tag clause below
-    # deliberately does not look at its result. `meeting-mcp-v...` does not
-    # start with `mcp-`, so the two tag namespaces cannot collide.
-    if: ${{ always() && needs.test.result == 'success' && ((github.ref_type == 'tag' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')) }}
+    #     release would ship to npm with no binaries attached. This is also how
+    #     STABLE binaries ship: a stable tag push can never satisfy the clause
+    #     above, by design.
+    # `always()` is needed only because publish-mcp-npm may be SKIPPED on the
+    # tag path (its own `if` is prefix-gated); the explicit `plan`/`test` result
+    # checks below are what keep a FAILED or SKIPPED upstream job from letting
+    # this one through. `meeting-mcp-v...` does not start with `mcp-`, so the
+    # two tag namespaces cannot collide.
+    if: ${{ always() && needs.test.result == 'success' && needs.plan.result == 'success' && ((github.ref_type == 'tag' && needs.plan.outputs.mcp == 'true' && startsWith(github.ref_name, 'mcp-')) || (github.ref_type != 'tag' && needs.publish-mcp-npm.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       # gh release create + upload.

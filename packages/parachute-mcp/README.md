@@ -26,6 +26,14 @@ Every release also ships **single-file executables** built with
 `bun build --compile` — a whole Bun runtime plus the bridge in one static file.
 No Node, no `node_modules`, no npm registry: the install is a download.
 
+Two platform caveats, both inherited from Bun's own build targets: the Linux
+binaries are **glibc**, not musl (they will not run on stock Alpine — use a
+`-slim`/glibc base, or build a musl one yourself with
+`bun build --compile --target=bun-linux-x64-musl`), and the x86-64 binary is
+Bun's non-baseline build, which requires **AVX2** (2013+ Intel/AMD; on an older
+or emulated CPU it dies with SIGILL — rebuild with
+`--target=bun-linux-x64-baseline`). The arm64 binaries have neither caveat.
+
 ```sh
 # pick your platform: linux-x64 | linux-arm64 | darwin-arm64 | darwin-x64
 VERSION=0.1.0
