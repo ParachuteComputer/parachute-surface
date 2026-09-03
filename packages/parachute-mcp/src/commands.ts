@@ -28,10 +28,12 @@ import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { MCP_TOOL_NAME_MAX_LENGTH, namespacedToolName } from "./bridge.js";
+import { type ChannelVaultLookup, lookupChannelVault } from "./channel-vault.js";
 import {
   type ChannelAction,
   type ChannelResult,
   DEFAULT_TAIL_BYTES,
+  deriveTarget,
   runChannelContext,
 } from "./channel.js";
 import { type HubEntry, type ResolvedConfig, resolveConfig } from "./config.js";
@@ -242,6 +244,10 @@ export interface DoctorCommand {
   hub?: string;
   /** `--vault <name>`: which vault the write round-trip probes. */
   vault?: string;
+  /** `--relay <wss-url>`: the `channel` step's relay. Defaults to `$BUZZ_RELAY_URL`. */
+  relay?: string;
+  /** `--channel <uuid>`: the `channel` step's channel. Defaults to the env. */
+  channel?: string;
   /** `--json`: one machine-readable object instead of the PASS/FAIL lines. */
   json: boolean;
   /** Per-request budget in ms (`--timeout`, seconds on the wire). */
@@ -253,11 +259,14 @@ export interface ChannelContextCommand {
   action: ChannelAction;
   config?: string;
   hub?: string;
-  /** `--vault <name>`: required for append/init, passed through on read. */
+  /**
+   * `--vault <name>`: optional everywhere. Absent on append/init, the vault is
+   * resolved from the hub's channel binding.
+   */
   vault?: string;
   /** `--relay <wss-url>`: defaults to `$BUZZ_RELAY_URL`. */
   relay?: string;
-  /** `--channel <uuid>`: defaults to `$BUZZ_CHANNEL_ID`. */
+  /** `--channel <uuid>`: defaults to `$BUZZ_CHANNEL_ID`, then `$BUZZ_GIT_ORIGIN_CHANNEL_ID`. */
   channel?: string;
   /** `--tail <bytes>`: how much of the note's end `read` prints. */
   tail: number;
@@ -392,6 +401,8 @@ function parseDoctor(argv: string[]): DoctorCommand {
     else if (isFlag(arg, "--config")) [cmd.config, i] = takeValue(argv, i, "--config");
     else if (isFlag(arg, "--hub")) [cmd.hub, i] = takeValue(argv, i, "--hub");
     else if (isFlag(arg, "--vault")) [cmd.vault, i] = takeValue(argv, i, "--vault");
+    else if (isFlag(arg, "--relay")) [cmd.relay, i] = takeValue(argv, i, "--relay");
+    else if (isFlag(arg, "--channel")) [cmd.channel, i] = takeValue(argv, i, "--channel");
     else if (isFlag(arg, "--timeout")) {
       let value: string;
       [value, i] = takeValue(argv, i, "--timeout");
@@ -942,6 +953,29 @@ function keySourceLabel(config: ResolvedConfig, env: NodeJS.ProcessEnv): string 
 }
 
 /**
+ * Ask the hub which vault backs `(relay, channel)`, over the SAME NIP-98
+ * signing path every other hub call in this package uses.
+ *
+ * The `fetch` is freshly signing per request (`makeSigningFetch`), because the
+ * hub burns event ids even on failed auth — a re-sent Authorization header is
+ * a rejected one.
+ */
+function channelVaultLookup(
+  hub: HubEntry,
+  key: LoadedKey,
+  timeoutMs: number,
+): (target: { relayHost: string; channelId: string }) => Promise<ChannelVaultLookup> {
+  return async (target) =>
+    await lookupChannelVault({
+      hubUrl: hub.url,
+      relayHost: target.relayHost,
+      channelId: target.channelId,
+      fetch: makeSigningFetch(key.sk),
+      timeoutMs,
+    });
+}
+
+/**
  * Wire the real config, key, MCP session and clock into the step runner in
  * doctor.ts. Everything here is plumbing; the policy — what a step means, when
  * it skips, what the probe writes — lives there and is unit-tested against a
@@ -964,6 +998,20 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
     return resolved;
   };
 
+  const soleDoctorHub = (): HubEntry => {
+    const { config } = resolveOnce();
+    const hubs = targetHubs(config, cmd.hub);
+    const only = hubs[0];
+    if (hubs.length !== 1 || !only) {
+      throw new UsageError(
+        `doctor checks one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
+          .map((h) => h.alias)
+          .join(", ")})`,
+      );
+    }
+    return only;
+  };
+
   const deps: DoctorDeps = {
     version: PARACHUTE_MCP_VERSION,
     now: () => new Date(),
@@ -971,22 +1019,31 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
       const { config, key } = resolveOnce();
       return { npub: key.npub, source: keySourceLabel(config, env) };
     },
-    resolveHub: () => {
-      const { config } = resolveOnce();
-      const hubs = targetHubs(config, cmd.hub);
-      const only = hubs[0];
-      if (hubs.length !== 1 || !only) {
-        throw new UsageError(
-          `doctor checks one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
-            .map((h) => h.alias)
-            .join(", ")})`,
-        );
-      }
-      return only;
-    },
+    resolveHub: soleDoctorHub,
     openSession: async (hub): Promise<DoctorSession> =>
       await HubSession.open(hub, makeSigningFetch(resolveOnce().key.sk), cmd.timeout),
     classify: classifyError,
+    // The `channel` step's two injected halves. `deriveTarget` throws a
+    // UsageError naming the missing flag; the step reports that verbatim as
+    // its SKIP reason, which is exactly the "how do I make this run?" line an
+    // operator needs.
+    channelTarget: () => {
+      try {
+        const target = deriveTarget(
+          {
+            ...(cmd.relay !== undefined ? { relay: cmd.relay } : {}),
+            ...(cmd.channel !== undefined ? { channel: cmd.channel } : {}),
+          },
+          env,
+          "doctor",
+        );
+        return { ok: true, target: { relayHost: target.relayHost, channelId: target.channelId } };
+      } catch (err) {
+        return { ok: false, reason: messageOf(err) };
+      }
+    },
+    lookupChannelVault: async (target) =>
+      await channelVaultLookup(soleDoctorHub(), resolveOnce().key, cmd.timeout)(target),
   };
 
   const report: DoctorReport = await runDoctor(
@@ -1046,6 +1103,7 @@ async function runChannelContextCommand(cmd: ChannelContextCommand, io: Io): Pro
     {
       env: io.env ?? process.env,
       openSession: async () => await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout),
+      resolveVault: channelVaultLookup(hub, key, cmd.timeout),
       // Tool phase only: a connect failure is thrown before the runner's
       // guarded region and is mapped by `runCli`.
       classify: (err) => classifyError(err, "tool"),
