@@ -37,6 +37,20 @@ export interface StubHubOptions {
    * which needs a hub that really stores and returns a note.
    */
   handleCall?: (tool: string, args: Record<string, unknown>) => unknown | undefined;
+  /**
+   * Answer `GET /api/channel-vault?relay=&channel=` the way parachute-hub does
+   * (`api-channel-vaults.ts`, hub#947): return a binding for 200
+   * `{vault, mode, synced_at}`, or `null` for the route's own 404
+   * `{"error":"not_found"}`.
+   *
+   * LEAVE IT UNSET to model a hub that predates the route — the GET then falls
+   * through to the plain 405/404 an older hub gives, which is the case the
+   * connector must not read as "this channel is unbound".
+   */
+  channelVault?: (
+    relay: string | null,
+    channel: string | null,
+  ) => { vault: string; mode?: string; synced_at?: string | null } | null;
 }
 
 export interface ToolCallRecord {
@@ -53,6 +67,8 @@ export class StubHub {
   readonly methods: string[] = [];
   /** Requests that carried an Authorization header (each must sign fresh). */
   authedRequests = 0;
+  /** Every `/api/channel-vault` query, in order. */
+  readonly channelVaultQueries: Array<{ relay: string | null; channel: string | null }> = [];
 
   private readonly liveSessions = new Set<string>();
   private server: ReturnType<typeof Bun.serve>;
@@ -135,6 +151,42 @@ export class StubHub {
     this.checkAuth(req, body);
 
     if (req.method === "DELETE") return new Response(null, { status: 200 });
+
+    // The REST read side, beside the MCP door. Authenticated only (a vault
+    // name is not a secret), like the real hub.
+    const url = new URL(req.url);
+    if (req.method === "GET" && url.pathname === "/api/channel-vault") {
+      const relay = url.searchParams.get("relay");
+      const channel = url.searchParams.get("channel");
+      this.channelVaultQueries.push({ relay, channel });
+      if (!this.opts.channelVault) {
+        // An older hub has no such route: its dispatch falls through to the
+        // generic plain-text 404.
+        return new Response("not found", { status: 404 });
+      }
+      if (!relay || !channel) {
+        return Response.json(
+          { error: "invalid_request", error_description: "`relay` and `channel` are required" },
+          { status: 400 },
+        );
+      }
+      const binding = this.opts.channelVault(relay, channel);
+      if (!binding) {
+        return Response.json(
+          { error: "not_found", error_description: "no vault is attached to that channel" },
+          { status: 404 },
+        );
+      }
+      return Response.json(
+        {
+          vault: binding.vault,
+          mode: binding.mode ?? "sync",
+          synced_at: binding.synced_at ?? null,
+        },
+        { status: 200 },
+      );
+    }
+
     if (req.method !== "POST") {
       // Mirrors the hub door: no server-initiated SSE stream.
       return new Response(null, { status: 405 });

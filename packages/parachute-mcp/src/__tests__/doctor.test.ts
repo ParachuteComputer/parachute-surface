@@ -11,7 +11,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { ChannelVaultLookup } from "../channel-vault.js";
 import {
+  type ChannelTargetResolution,
   type DoctorDeps,
   type DoctorHub,
   type DoctorReport,
@@ -133,7 +135,23 @@ interface DepsOverrides {
   resolveHub?: DoctorDeps["resolveHub"];
   openSession?: DoctorDeps["openSession"];
   classify?: DoctorDeps["classify"];
+  channelTarget?: DoctorDeps["channelTarget"];
+  lookupChannelVault?: DoctorDeps["lookupChannelVault"];
 }
+
+const CHANNEL = "3ff68a58-3f97-409a-b531-45d388b3c827";
+const RELAY_HOST = "buzz.techne.coop";
+
+/** The default: no channel id anywhere, which is every pre-existing test. */
+const NO_CHANNEL: ChannelTargetResolution = {
+  ok: false,
+  reason: "doctor: needs a channel — pass --channel <uuid> or set $BUZZ_CHANNEL_ID",
+};
+
+const HAVE_CHANNEL: ChannelTargetResolution = {
+  ok: true,
+  target: { relayHost: RELAY_HOST, channelId: CHANNEL },
+};
 
 function deps(hub: FakeHub, over: DepsOverrides = {}): DoctorDeps {
   return {
@@ -143,7 +161,26 @@ function deps(hub: FakeHub, over: DepsOverrides = {}): DoctorDeps {
     resolveHub: over.resolveHub ?? (() => HUB),
     openSession: over.openSession ?? (async () => hub.session),
     classify: over.classify ?? ((err) => (err instanceof UsageError ? EXIT.usage : EXIT.transport)),
+    channelTarget: over.channelTarget ?? (() => NO_CHANNEL),
+    lookupChannelVault:
+      over.lookupChannelVault ??
+      (async () => {
+        throw new Error("lookupChannelVault should not have been called");
+      }),
   };
+}
+
+/** deps whose channel step has a channel id and one canned hub answer. */
+function channelDeps(
+  hub: FakeHub,
+  lookup: ChannelVaultLookup,
+  over: DepsOverrides = {},
+): DoctorDeps {
+  return deps(hub, {
+    channelTarget: () => HAVE_CHANNEL,
+    lookupChannelVault: async () => lookup,
+    ...over,
+  });
 }
 
 /** The step with this name, or undefined. */
@@ -224,13 +261,13 @@ describe("collectContentStrings", () => {
 });
 
 describe("runDoctor — the happy path", () => {
-  test("all four steps pass and the exit code is 0", async () => {
+  test("the four access steps pass and the exit code is 0", async () => {
     const hub = fakeHub({ serverInfo: { name: "parachute-account", version: "0.1.0" } });
     const report = await runDoctor({}, deps(hub));
 
     expect(report.exitCode).toBe(EXIT.ok);
     expect(report.ok).toBe(true);
-    expect(statuses(report)).toBe("key:pass hub:pass vaults:pass write:pass");
+    expect(statuses(report)).toBe("key:pass hub:pass vaults:pass write:pass channel:skip");
     expect(report.summary).toContain("PASS");
   });
 
@@ -382,7 +419,7 @@ describe("runDoctor — vaults step", () => {
     const hub = fakeHub({ tools: ["query-notes", "create-note"] });
     const report = await runDoctor({}, deps(hub));
     expect(report.exitCode).toBe(EXIT.ok);
-    expect(statuses(report)).toBe("key:pass hub:pass vaults:skip write:skip");
+    expect(statuses(report)).toBe("key:pass hub:pass vaults:skip write:skip channel:skip");
     expect(step(report, "vaults")?.reason).toContain("not a hub account door");
   });
 
@@ -547,8 +584,145 @@ describe("runDoctor — write step", () => {
   test("--vault against a door with no vault listing still probes", async () => {
     const hub = fakeHub({ tools: ["create-note", "query-notes", "delete-note"] });
     const report = await runDoctor({ vault: "uni" }, deps(hub));
-    expect(statuses(report)).toBe("key:pass hub:pass vaults:skip write:pass");
+    expect(statuses(report)).toBe("key:pass hub:pass vaults:skip write:pass channel:skip");
     expect(report.exitCode).toBe(EXIT.ok);
+  });
+});
+
+describe("runDoctor — channel step", () => {
+  test("a bound channel PASSES and names the vault, its mode and its sync age", async () => {
+    const report = await runDoctor(
+      {},
+      channelDeps(fakeHub(), {
+        status: "bound",
+        binding: { vault: "parachute", mode: "sync", syncedAt: "2026-09-03T12:00:00.000Z" },
+      }),
+    );
+    const channel = step(report, "channel");
+    expect(channel?.status).toBe("pass");
+    expect(channel?.reason).toContain('vault "parachute"');
+    expect(channel?.reason).toContain("mode sync");
+    expect(channel?.reason).toContain("2026-09-03T12:00:00.000Z");
+    expect(channel?.details).toMatchObject({
+      relayHost: RELAY_HOST,
+      channelId: CHANNEL,
+      vault: "parachute",
+    });
+    expect(report.exitCode).toBe(EXIT.ok);
+  });
+
+  test("a bound but never-synced channel still passes and says so", async () => {
+    const report = await runDoctor(
+      {},
+      channelDeps(fakeHub(), {
+        status: "bound",
+        binding: { vault: "ch-3ff68a58", mode: "frozen" },
+      }),
+    );
+    expect(step(report, "channel")?.reason).toContain("never synced");
+    expect(step(report, "channel")?.status).toBe("pass");
+  });
+
+  test("an UNBOUND channel SKIPS — not fails — and names the attach command", async () => {
+    // The design note's gate for this PR, verbatim: "`doctor` on a bound
+    // channel reports the vault; unbound reports `skip`, not `fail`". The
+    // binding is the operator's to create; nothing the agent can do turns a
+    // red step green, and most channels are not attached to anything.
+    const report = await runDoctor({}, channelDeps(fakeHub(), { status: "unbound" }));
+    const channel = step(report, "channel");
+    expect(channel?.status).toBe("skip");
+    expect(channel?.reason).toContain("parachute vault attach-channel");
+    expect(channel?.reason).toContain(CHANNEL);
+    expect(report.exitCode).toBe(EXIT.ok);
+    expect(report.ok).toBe(true);
+  });
+
+  test("no channel id SKIPS with the reason the target resolver gave", async () => {
+    const report = await runDoctor({}, deps(fakeHub()));
+    const channel = step(report, "channel");
+    expect(channel?.status).toBe("skip");
+    expect(channel?.reason).toContain("--channel");
+    expect(report.exitCode).toBe(EXIT.ok);
+  });
+
+  test("a hub that predates the route SKIPS, and blames the hub rather than the channel", async () => {
+    const report = await runDoctor(
+      {},
+      channelDeps(fakeHub(), { status: "unsupported", reason: "404 without the route's body" }),
+    );
+    const channel = step(report, "channel");
+    expect(channel?.status).toBe("skip");
+    expect(channel?.reason).toContain("does not serve /api/channel-vault yet");
+    expect(channel?.reason).not.toContain("attach-channel");
+    expect(report.exitCode).toBe(EXIT.ok);
+  });
+
+  test("a transport or auth failure in the lookup SKIPS too — never a fail", async () => {
+    for (const lookup of [
+      { status: "error", reason: "connect ECONNREFUSED", exitCode: EXIT.transport },
+      { status: "error", reason: "401 — rejected", exitCode: EXIT.auth },
+    ] as const) {
+      const report = await runDoctor({}, channelDeps(fakeHub(), lookup));
+      expect(step(report, "channel")?.status).toBe("skip");
+      expect(report.exitCode).toBe(EXIT.ok);
+    }
+  });
+
+  test("a THROWN lookup is still only a skip — a diagnostic must not crash", async () => {
+    const report = await runDoctor(
+      {},
+      deps(fakeHub(), {
+        channelTarget: () => ({ ok: true, target: { relayHost: RELAY_HOST, channelId: CHANNEL } }),
+        lookupChannelVault: async () => {
+          throw new Error("kaboom");
+        },
+      }),
+    );
+    expect(step(report, "channel")?.status).toBe("skip");
+    expect(step(report, "channel")?.reason).toContain("kaboom");
+    expect(report.exitCode).toBe(EXIT.ok);
+  });
+
+  test("a channelTarget that throws is a skip, not an unhandled rejection", async () => {
+    const report = await runDoctor(
+      {},
+      deps(fakeHub(), {
+        channelTarget: () => {
+          throw new UsageError("doctor: --channel must be a single path segment");
+        },
+      }),
+    );
+    expect(step(report, "channel")?.status).toBe("skip");
+    expect(step(report, "channel")?.reason).toContain("single path segment");
+  });
+
+  test("it never runs when an earlier step already failed hard", async () => {
+    // The steps stop at the first hard failure: reporting a channel binding
+    // under "FAIL at hub" is noise, and the lookup needs the hub anyway.
+    const report = await runDoctor(
+      {},
+      channelDeps(
+        fakeHub(),
+        { status: "bound", binding: { vault: "parachute" } },
+        {
+          resolveKey: () => {
+            throw new UsageError("no key");
+          },
+        },
+      ),
+    );
+    expect(statuses(report)).toBe("key:fail");
+    expect(step(report, "channel")).toBeUndefined();
+  });
+
+  test("a bound channel does not change what exit 0 already meant", async () => {
+    // The four access checks are the contract; this step adds information.
+    const report = await runDoctor(
+      {},
+      channelDeps(fakeHub(), { status: "bound", binding: { vault: "parachute" } }),
+    );
+    expect(statuses(report)).toBe("key:pass hub:pass vaults:pass write:pass channel:pass");
+    expect(report.summary).toContain("5/5");
   });
 });
 
@@ -561,6 +735,17 @@ describe("renderReport", () => {
     expect(lines[0]).toContain("key");
     expect(lines.at(-1)).toBe(report.summary);
     expect(rendered.endsWith("\n")).toBe(true);
+  });
+
+  test("the widest step name still leaves a column gap", async () => {
+    const report = await runDoctor(
+      {},
+      channelDeps(fakeHub(), { status: "bound", binding: { vault: "parachute" } }),
+    );
+    const line = renderReport(report)
+      .split("\n")
+      .find((l) => l.includes("channel"));
+    expect(line).toContain("PASS  channel  ");
   });
 
   test("a failed run's summary names the step and the exit code", async () => {

@@ -24,7 +24,7 @@ import {
   splitSubcommand,
 } from "../commands.js";
 import { decodeAuthHeader, sha256Hex, tagValue } from "../nip98.js";
-import { StubHub, type StubTool, freePort } from "./stub-hub.js";
+import { StubHub, type StubHubOptions, type StubTool, freePort } from "./stub-hub.js";
 
 const sk = generateSecretKey();
 const pubkey = getPublicKey(sk);
@@ -32,6 +32,9 @@ const nsec = nsecEncode(sk);
 const skHex = Buffer.from(sk).toString("hex");
 
 const USAGE = "USAGE-PLACEHOLDER\n";
+
+/** The first real binding the design names: parachute-dev on the techne relay. */
+const CHANNEL_ID = "3ff68a58-3f97-409a-b531-45d388b3c827";
 
 const ECHO: StubTool = {
   name: "echo",
@@ -673,12 +676,17 @@ describe("doctor", () => {
   ];
 
   /** A hub with one vault that really holds what `create-note` writes. */
-  function vaultHub(label: string, vaults: string[]): StubHub {
+  function vaultHub(
+    label: string,
+    vaults: string[],
+    channelVault?: StubHubOptions["channelVault"],
+  ): StubHub {
     const notes = new Map<string, string>();
     const hub = new StubHub({
       label,
       tools: VAULT_TOOLS,
       expectPubkey: pubkey,
+      ...(channelVault ? { channelVault } : {}),
       handleCall: (tool, args) => {
         const json = (value: unknown) => ({
           content: [{ type: "text", text: JSON.stringify(value) }],
@@ -708,7 +716,7 @@ describe("doctor", () => {
     return hub;
   }
 
-  test("one vault → all four checks pass, exit 0, and the probe is cleaned up", async () => {
+  test("one vault → the four access checks pass, exit 0, and the probe is cleaned up", async () => {
     const hub = vaultHub("solo", ["uni"]);
     const cap = capture(configFor([{ alias: "home", url: hub.url }]));
 
@@ -718,13 +726,73 @@ describe("doctor", () => {
     expect(out).toContain("PASS  hub");
     expect(out).toContain("PASS  vaults");
     expect(out).toContain("PASS  write");
-    expect(out).toContain("4/4 checks passed");
+    // The channel step skips: no relay or channel id in this environment. It
+    // is a SKIP, so the run is still a pass and the exit code is still 0.
+    expect(out).toContain("SKIP  channel");
+    expect(out).toContain("4/5 checks passed, 1 skipped");
 
     const called = hub.toolCalls.map((c) => c.tool);
     expect(called).toEqual(["list-vaults", "create-note", "query-notes", "delete-note"]);
     for (const call of hub.toolCalls.slice(1)) {
       expect(String(call.args.path ?? call.args.id)).toStartWith(".doctor/");
     }
+    expectCleanAuth(hub);
+  });
+
+  test("a bound channel PASSES the channel step over the real signed REST call", async () => {
+    const hub = vaultHub("solo", ["uni"], (relay, channel) =>
+      relay === "buzz.techne.coop" && channel === CHANNEL_ID
+        ? { vault: "parachute", mode: "sync", synced_at: "2026-09-03T12:00:00.000Z" }
+        : null,
+    );
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    place.env.BUZZ_RELAY_URL = "wss://Buzz.Techne.Coop/";
+    place.env.BUZZ_GIT_ORIGIN_CHANNEL_ID = CHANNEL_ID;
+    const cap = capture(place);
+
+    expect(await runCli(["doctor"], cap.io, USAGE)).toBe(EXIT.ok);
+    const out = cap.stdout();
+    expect(out).toContain("PASS  channel");
+    expect(out).toContain('vault "parachute"');
+    expect(out).toContain("5/5 checks passed");
+    // The relay reached the hub lower-cased and scheme-free, which is what
+    // keeps one channel to one binding on both sides.
+    expect(hub.channelVaultQueries).toEqual([{ relay: "buzz.techne.coop", channel: CHANNEL_ID }]);
+    // The REST call is NIP-98-signed on the same terms as every MCP request.
+    expectCleanAuth(hub);
+  });
+
+  test("an unbound channel SKIPS, and exit 0 is unchanged", async () => {
+    const hub = vaultHub("solo", ["uni"], () => null);
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    place.env.BUZZ_RELAY_URL = "wss://buzz.techne.coop";
+    place.env.BUZZ_CHANNEL_ID = CHANNEL_ID;
+    const cap = capture(place);
+
+    expect(await runCli(["doctor"], cap.io, USAGE)).toBe(EXIT.ok);
+    expect(cap.stdout()).toContain("SKIP  channel");
+    expect(cap.stdout()).toContain("parachute vault attach-channel");
+    expectCleanAuth(hub);
+  });
+
+  test("a hub with no such route SKIPS as too-old, not as unbound", async () => {
+    // No `channelVault` handler: the stub falls through to the plain-text 404
+    // parachute-hub's dispatch gives an unknown path.
+    const hub = vaultHub("solo", ["uni"]);
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    const cap = capture(place);
+
+    expect(
+      await runCli(
+        ["doctor", "--relay", "wss://buzz.techne.coop", "--channel", CHANNEL_ID],
+        cap.io,
+        USAGE,
+      ),
+    ).toBe(EXIT.ok);
+    const out = cap.stdout();
+    expect(out).toContain("SKIP  channel");
+    expect(out).toContain("does not serve /api/channel-vault yet");
+    expect(out).not.toContain("attach-channel");
     expectCleanAuth(hub);
   });
 
@@ -753,8 +821,14 @@ describe("doctor", () => {
       "hub",
       "vaults",
       "write",
+      "channel",
     ]);
-    expect(report.steps.every((s: { status: string }) => s.status === "pass")).toBe(true);
+    expect(
+      report.steps
+        .filter((s: { step: string }) => s.step !== "channel")
+        .every((s: { status: string }) => s.status === "pass"),
+    ).toBe(true);
+    expect(report.steps.at(-1)).toMatchObject({ step: "channel", status: "skip" });
     expect(report.npub).toStartWith("npub1");
     expect(report.hub).toEqual({ alias: "home", url: hub.url });
   });
@@ -842,5 +916,68 @@ describe("doctor", () => {
     expect(cap.stdout()).toContain("BUZZ_PRIVATE_KEY (injected nsec value)");
     expect(cap.stdout()).not.toContain(nsec);
     expectCleanAuth(hub);
+  });
+});
+
+describe("channel-context: resolving the vault from the hub", () => {
+  const VAULT_TOOLS: StubTool[] = [
+    "list-vaults",
+    "create-note",
+    "query-notes",
+    "delete-note",
+    "update-note",
+  ].map((name) => ({ name, description: name, inputSchema: { type: "object" } }));
+
+  function hubWithBinding(binding: { vault: string } | null): StubHub {
+    const hub = new StubHub({
+      label: "solo",
+      tools: VAULT_TOOLS,
+      expectPubkey: pubkey,
+      channelVault: () => binding,
+    });
+    cleanup.push(() => hub.stop());
+    return hub;
+  }
+
+  test("append with no --vault asks the hub and writes to the vault it names", async () => {
+    const hub = hubWithBinding({ vault: "parachute" });
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    place.env.BUZZ_RELAY_URL = "wss://buzz.techne.coop";
+    place.env.BUZZ_CHANNEL_ID = CHANNEL_ID;
+    const cap = capture(place, "an entry");
+
+    expect(await runCli(["channel-context", "append"], cap.io, USAGE)).toBe(EXIT.ok);
+    expect(hub.channelVaultQueries).toEqual([{ relay: "buzz.techne.coop", channel: CHANNEL_ID }]);
+    const update = hub.toolCalls.find((c) => c.tool === "update-note");
+    expect(update?.args.vault).toBe("parachute");
+    expect(update?.args.id).toBe(`Channels/buzz.techne.coop/${CHANNEL_ID}`);
+    expectCleanAuth(hub);
+  });
+
+  test("an explicit --vault wins and the hub is never asked", async () => {
+    const hub = hubWithBinding({ vault: "parachute" });
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    place.env.BUZZ_RELAY_URL = "wss://buzz.techne.coop";
+    place.env.BUZZ_CHANNEL_ID = CHANNEL_ID;
+    const cap = capture(place, "an entry");
+
+    expect(await runCli(["channel-context", "append", "--vault", "uni"], cap.io, USAGE)).toBe(
+      EXIT.ok,
+    );
+    expect(hub.channelVaultQueries).toEqual([]);
+    expect(hub.toolCalls.find((c) => c.tool === "update-note")?.args.vault).toBe("uni");
+  });
+
+  test("an unbound channel exits 1 with the attach command, and writes nothing", async () => {
+    const hub = hubWithBinding(null);
+    const place = configFor([{ alias: "home", url: hub.url }]);
+    place.env.BUZZ_RELAY_URL = "wss://buzz.techne.coop";
+    place.env.BUZZ_CHANNEL_ID = CHANNEL_ID;
+    const cap = capture(place, "an entry");
+
+    expect(await runCli(["channel-context", "append"], cap.io, USAGE)).toBe(EXIT.usage);
+    expect(cap.stderr()).toContain("parachute vault attach-channel");
+    expect(cap.stderr()).toContain("--vault");
+    expect(hub.toolCalls).toEqual([]);
   });
 });
