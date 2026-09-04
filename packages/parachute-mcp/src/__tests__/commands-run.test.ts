@@ -42,6 +42,12 @@ const ECHO: StubTool = {
   inputSchema: { type: "object", properties: { text: { type: "string" } } },
 };
 
+const UPDATE_NOTE: StubTool = {
+  name: "update-note",
+  description: "update a note by id (id accepts an id or a path)",
+  inputSchema: { type: "object", properties: { id: { type: "string" } } },
+};
+
 let cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const fn of cleanup.reverse()) await fn();
@@ -341,6 +347,90 @@ describe("call", () => {
     expect(await runCli(["call", "echo", "[1,2]"], cap.io, USAGE)).toBe(EXIT.usage);
     expect(cap.stderr()).toContain("must be a JSON object");
     expect(hub.authedRequests).toBe(0);
+  });
+
+  // surface#236: `call update-note` with `path` and no `id` reached the hub
+  // with `id` unset. The vault's `id` param is documented id-OR-path, and the
+  // channel-context convention already sends `id: <path>` (channel.ts
+  // `appendEntry`) — a caller reaching for the more obvious `path` key should
+  // get the same resolution, not a hub-side crash dressed up as a tool error.
+  test("update-note with `path` and no `id` resolves the note (surface#236)", async () => {
+    const hub = new StubHub({
+      label: "solo",
+      tools: [UPDATE_NOTE],
+      expectPubkey: pubkey,
+      handleCall: (tool, args) => {
+        if (tool !== "update-note") return undefined;
+        // Mirrors the real hub: an `id` (or a path resolved into one)
+        // succeeds; an unresolvable/absent id falls back to its unstructured
+        // `Error: ...` isError text (vault core/src/mcp.ts `resolveNote`).
+        if (typeof args.id === "string") {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ id: args.id, updated: true }) }],
+          };
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: undefined is not an object (evaluating 'idOrPath.match')",
+            },
+          ],
+          isError: true,
+        };
+      },
+    });
+    cleanup.push(() => hub.stop());
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    const code = await runCli(
+      ["call", "update-note", '{"vault":"v","path":"Channels/x","append":"\\n- test"}'],
+      cap.io,
+      USAGE,
+    );
+
+    expect(code).toBe(EXIT.ok);
+    expect(cap.stderr()).toBe("");
+    expect(JSON.parse(cap.stdout())).toEqual({ id: "Channels/x", updated: true });
+    // `path` was translated to `id`, not merely echoed alongside it — the
+    // hub never sees a call it would have to fall back on.
+    expect(hub.toolCalls).toEqual([
+      { tool: "update-note", args: { vault: "v", id: "Channels/x", append: "\n- test" } },
+    ]);
+  });
+
+  // The other half of surface#236: whatever shape a tool failure takes out of
+  // `tools/call` (an `isError` result OR the hub throwing, which the real MCP
+  // SDK turns into a JSON-RPC error — see stub-hub.ts's `tools/call` catch),
+  // the CLI must resolve to a real, non-zero exit code, and the SAME one
+  // `doctor`/`channel-context` use for "the tool failed" (4), not the generic
+  // transport default (2) a bare rethrow used to fall into.
+  test("a JSON-RPC error out of tools/call exits non-zero as a tool error, not transport (surface#236)", async () => {
+    const hub = new StubHub({
+      label: "solo",
+      tools: [UPDATE_NOTE],
+      expectPubkey: pubkey,
+      handleCall: (tool, args) => {
+        if (tool === "update-note" && args.id === undefined) {
+          const idOrPath = args.id as string | undefined;
+          // @ts-expect-error — reproduces the exact vault-side TypeError
+          // (core/src/mcp.ts `resolveNote`) an older/unpatched hub can still
+          // throw instead of answering with `isError`.
+          idOrPath.match(/^(.*)\.([a-z0-9]{1,16})$/i);
+        }
+        return undefined;
+      },
+    });
+    cleanup.push(() => hub.stop());
+    const cap = capture(configFor([{ alias: "home", url: hub.url }]));
+
+    const code = await runCli(["call", "update-note", '{"vault":"v"}'], cap.io, USAGE);
+
+    expect(code).toBe(EXIT.toolError);
+    expect(code).not.toBe(EXIT.ok);
+    expect(cap.stdout()).toBe("");
+    expect(cap.stderr()).toContain("undefined is not an object");
+    expect(cap.stderr()).toContain(".match");
   });
 });
 

@@ -820,6 +820,31 @@ function withNewline(text: string): string {
   return text.endsWith("\n") ? text : `${text}\n`;
 }
 
+/**
+ * Tools whose `id` parameter is a documented id-OR-path lookup key (vault
+ * `core/src/mcp.ts`'s `resolveNote`) — the same convention `channel-context`
+ * already relies on (`appendEntry` sends `id: target.path`, never a separate
+ * `path`). `call` is a raw pass-through for any tool on any hub, so this maps
+ * `path` -> `id` only for the tools known to share that contract: an agent
+ * that reaches for the more obvious `path` key (there is no such thing as a
+ * "path" parameter on these tools) gets the note the hub would have found
+ * anyway, instead of an `id`-less call.
+ *
+ * `update-note` ALSO accepts `path` as a genuine field (renames the note), so
+ * this only fires when `id` is absent — a caller passing both keeps its
+ * rename intent untouched. See surface#236: `call update-note` with `path`
+ * and no `id` reached the hub with `id` unset, and the hub's fallback for an
+ * unresolvable id/path is an unstructured `Error: ...` tool result.
+ */
+const ID_OR_PATH_TOOLS = new Set(["update-note"]);
+
+function resolveIdOrPath(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  if (!ID_OR_PATH_TOOLS.has(toolName)) return args;
+  if (args.id !== undefined || typeof args.path !== "string") return args;
+  const { path, ...rest } = args;
+  return { ...rest, id: path };
+}
+
 async function runCall(cmd: CallCommand, io: Io): Promise<number> {
   const { config, key } = resolveKeyAndConfig(
     cmd.config,
@@ -835,10 +860,12 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
         ? parseToolArgs(cmd.args.json, "the JSON arguments")
         : {};
 
-  let session: HubSession | undefined;
+  // A connect failure here is NOT caught below — it propagates to runCli's
+  // generic classification, same as `tools`: an unreachable hub is a
+  // transport fault, not the tool failing.
+  const session = await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout);
   try {
-    session = await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout);
-    const result = await session.callTool(toolName, args);
+    const result = await session.callTool(toolName, resolveIdOrPath(toolName, args));
     const text = singleTextBlock(result);
     if (result.isError) {
       io.err(text ?? JSON.stringify(result, null, 2));
@@ -846,8 +873,16 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
     }
     io.out(text !== undefined ? withNewline(text) : `${JSON.stringify(result, null, 2)}\n`);
     return EXIT.ok;
+  } catch (err) {
+    // A JSON-RPC error out of tools/call (the hub throwing instead of
+    // answering with `isError`) is still the TOOL failing, not the network —
+    // classify it the same way doctor/channel-context do (`classifyError`
+    // below), so it doesn't fall through to runCli's generic transport
+    // default and every failure here resolves to a real, non-zero EXIT code.
+    io.err(`call: ${messageOf(err)}`);
+    return classifyError(err, "tool");
   } finally {
-    await session?.close();
+    await session.close();
   }
 }
 
@@ -932,9 +967,9 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
  */
 /**
  * Map a thrown value to this CLI's exit codes, given WHERE it came from.
- * Shared by `doctor` and `channel-context`: both drive tool calls through an
- * injected runner and both must tell "the tool said no" (4) apart from "the
- * network is down" (2).
+ * Shared by `call`, `doctor` and `channel-context`: all three drive tool
+ * calls and must tell "the tool said no" (4) apart from "the network is
+ * down" (2).
  */
 function classifyError(err: unknown, phase: "transport" | "tool"): number {
   // Auth first: a 401/403 is an auth failure whichever phase surfaced it.

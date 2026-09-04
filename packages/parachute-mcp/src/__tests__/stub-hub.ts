@@ -241,7 +241,25 @@ export class StubHub {
         const tool = String(message.params?.name ?? "");
         const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
         this.toolCalls.push({ tool, args });
-        const custom = this.opts.handleCall?.(tool, args);
+        let custom: unknown;
+        try {
+          custom = this.opts.handleCall?.(tool, args);
+        } catch (err) {
+          // The real MCP SDK server (protocol.js `_onrequest`) catches ANY
+          // exception a request handler throws and turns it into a JSON-RPC
+          // PROTOCOL error, not an `isError` tool result and never a crash —
+          // that's how a vault-side bug (an uncaught TypeError deep in a tool
+          // handler, e.g. surface#236) actually reaches this client. A
+          // `handleCall` that throws models that path.
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
+            }),
+            { status: 200, headers },
+          );
+        }
         if (custom !== undefined) return respond(custom);
         if (!this.opts.tools.some((t) => t.name === tool)) {
           return respond({
