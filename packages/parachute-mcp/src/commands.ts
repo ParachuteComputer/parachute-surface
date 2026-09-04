@@ -822,21 +822,43 @@ function withNewline(text: string): string {
 
 /**
  * Tools whose `id` parameter is a documented id-OR-path lookup key (vault
- * `core/src/mcp.ts`'s `resolveNote`) — the same convention `channel-context`
- * already relies on (`appendEntry` sends `id: target.path`, never a separate
- * `path`). `call` is a raw pass-through for any tool on any hub, so this maps
- * `path` -> `id` only for the tools known to share that contract: an agent
- * that reaches for the more obvious `path` key (there is no such thing as a
- * "path" parameter on these tools) gets the note the hub would have found
- * anyway, instead of an `id`-less call.
+ * `core/src/mcp.ts`'s `resolveNote`, manifest'd in `core/src/mcp-manifest.ts`
+ * as "Note ID, path, or (fallback...) its H1 title") — the same convention
+ * `channel-context` already relies on (`appendEntry` sends `id:
+ * target.path`, never a separate `path`). `call` is a raw pass-through for
+ * any tool on any hub, so this maps `path` -> `id` only for the tools known
+ * to share that contract: an agent that reaches for the more obvious `path`
+ * key (there is no such thing as a "path" parameter on either tool) gets the
+ * note the hub would have found anyway, instead of an `id`-less call.
  *
  * `update-note` ALSO accepts `path` as a genuine field (renames the note), so
  * this only fires when `id` is absent — a caller passing both keeps its
- * rename intent untouched. See surface#236: `call update-note` with `path`
- * and no `id` reached the hub with `id` unset, and the hub's fallback for an
- * unresolvable id/path is an unstructured `Error: ...` tool result.
+ * rename intent untouched. `delete-note` has no such second meaning for
+ * `path` (`core/src/mcp.ts:2194-2199`: `requireNote(db, params.id)` and
+ * nothing else reads `params.path`), so the mapping is unconditionally safe
+ * there whenever `id` is absent. See surface#236: `call update-note` with
+ * `path` and no `id` reached the hub with `id` unset, and the hub's fallback
+ * for an unresolvable id/path is an unstructured `Error: ...` tool result;
+ * `call delete-note` hits the exact same fallback the same way
+ * (`core/src/core.test.ts:4520` "delete-note accepts path" documents the
+ * contract on the vault side).
+ *
+ * Checked the rest of the manifest for the same id-or-path contract under a
+ * DIFFERENT key name, which this substitution can't help (it only ever reads
+ * `args.id`/`args.path`): `query-notes`'s `near.note_id` and `find-path`'s
+ * `source`/`target` are id-or-path too, but neither is spelled `id`, so a
+ * `path`-key caller can't collide with them the way it can with
+ * update-note/delete-note.
+ *
+ * `query-notes`'s own top-level `id` is ALSO id-or-path and IS spelled `id`,
+ * but deliberately excluded here: unlike update-note/delete-note, an absent
+ * `id` on query-notes is not "no target" — it's a totally different LIST
+ * mode (tag/search/near/etc. filters), so promoting a stray `path` key into
+ * `id` would silently turn a list call into a single-note lookup, a
+ * behavior change outside what #236 reported (the reporter found
+ * query-notes-by-`path` "fine" as-is) and not covered by a test here.
  */
-const ID_OR_PATH_TOOLS = new Set(["update-note"]);
+const ID_OR_PATH_TOOLS = new Set(["update-note", "delete-note"]);
 
 function resolveIdOrPath(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
   if (!ID_OR_PATH_TOOLS.has(toolName)) return args;
