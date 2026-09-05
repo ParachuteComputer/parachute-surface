@@ -15,10 +15,16 @@
  * signature, the grant reaches at least one vault, and (when there is one
  * vault to aim at) a note round-trips. A grant that reaches nothing exits 4.
  *
+ * A FIFTH step, `channel`, reports which vault backs the Buzz channel this
+ * agent is answering on (channel-attached vaults, design step A). It is the
+ * one step that can never FAIL — see `channelStep` for why — so exit 0 still
+ * means exactly the four things above and nothing more.
+ *
  * The steps run in dependency order and STOP at the first hard failure —
  * reporting "vaults: FAIL" when the key never loaded is noise, not diagnosis.
  * A step that cannot apply (no `list-vaults` tool; no single vault to write
- * to) is SKIP, which is not a failure and does not change the exit code.
+ * to; no channel id to ask about) is SKIP, which is not a failure and does not
+ * change the exit code.
  *
  * EVERYTHING IS INJECTED (`DoctorDeps`). No config reading, no key loading, no
  * MCP client, no clock: commands.ts wires the real ones, and the unit tests
@@ -32,6 +38,7 @@
  * only key-shaped thing that reaches a report, a log or a note path.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { type ChannelVaultLookup, OLD_HUB_HINT, attachHint } from "./channel-vault.js";
 import { EXIT, UsageError, messageOf } from "./exit.js";
 
 /**
@@ -64,7 +71,7 @@ const UPDATE_NOTE_TOOL = "update-note";
  */
 export const PROBE_PATH_PREFIX = ".doctor/";
 
-export type StepName = "key" | "hub" | "vaults" | "write";
+export type StepName = "key" | "hub" | "vaults" | "write" | "channel";
 export type StepStatus = "pass" | "fail" | "skip";
 
 export interface DoctorStep {
@@ -101,6 +108,24 @@ export interface DoctorHub {
   url: string;
 }
 
+/** Which Buzz channel this run is about — the `channel` step's input. */
+export interface DoctorChannelTarget {
+  /** Relay host, scheme stripped and lower-cased (`relayHostOf`). */
+  relayHost: string;
+  channelId: string;
+}
+
+/**
+ * The channel this run is about, or a one-line reason there is none.
+ *
+ * A REASON rather than `undefined`: "no relay" and "no channel id" are fixed
+ * by different flags, and the whole point of a `skip` here is that it tells
+ * the operator how to make the step run.
+ */
+export type ChannelTargetResolution =
+  | { ok: true; target: DoctorChannelTarget }
+  | { ok: false; reason: string };
+
 export interface DoctorDeps {
   /** Config + key resolution. Throws `UsageError` when there is no key. */
   resolveKey(): { npub: string; source: string };
@@ -113,6 +138,17 @@ export interface DoctorDeps {
    * transport failure (2) when it came out of the connect.
    */
   classify(err: unknown, phase: "transport" | "tool"): number;
+  /**
+   * Which channel to ask about — `--channel`/`--relay`, falling back to the
+   * environment buzz-acp injects. Injected because this module reads no env.
+   */
+  channelTarget(): ChannelTargetResolution;
+  /**
+   * Ask the hub which vault backs a channel. Never throws (see
+   * channel-vault.ts): every outcome is a variant, which is what lets the
+   * `channel` step keep its promise not to fail.
+   */
+  lookupChannelVault(target: DoctorChannelTarget): Promise<ChannelVaultLookup>;
   now(): Date;
   version: string;
 }
@@ -258,8 +294,8 @@ function pass(step: StepName, reason: string, details?: Record<string, unknown>)
   return { step, status: "pass", reason, ...(details ? { details } : {}) };
 }
 
-function skip(step: StepName, reason: string): DoctorStep {
-  return { step, status: "skip", reason };
+function skip(step: StepName, reason: string, details?: Record<string, unknown>): DoctorStep {
+  return { step, status: "skip", reason, ...(details ? { details } : {}) };
 }
 
 function fail(
@@ -441,6 +477,14 @@ export async function runDoctor(opts: DoctorOptions, deps: DoctorDeps): Promise<
     } else {
       steps.push(await writeRoundTrip(session, deps, target, npub, has));
     }
+
+    // --- channel -----------------------------------------------------------
+    // LAST, and never a FAIL. Everything above it is the access contract exit
+    // 0 has always meant; this step is extra information about a binding that
+    // most hubs do not have yet, and an agent that upgraded its connector
+    // must not start seeing `doctor` fail on a hub and a channel that were
+    // working fine yesterday.
+    steps.push(await channelStep(deps));
   } catch (err) {
     if (err instanceof StepFailure) {
       steps.push(err.step);
@@ -455,6 +499,76 @@ export async function runDoctor(opts: DoctorOptions, deps: DoctorDeps): Promise<
   }
 
   return finish(steps, EXIT.ok, deps.version, npub, hub);
+}
+
+/**
+ * Which vault backs the Buzz channel this agent is answering on?
+ *
+ * PASS or SKIP, never FAIL — and never a throw. That is a deliberate,
+ * load-bearing asymmetry, and the design note states it as the gate for this
+ * PR: "`doctor` on a bound channel reports the vault; unbound reports `skip`,
+ * not `fail`". Three reasons a fail would be wrong:
+ *
+ *   - Most channels are not attached to anything, and most hubs do not serve
+ *     the route at all. Failing on either would make `doctor` red for the
+ *     ordinary case, which is how a diagnostic stops being read.
+ *   - `doctor`'s exit 0 is a published contract ("a key resolved, the hub
+ *     accepts it, the grant reaches a vault, a note round-trips"). This step
+ *     answers a different question and must not redefine that.
+ *   - The binding is the OPERATOR's to create, not the agent's. Nothing the
+ *     agent can do on its own turns this red step green.
+ *
+ * So every outcome that is not "here is the vault" is a SKIP whose reason is
+ * the next thing to do.
+ */
+async function channelStep(deps: DoctorDeps): Promise<DoctorStep> {
+  let resolution: ChannelTargetResolution;
+  try {
+    resolution = deps.channelTarget();
+  } catch (err) {
+    // Defensive: `channelTarget` is documented to return rather than throw,
+    // but a bad `--channel` reaching a UsageError must still be a skip.
+    return skip("channel", messageOf(err));
+  }
+  if (!resolution.ok) return skip("channel", resolution.reason);
+
+  const { relayHost, channelId } = resolution.target;
+  const where = `${relayHost} / ${channelId}`;
+  const target = { relayHost, channelId };
+
+  let lookup: ChannelVaultLookup;
+  try {
+    lookup = await deps.lookupChannelVault(target);
+  } catch (err) {
+    return skip("channel", `could not ask the hub about ${where}: ${messageOf(err)}`, target);
+  }
+
+  switch (lookup.status) {
+    case "bound": {
+      const { vault, mode, syncedAt } = lookup.binding;
+      const synced = syncedAt ? `last synced ${syncedAt}` : "never synced";
+      return pass(
+        "channel",
+        `${where} → vault "${vault}" (mode ${mode ?? "unreported"}, ${synced})`,
+        {
+          ...target,
+          vault,
+          ...(mode !== undefined ? { mode } : {}),
+          ...(syncedAt !== undefined ? { syncedAt } : {}),
+        },
+      );
+    }
+    case "unbound":
+      return skip(
+        "channel",
+        `no vault is attached to ${where} on this hub — ${attachHint(relayHost, channelId)}`,
+        target,
+      );
+    case "unsupported":
+      return skip("channel", `${OLD_HUB_HINT} (${lookup.reason})`, target);
+    case "error":
+      return skip("channel", `could not ask the hub about ${where}: ${lookup.reason}`, target);
+  }
 }
 
 /**
@@ -565,7 +679,7 @@ async function removeProbe(
   return `NOT deleted (no "${DELETE_NOTE_TOOL}" or "${UPDATE_NOTE_TOOL}" tool) — remove ${path} by hand`;
 }
 
-const ORDER: StepName[] = ["key", "hub", "vaults", "write"];
+const ORDER: StepName[] = ["key", "hub", "vaults", "write", "channel"];
 
 function finish(
   steps: DoctorStep[],
@@ -595,7 +709,7 @@ function finish(
 /** Human-readable render: one aligned line per step, then the summary. */
 export function renderReport(report: DoctorReport): string {
   const lines = report.steps.map(
-    (s) => `${s.status.toUpperCase().padEnd(4)}  ${s.step.padEnd(6)}  ${s.reason}`,
+    (s) => `${s.status.toUpperCase().padEnd(4)}  ${s.step.padEnd(7)}  ${s.reason}`,
   );
   lines.push("", report.summary);
   return `${lines.join("\n")}\n`;

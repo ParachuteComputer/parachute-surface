@@ -1,5 +1,70 @@
 # Changelog — @openparachute/mcp
 
+## [0.2.0-rc.3] - 2026-09-05
+
+- **`channel-context` no longer needs to be told its vault.** `append` and
+  `init` accept `--vault` as before, but without it they ask the hub which
+  vault backs this `(relay, channel)` pair — `GET /api/channel-vault`,
+  NIP-98-signed with the agent's own key, the same signing path every other
+  hub call takes. Relay comes from `--relay` / `$BUZZ_RELAY_URL`, channel from
+  `--channel` / `$BUZZ_CHANNEL_ID` / `$BUZZ_GIT_ORIGIN_CHANNEL_ID` (buzz-acp
+  sets the last on stream channels). Until now the binding was a fact the hub
+  already owned and every agent had to be told out of band and repeat on every
+  invocation; one wrong name and the turn appended to the wrong vault. An
+  explicit `--vault` still wins and makes **no** hub call. `read` never needed
+  one and still asks nothing (`query-notes` fans out across every reachable
+  vault, and the channel path is unique).
+- An unbound channel is exit `1` naming both fixes — the hub-side
+  `parachute vault attach-channel --relay <host> --channel <uuid> --vault
+  <name>`, or passing `--vault` yourself — and it is raised **before** the MCP
+  session opens and before stdin is read, so an unattached channel costs
+  nothing and loses no entry.
+- The route's two 404s are kept apart on purpose. `{"error":"not_found"}` from
+  the route itself means "this channel is unbound"; a hub's generic plain-text
+  404 means "this hub predates the route". Conflating them would send an
+  operator to an attach command their hub does not have. `channel-vault.ts`
+  never throws — every outcome, including a dead network, is a variant of
+  `ChannelVaultLookup`, because its loudest caller is `doctor`, whose whole
+  contract is that a diagnostic step does not crash the diagnosis.
+- **`doctor` gains a fifth step, `channel`**, beside `key|hub|vaults|write`,
+  with `--relay` / `--channel` flags. Bound → `PASS` naming the vault, the
+  binding's mode (`sync`/`frozen`) and its sync age. No channel id, an unbound
+  channel, a hub that predates the route, or a failed lookup → `SKIP` with the
+  next thing to do. It can **never FAIL**: exit `0` still means exactly the
+  four access checks it always did, because the binding is the hub operator's
+  to create and nothing the agent can do would turn a red step green.
+- **Namespaced tool names now respect SEP-986's 128-character cap.** In
+  multi-hub mode a tool whose `<alias>__<tool>` name would exceed 128
+  characters is omitted from `tools/list` with a stderr diagnostic naming the
+  hub and the tool, instead of being advertised under a name the format does
+  not allow. Nothing is renamed — single-hub mode passes names through
+  unchanged, and every namespaced name that already fit is untouched. The
+  remedy for an omitted tool is a shorter hub alias. Applies to both the
+  bridge and `parachute-mcp tools`.
+- **`call update-note` and `call delete-note` resolve a path-only argument.**
+  Both tools' `id` parameter is documented id-**or**-path, and the
+  `channel-context` convention already relies on it, but the raw `call`
+  pass-through never made the substitution — so `{"path": …}` with no `id`
+  reached the hub with `id` unset and came back as the hub's unstructured
+  `Error: undefined is not an object (evaluating 'idOrPath.match')` fallback.
+  `runCall` now maps `path` → `id` for those two tools only, and only when
+  `id` is absent, so `update-note`'s separate `path`-as-rename semantics stay
+  intact when a caller passes both. Deliberately NOT extended to
+  `query-notes`'s top-level `id`: an absent `id` there selects a different
+  LIST mode, not "no target". `query-notes`'s `near.note_id` and `find-path`'s
+  `source`/`target` share the contract under other key names and are out of
+  reach of a `path`-keyed substitution.
+- **`call` classifies tool errors instead of falling through.** `runCall` had
+  no catch around `session.callTool`, so a JSON-RPC error out of `tools/call`
+  (a hub that throws rather than answering with `isError`) reached `runCli`'s
+  generic classifier and exited `2` — the transport code — for what is a
+  tool failure. It now goes through `classifyError` like `doctor` and
+  `channel-context`, so the same shape of failure gets the same exit `4`.
+- README: the binary-install recipes point at `mcp-v0.2.0-rc.2`, the first
+  version to ship single-file executables (`0.1.0` shipped none). This release
+  supersedes them — `mcp-v0.2.0-rc.3` carries the same four executables plus
+  `SHA256SUMS`.
+
 ## [0.2.0-rc.2] - 2026-09-02
 
 - **`parachute-mcp doctor`** — one command that proves a harness has working

@@ -28,6 +28,7 @@
  * is prose an agent composed and has no business in a `ps` listing.
  */
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { type ChannelVaultLookup, OLD_HUB_HINT, attachHint } from "./channel-vault.js";
 import { EXIT, UsageError, messageOf } from "./exit.js";
 
 /** The tag every channel-context note carries, per the vault-side runbook. */
@@ -57,11 +58,16 @@ export type ChannelAction = "read" | "append" | "init";
 
 export interface ChannelOptions {
   action: ChannelAction;
-  /** `--vault` — required for `append`/`init`, passed through on `read`. */
+  /**
+   * `--vault`. OPTIONAL everywhere now: on `read` the hub fans `query-notes`
+   * out across every reachable vault, and on `append`/`init` an absent name is
+   * resolved from the hub's `(relay, channel)` binding. An explicit value
+   * always wins and costs no hub round trip.
+   */
   vault?: string;
   /** `--relay` — defaults to `$BUZZ_RELAY_URL`. */
   relay?: string;
-  /** `--channel` — defaults to `$BUZZ_CHANNEL_ID`. */
+  /** `--channel` — defaults to `$BUZZ_CHANNEL_ID`, then `$BUZZ_GIT_ORIGIN_CHANNEL_ID`. */
   channel?: string;
   /** `--tail`, in bytes. */
   tail: number;
@@ -85,6 +91,16 @@ export interface ChannelDeps {
   classify(err: unknown): number;
   /** The entry text, for `append` only. Read before any session is opened. */
   readStdin(): Promise<string>;
+  /**
+   * Ask the hub which vault backs this channel. Called ONLY when the action
+   * needs a vault and `--vault` was not given — so the common, explicit case
+   * still makes exactly the calls it always did.
+   *
+   * Injected (and never throwing — see channel-vault.ts) for the same reason
+   * everything else here is: the unit tests drive the unbound and old-hub
+   * branches without a network.
+   */
+  resolveVault(target: ChannelTarget): Promise<ChannelVaultLookup>;
   env: NodeJS.ProcessEnv;
 }
 
@@ -137,38 +153,60 @@ export function relayHostOf(raw: string | undefined): string | undefined {
  * `Channels/` namespace is refused rather than normalized. A caller passing a
  * bad `--channel` should hear about it, not silently append to another note.
  */
-function assertSegment(value: string, what: string): string {
+function assertSegment(value: string, what: string, command = "channel-context"): string {
   if (/[/\\]/.test(value) || value.includes("..") || /\s/.test(value)) {
     throw new UsageError(
-      `channel-context: ${what} must be a single path segment (no slashes, "..", or whitespace)`,
+      `${command}: ${what} must be a single path segment (no slashes, "..", or whitespace)`,
     );
   }
   return value;
 }
 
 /**
+ * Which channel id this invocation is about, from the flag or the environment.
+ *
+ * `$BUZZ_GIT_ORIGIN_CHANNEL_ID` is the SECOND fallback because buzz-acp does
+ * not inject a general `$BUZZ_CHANNEL_ID` into MCP subprocesses at all today
+ * (`build_mcp_servers` injects only the relay URL, the key and the auth tag);
+ * the per-channel git hook injects `BUZZ_GIT_ORIGIN_CHANNEL_ID`, and only for
+ * stream channels. Reading both means an agent on a stream channel needs no
+ * flag, and every other agent passes `--channel <uuid>` — which it can read
+ * off its own turn prompt (`Channel: <name> (#<uuid>)`).
+ */
+export function channelIdOf(
+  opts: { channel?: string },
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  const raw = (opts.channel ?? env.BUZZ_CHANNEL_ID ?? env.BUZZ_GIT_ORIGIN_CHANNEL_ID ?? "").trim();
+  return raw === "" ? undefined : raw;
+}
+
+/**
  * Where this channel's context note lives. Both inputs may come from the
  * environment buzz-acp injects, which is what makes the command a one-liner
- * inside an agent turn: `parachute-mcp channel-context read --vault uni`.
+ * inside an agent turn: `parachute-mcp channel-context read`.
+ *
+ * `what` labels the UsageError, because `doctor` derives the same target and a
+ * message reading "channel-context: needs a channel" out of `doctor` sends the
+ * operator to the wrong command.
  */
 export function deriveTarget(
   opts: { relay?: string; channel?: string },
   env: NodeJS.ProcessEnv,
+  what = "channel-context",
 ): ChannelTarget {
   const relayHost = relayHostOf(opts.relay ?? env.BUZZ_RELAY_URL);
   if (!relayHost) {
+    throw new UsageError(`${what}: needs a relay — pass --relay <wss-url> or set $BUZZ_RELAY_URL`);
+  }
+  const rawChannel = channelIdOf(opts, env);
+  if (rawChannel === undefined) {
     throw new UsageError(
-      "channel-context: needs a relay — pass --relay <wss-url> or set $BUZZ_RELAY_URL",
+      `${what}: needs a channel — pass --channel <uuid> or set $BUZZ_CHANNEL_ID (or $BUZZ_GIT_ORIGIN_CHANNEL_ID, which buzz-acp sets on stream channels)`,
     );
   }
-  const rawChannel = (opts.channel ?? env.BUZZ_CHANNEL_ID ?? "").trim();
-  if (rawChannel === "") {
-    throw new UsageError(
-      "channel-context: needs a channel — pass --channel <uuid> or set $BUZZ_CHANNEL_ID",
-    );
-  }
-  const channelId = assertSegment(rawChannel, "--channel");
-  assertSegment(relayHost, "--relay host");
+  const channelId = assertSegment(rawChannel, "--channel", what);
+  assertSegment(relayHost, "--relay host", what);
   return { relayHost, channelId, path: `${CHANNEL_PATH_PREFIX}${relayHost}/${channelId}` };
 }
 
@@ -563,6 +601,46 @@ export function normalizeEntry(raw: string): string {
 }
 
 /**
+ * Turn `(relay, channel)` into a vault name by asking the hub, or explain why
+ * that failed.
+ *
+ * Returns the NAME on success. The two answers an operator can act on —
+ * "nothing is attached" and "this hub is too old" — are `UsageError`s (exit 1)
+ * because in both cases `--vault <name>` right now is the fix; a transport or
+ * auth failure comes back as a `ChannelResult` so it keeps its own exit code
+ * instead of being flattened into "usage".
+ *
+ * Runs BEFORE the MCP session is opened: a channel nobody attached should not
+ * cost a connect, and the error arrives before stdin is consumed.
+ */
+async function resolveVaultFromHub(
+  action: ChannelAction,
+  target: ChannelTarget,
+  deps: ChannelDeps,
+): Promise<string | ChannelResult> {
+  const lookup = await deps.resolveVault(target);
+  switch (lookup.status) {
+    case "bound":
+      return lookup.binding.vault;
+    case "unbound":
+      throw new UsageError(
+        `channel-context ${action}: no vault is attached to ${target.relayHost} / ${target.channelId} on this hub — ${attachHint(target.relayHost, target.channelId)}, or pass --vault <name>`,
+      );
+    case "unsupported":
+      throw new UsageError(`channel-context ${action}: ${OLD_HUB_HINT} (${lookup.reason})`);
+    case "error": {
+      const error = `channel-context ${action}: could not ask the hub which vault backs ${target.relayHost} / ${target.channelId}: ${lookup.reason}`;
+      return {
+        exitCode: lookup.exitCode,
+        text: "",
+        json: { action, path: target.path, ok: false, error },
+        error,
+      };
+    }
+  }
+}
+
+/**
  * Run one `channel-context` action. Throws `UsageError` for anything the
  * caller could fix on the command line (checked BEFORE a session is opened, so
  * a typo never costs a hub round trip); every other failure comes back as a
@@ -573,11 +651,15 @@ export async function runChannelContext(
   deps: ChannelDeps,
 ): Promise<ChannelResult> {
   const target = deriveTarget(opts, deps.env);
-  if (opts.action !== "read" && opts.vault === undefined) {
-    throw new UsageError(
-      `channel-context ${opts.action}: needs --vault <name> (the hub requires a vault on every ` +
-        `tool except ${QUERY_NOTES_TOOL})`,
-    );
+  // `read` needs no vault at all — `query-notes` fans out across every vault
+  // the key can reach and the note's path is unique per channel — so it never
+  // pays for the lookup. `append`/`init` do need one, and that is where an
+  // absent `--vault` becomes a question for the hub.
+  let vault = opts.vault;
+  if (opts.action !== "read" && vault === undefined) {
+    const resolved = await resolveVaultFromHub(opts.action, target, deps);
+    if (typeof resolved !== "string") return resolved;
+    vault = resolved;
   }
   const entry = opts.action === "append" ? normalizeEntry(await deps.readStdin()) : undefined;
 
@@ -587,9 +669,9 @@ export async function runChannelContext(
       case "read":
         return await readTail(session, deps, target, opts);
       case "init":
-        return await initChannel(session, deps, target, opts.vault as string);
+        return await initChannel(session, deps, target, vault as string);
       case "append":
-        return await appendEntry(session, deps, target, opts.vault as string, entry as string);
+        return await appendEntry(session, deps, target, vault as string, entry as string);
     }
   } catch (err) {
     if (err instanceof ChannelFailure) {

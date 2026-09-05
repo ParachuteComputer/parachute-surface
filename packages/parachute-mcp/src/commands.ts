@@ -27,10 +27,13 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { MCP_TOOL_NAME_MAX_LENGTH, namespacedToolName } from "./bridge.js";
+import { type ChannelVaultLookup, lookupChannelVault } from "./channel-vault.js";
 import {
   type ChannelAction,
   type ChannelResult,
   DEFAULT_TAIL_BYTES,
+  deriveTarget,
   runChannelContext,
 } from "./channel.js";
 import { type HubEntry, type ResolvedConfig, resolveConfig } from "./config.js";
@@ -241,6 +244,10 @@ export interface DoctorCommand {
   hub?: string;
   /** `--vault <name>`: which vault the write round-trip probes. */
   vault?: string;
+  /** `--relay <wss-url>`: the `channel` step's relay. Defaults to `$BUZZ_RELAY_URL`. */
+  relay?: string;
+  /** `--channel <uuid>`: the `channel` step's channel. Defaults to the env. */
+  channel?: string;
   /** `--json`: one machine-readable object instead of the PASS/FAIL lines. */
   json: boolean;
   /** Per-request budget in ms (`--timeout`, seconds on the wire). */
@@ -252,11 +259,14 @@ export interface ChannelContextCommand {
   action: ChannelAction;
   config?: string;
   hub?: string;
-  /** `--vault <name>`: required for append/init, passed through on read. */
+  /**
+   * `--vault <name>`: optional everywhere. Absent on append/init, the vault is
+   * resolved from the hub's channel binding.
+   */
   vault?: string;
   /** `--relay <wss-url>`: defaults to `$BUZZ_RELAY_URL`. */
   relay?: string;
-  /** `--channel <uuid>`: defaults to `$BUZZ_CHANNEL_ID`. */
+  /** `--channel <uuid>`: defaults to `$BUZZ_CHANNEL_ID`, then `$BUZZ_GIT_ORIGIN_CHANNEL_ID`. */
   channel?: string;
   /** `--tail <bytes>`: how much of the note's end `read` prints. */
   tail: number;
@@ -391,6 +401,8 @@ function parseDoctor(argv: string[]): DoctorCommand {
     else if (isFlag(arg, "--config")) [cmd.config, i] = takeValue(argv, i, "--config");
     else if (isFlag(arg, "--hub")) [cmd.hub, i] = takeValue(argv, i, "--hub");
     else if (isFlag(arg, "--vault")) [cmd.vault, i] = takeValue(argv, i, "--vault");
+    else if (isFlag(arg, "--relay")) [cmd.relay, i] = takeValue(argv, i, "--relay");
+    else if (isFlag(arg, "--channel")) [cmd.channel, i] = takeValue(argv, i, "--channel");
     else if (isFlag(arg, "--timeout")) {
       let value: string;
       [value, i] = takeValue(argv, i, "--timeout");
@@ -723,8 +735,15 @@ async function runTools(cmd: ToolsCommand, io: Io): Promise<number> {
     try {
       session = await HubSession.open(hub, signingFetch, cmd.timeout);
       for (const tool of await session.listTools()) {
+        const name = namespaced ? namespacedToolName(hub.alias, tool.name) : tool.name;
+        if (name === null) {
+          io.err(
+            `hub "${hub.alias}": omitting tool "${tool.name}": namespaced name exceeds ${MCP_TOOL_NAME_MAX_LENGTH} characters`,
+          );
+          continue;
+        }
         listed.push({
-          name: namespaced ? `${hub.alias}${NAMESPACE_SEP}${tool.name}` : tool.name,
+          name,
           description: tool.description ?? "",
         });
       }
@@ -801,6 +820,53 @@ function withNewline(text: string): string {
   return text.endsWith("\n") ? text : `${text}\n`;
 }
 
+/**
+ * Tools whose `id` parameter is a documented id-OR-path lookup key (vault
+ * `core/src/mcp.ts`'s `resolveNote`, manifest'd in `core/src/mcp-manifest.ts`
+ * as "Note ID, path, or (fallback...) its H1 title") — the same convention
+ * `channel-context` already relies on (`appendEntry` sends `id:
+ * target.path`, never a separate `path`). `call` is a raw pass-through for
+ * any tool on any hub, so this maps `path` -> `id` only for the tools known
+ * to share that contract: an agent that reaches for the more obvious `path`
+ * key (there is no such thing as a "path" parameter on either tool) gets the
+ * note the hub would have found anyway, instead of an `id`-less call.
+ *
+ * `update-note` ALSO accepts `path` as a genuine field (renames the note), so
+ * this only fires when `id` is absent — a caller passing both keeps its
+ * rename intent untouched. `delete-note` has no such second meaning for
+ * `path` (`core/src/mcp.ts:2194-2199`: `requireNote(db, params.id)` and
+ * nothing else reads `params.path`), so the mapping is unconditionally safe
+ * there whenever `id` is absent. See surface#236: `call update-note` with
+ * `path` and no `id` reached the hub with `id` unset, and the hub's fallback
+ * for an unresolvable id/path is an unstructured `Error: ...` tool result;
+ * `call delete-note` hits the exact same fallback the same way
+ * (`core/src/core.test.ts:4520` "delete-note accepts path" documents the
+ * contract on the vault side).
+ *
+ * Checked the rest of the manifest for the same id-or-path contract under a
+ * DIFFERENT key name, which this substitution can't help (it only ever reads
+ * `args.id`/`args.path`): `query-notes`'s `near.note_id` and `find-path`'s
+ * `source`/`target` are id-or-path too, but neither is spelled `id`, so a
+ * `path`-key caller can't collide with them the way it can with
+ * update-note/delete-note.
+ *
+ * `query-notes`'s own top-level `id` is ALSO id-or-path and IS spelled `id`,
+ * but deliberately excluded here: unlike update-note/delete-note, an absent
+ * `id` on query-notes is not "no target" — it's a totally different LIST
+ * mode (tag/search/near/etc. filters), so promoting a stray `path` key into
+ * `id` would silently turn a list call into a single-note lookup, a
+ * behavior change outside what #236 reported (the reporter found
+ * query-notes-by-`path` "fine" as-is) and not covered by a test here.
+ */
+const ID_OR_PATH_TOOLS = new Set(["update-note", "delete-note"]);
+
+function resolveIdOrPath(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  if (!ID_OR_PATH_TOOLS.has(toolName)) return args;
+  if (args.id !== undefined || typeof args.path !== "string") return args;
+  const { path, ...rest } = args;
+  return { ...rest, id: path };
+}
+
 async function runCall(cmd: CallCommand, io: Io): Promise<number> {
   const { config, key } = resolveKeyAndConfig(
     cmd.config,
@@ -816,10 +882,12 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
         ? parseToolArgs(cmd.args.json, "the JSON arguments")
         : {};
 
-  let session: HubSession | undefined;
+  // A connect failure here is NOT caught below — it propagates to runCli's
+  // generic classification, same as `tools`: an unreachable hub is a
+  // transport fault, not the tool failing.
+  const session = await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout);
   try {
-    session = await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout);
-    const result = await session.callTool(toolName, args);
+    const result = await session.callTool(toolName, resolveIdOrPath(toolName, args));
     const text = singleTextBlock(result);
     if (result.isError) {
       io.err(text ?? JSON.stringify(result, null, 2));
@@ -827,8 +895,16 @@ async function runCall(cmd: CallCommand, io: Io): Promise<number> {
     }
     io.out(text !== undefined ? withNewline(text) : `${JSON.stringify(result, null, 2)}\n`);
     return EXIT.ok;
+  } catch (err) {
+    // A JSON-RPC error out of tools/call (the hub throwing instead of
+    // answering with `isError`) is still the TOOL failing, not the network —
+    // classify it the same way doctor/channel-context do (`classifyError`
+    // below), so it doesn't fall through to runCli's generic transport
+    // default and every failure here resolves to a real, non-zero EXIT code.
+    io.err(`call: ${messageOf(err)}`);
+    return classifyError(err, "tool");
   } finally {
-    await session?.close();
+    await session.close();
   }
 }
 
@@ -913,9 +989,9 @@ async function runHttp(cmd: HttpCommand, io: Io): Promise<number> {
  */
 /**
  * Map a thrown value to this CLI's exit codes, given WHERE it came from.
- * Shared by `doctor` and `channel-context`: both drive tool calls through an
- * injected runner and both must tell "the tool said no" (4) apart from "the
- * network is down" (2).
+ * Shared by `call`, `doctor` and `channel-context`: all three drive tool
+ * calls and must tell "the tool said no" (4) apart from "the network is
+ * down" (2).
  */
 function classifyError(err: unknown, phase: "transport" | "tool"): number {
   // Auth first: a 401/403 is an auth failure whichever phase surfaced it.
@@ -931,6 +1007,29 @@ function keySourceLabel(config: ResolvedConfig, env: NodeJS.ProcessEnv): string 
   if (env.PARACHUTE_NSEC_FILE) return "PARACHUTE_NSEC_FILE (a key file)";
   if (config.keyFile) return 'config "keyFile"';
   return "BUZZ_PRIVATE_KEY (injected nsec value)";
+}
+
+/**
+ * Ask the hub which vault backs `(relay, channel)`, over the SAME NIP-98
+ * signing path every other hub call in this package uses.
+ *
+ * The `fetch` is freshly signing per request (`makeSigningFetch`), because the
+ * hub burns event ids even on failed auth — a re-sent Authorization header is
+ * a rejected one.
+ */
+function channelVaultLookup(
+  hub: HubEntry,
+  key: LoadedKey,
+  timeoutMs: number,
+): (target: { relayHost: string; channelId: string }) => Promise<ChannelVaultLookup> {
+  return async (target) =>
+    await lookupChannelVault({
+      hubUrl: hub.url,
+      relayHost: target.relayHost,
+      channelId: target.channelId,
+      fetch: makeSigningFetch(key.sk),
+      timeoutMs,
+    });
 }
 
 /**
@@ -956,6 +1055,20 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
     return resolved;
   };
 
+  const soleDoctorHub = (): HubEntry => {
+    const { config } = resolveOnce();
+    const hubs = targetHubs(config, cmd.hub);
+    const only = hubs[0];
+    if (hubs.length !== 1 || !only) {
+      throw new UsageError(
+        `doctor checks one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
+          .map((h) => h.alias)
+          .join(", ")})`,
+      );
+    }
+    return only;
+  };
+
   const deps: DoctorDeps = {
     version: PARACHUTE_MCP_VERSION,
     now: () => new Date(),
@@ -963,22 +1076,31 @@ async function runDoctorCommand(cmd: DoctorCommand, io: Io): Promise<number> {
       const { config, key } = resolveOnce();
       return { npub: key.npub, source: keySourceLabel(config, env) };
     },
-    resolveHub: () => {
-      const { config } = resolveOnce();
-      const hubs = targetHubs(config, cmd.hub);
-      const only = hubs[0];
-      if (hubs.length !== 1 || !only) {
-        throw new UsageError(
-          `doctor checks one hub at a time — pass --hub <alias|url> (configured: ${config.hubs
-            .map((h) => h.alias)
-            .join(", ")})`,
-        );
-      }
-      return only;
-    },
+    resolveHub: soleDoctorHub,
     openSession: async (hub): Promise<DoctorSession> =>
       await HubSession.open(hub, makeSigningFetch(resolveOnce().key.sk), cmd.timeout),
     classify: classifyError,
+    // The `channel` step's two injected halves. `deriveTarget` throws a
+    // UsageError naming the missing flag; the step reports that verbatim as
+    // its SKIP reason, which is exactly the "how do I make this run?" line an
+    // operator needs.
+    channelTarget: () => {
+      try {
+        const target = deriveTarget(
+          {
+            ...(cmd.relay !== undefined ? { relay: cmd.relay } : {}),
+            ...(cmd.channel !== undefined ? { channel: cmd.channel } : {}),
+          },
+          env,
+          "doctor",
+        );
+        return { ok: true, target: { relayHost: target.relayHost, channelId: target.channelId } };
+      } catch (err) {
+        return { ok: false, reason: messageOf(err) };
+      }
+    },
+    lookupChannelVault: async (target) =>
+      await channelVaultLookup(soleDoctorHub(), resolveOnce().key, cmd.timeout)(target),
   };
 
   const report: DoctorReport = await runDoctor(
@@ -1038,6 +1160,7 @@ async function runChannelContextCommand(cmd: ChannelContextCommand, io: Io): Pro
     {
       env: io.env ?? process.env,
       openSession: async () => await HubSession.open(hub, makeSigningFetch(key.sk), cmd.timeout),
+      resolveVault: channelVaultLookup(hub, key, cmd.timeout),
       // Tool phase only: a connect failure is thrown before the runner's
       // guarded region and is mapped by `runCli`.
       classify: (err) => classifyError(err, "tool"),
