@@ -115,7 +115,7 @@
     },
     "packages/parachute-mcp": {
       "name": "@openparachute/mcp",
-      "version": "0.2.0-rc.2",
+      "version": "0.2.0-rc.3",
       "bin": {
         "parachute-mcp": "./dist/cli.js",
       },
