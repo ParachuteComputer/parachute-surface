@@ -7,8 +7,9 @@
  * Hermetic: loopback only, throwaway keys generated in-test.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
-import { ParachuteBridge } from "../bridge.js";
+import { ParachuteBridge, isSessionExpiry } from "../bridge.js";
 import { makeSigningFetch } from "../signing-fetch.js";
 import { StubHub, type StubHubOptions, freePort } from "./stub-hub.js";
 
@@ -33,8 +34,11 @@ function stub(opts: StubHubOptions): StubHub {
   return hub;
 }
 
-function bridgeFor(hubs: Array<{ alias: string; url: string }>): ParachuteBridge {
-  const bridge = new ParachuteBridge(hubs, makeSigningFetch(sk));
+function bridgeFor(
+  hubs: Array<{ alias: string; url: string }>,
+  log: (message: string) => void = () => {},
+): ParachuteBridge {
+  const bridge = new ParachuteBridge(hubs, makeSigningFetch(sk), log);
   cleanup.push(() => bridge.close());
   return bridge;
 }
@@ -116,9 +120,43 @@ describe("two hubs", () => {
     expect(bridge.callTool("nowhere__echo", {})).rejects.toThrow(/unknown tool "nowhere__echo"/);
     expectCleanAuth(home, techne);
   });
+
+  test("omits a namespaced tool that would exceed the MCP 128-character cap", async () => {
+    const alias = "a".repeat(64);
+    const boundary = "x".repeat(62);
+    const tooLong = "y".repeat(63);
+    const home = stub({
+      label: "home",
+      tools: [
+        { name: boundary, description: "fits exactly", inputSchema: ECHO_SCHEMA },
+        { name: tooLong, description: "too long after prefixing", inputSchema: ECHO_SCHEMA },
+      ],
+    });
+    const other = stub({ label: "other", tools: [] });
+    const logs: string[] = [];
+    const bridge = bridgeFor(
+      [
+        { alias, url: home.url },
+        { alias: "other", url: other.url },
+      ],
+      (message) => logs.push(message),
+    );
+    await bridge.start();
+
+    expect((await bridge.listTools()).map((tool) => tool.name)).toEqual([`${alias}__${boundary}`]);
+    expect(logs).toEqual([
+      `hub "${alias}": omitting tool "${tooLong}": namespaced name exceeds 128 characters`,
+    ]);
+  });
 });
 
 describe("resilience", () => {
+  test("a bare 404 without a live session is not treated as session expiry", () => {
+    const notFound = new StreamableHTTPError(404, "not found");
+    expect(isSessionExpiry(notFound, false)).toBe(false);
+    expect(isSessionExpiry(notFound, true)).toBe(true);
+  });
+
   test("a hub that is down at startup does not kill the bridge, and is retried lazily", async () => {
     const live = stub({
       label: "live",

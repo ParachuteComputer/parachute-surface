@@ -4,9 +4,8 @@
  *
  * - Single hub → tool names pass through unchanged.
  * - Multiple hubs → names are namespaced `<alias>__<tool>` and calls are
- *   routed by prefix. Namespaced names stay inside the MCP tool-name format
- *   (SEP-986: `^[A-Za-z0-9._-]{1,128}$`) because aliases are validated in
- *   config.ts to contain no `__` and no leading/trailing `_`.
+ *   routed by prefix. Namespaced names that would exceed SEP-986's 128-character
+ *   tool-name cap are omitted with a stderr diagnostic.
  * - A hub that is down does NOT kill the bridge: startup logs the failure to
  *   stderr and carries on with the hubs that answered; every later
  *   tools/list / tools/call retries the dead hub lazily.
@@ -28,11 +27,17 @@ import type { HubEntry } from "./config.js";
 import { PARACHUTE_MCP_VERSION } from "./version.js";
 
 const NAMESPACE_SEP = "__";
+export const MCP_TOOL_NAME_MAX_LENGTH = 128;
+
+export function namespacedToolName(alias: string, toolName: string): string | null {
+  const name = `${alias}${NAMESPACE_SEP}${toolName}`;
+  return name.length <= MCP_TOOL_NAME_MAX_LENGTH ? name : null;
+}
 
 /** Stderr-only logger — stdout is the MCP wire and must stay clean. */
 export type Log = (msg: string) => void;
 
-function isSessionExpiry(err: unknown, hadSession: boolean): boolean {
+export function isSessionExpiry(err: unknown, hadSession: boolean): boolean {
   // MCP Streamable HTTP: a server that no longer recognizes the session id
   // answers 404 and the client MUST re-initialize. Only a 404 on a connection
   // that actually HOLDS a session id means expiry — a bare 404 (e.g. a typo'd
@@ -181,9 +186,18 @@ export class ParachuteBridge {
         continue;
       }
       for (const tool of tools) {
-        out.push(
-          this.namespaced ? { ...tool, name: `${hub.alias}${NAMESPACE_SEP}${tool.name}` } : tool,
-        );
+        if (!this.namespaced) {
+          out.push(tool);
+          continue;
+        }
+        const name = namespacedToolName(hub.alias, tool.name);
+        if (name === null) {
+          this.log(
+            `hub "${hub.alias}": omitting tool "${tool.name}": namespaced name exceeds ${MCP_TOOL_NAME_MAX_LENGTH} characters`,
+          );
+          continue;
+        }
+        out.push({ ...tool, name });
       }
     }
     return out;

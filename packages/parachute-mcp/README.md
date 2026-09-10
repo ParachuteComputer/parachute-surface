@@ -45,7 +45,7 @@ or emulated CPU it dies with SIGILL — rebuild with
 
 ```sh
 # pick your platform: linux-x64 | linux-arm64 | darwin-arm64 | darwin-x64
-VERSION=0.1.0
+VERSION=0.2.0-rc.2
 PLATFORM=linux-x64
 curl -fsSL -o /usr/local/bin/parachute-mcp \
   "https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}/parachute-mcp-${VERSION}-${PLATFORM}"
@@ -136,12 +136,13 @@ proof; the rest is wiring.
 
 ```
 $ parachute-mcp doctor
-PASS  key     signing as npub1abc… (from config "keyFile")
-PASS  hub     https://uni.example.ts.net/mcp: initialize + tools/list ok, 21 tools — server parachute-account 0.1.0
-PASS  vaults  2 reachable: uni, team (grant covers this listed subset)
-PASS  write   uni: created, read back byte-exact, deleted — .doctor/npub1abcdefg-20260902T041500Z
+PASS  key      signing as npub1abc… (from config "keyFile")
+PASS  hub      https://uni.example.ts.net/mcp: initialize + tools/list ok, 21 tools — server parachute-account 0.1.0
+PASS  vaults   2 reachable: uni, team (grant covers this listed subset)
+PASS  write    uni: created, read back byte-exact, deleted — .doctor/npub1abcdefg-20260902T041500Z
+SKIP  channel  doctor: needs a channel — pass --channel <uuid> or set $BUZZ_CHANNEL_ID
 
-PASS — 4/4 checks passed
+PASS — 4/5 checks passed, 1 skipped
 $ echo $?
 0
 ```
@@ -293,7 +294,7 @@ from the GitHub release `mcp-v<version>`, **verify the checksum**, and point
 the harness at the absolute path:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.2.0-rc.2
 PLATFORM=linux-x64
 BASE="https://github.com/ParachuteComputer/parachute-surface/releases/download/mcp-v${VERSION}"
 curl -fsSL -O "${BASE}/parachute-mcp-${VERSION}-${PLATFORM}"
@@ -320,10 +321,11 @@ signing code; five one-shot subcommands instead of a stdio server:
 ### `doctor` — prove the whole chain
 
 ```sh
-parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json] [--timeout <s>]
+parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json] [--timeout <s>] \
+    [--relay <wss-url>] [--channel <uuid>]
 ```
 
-Four checks, in dependency order, each `PASS` / `FAIL` / `SKIP` with a one-line
+Five checks, in dependency order, each `PASS` / `FAIL` / `SKIP` with a one-line
 reason. The run **stops at the first hard failure** — reporting "vaults: FAIL"
 when the key never loaded is noise, not diagnosis.
 
@@ -333,6 +335,7 @@ when the key never loaded is noise, not diagnosis.
 | `hub` | A NIP-98-signed `initialize` + `tools/list` against the hub's `/mcp` door. Reports the tool count and the server name/version when the hub sends one. | Unreachable/timeout: exit `2`. Signature rejected (`401`/`403`): exit `3`. |
 | `vaults` | `list-vaults` — which vaults this key can reach, and whether the grant covers **all** of the hub's vaults or a listed subset. | Tool error: exit `4`. **Zero reachable vaults is a FAIL, exit `4`** — the key authenticates and can reach nothing, which is not working access. `SKIP` when the door exposes no `list-vaults` (i.e. it is a vault door, not an account door). |
 | `write` | A real round-trip: create a note, read it back **byte-exact**, delete it. | Refused / mismatch: exit `4`. |
+| `channel` | Which vault backs the Buzz channel this agent answers on, from the hub's `GET /api/channel-vault`. Reports the vault name, the binding's mode (`sync`/`frozen`) and when it last synced. | **Never fails.** `SKIP` when there is no channel id, when the channel has no vault attached (with the attach command to run), when the hub does not serve the route, or when the lookup itself failed. |
 
 The write probe only runs when `--vault <name>` is given, or exactly one vault
 is reachable — with several vaults and no `--vault` it `SKIP`s and says which
@@ -349,6 +352,21 @@ Cleanup runs even when the read-back fails, and after a create that timed out
 leaves nothing behind; if the door exposes no `delete-note`, the note is relabelled
 "doctor probe, safe to delete" and the step says so rather than claiming it
 tidied up.
+
+The `channel` step needs a relay (`--relay`, default `$BUZZ_RELAY_URL`) and a
+channel id (`--channel`, default `$BUZZ_CHANNEL_ID`, then
+`$BUZZ_GIT_ORIGIN_CHANNEL_ID`), and a hub that serves `GET /api/channel-vault`
+— parachute-hub `next` after #947, **unreleased at the time of writing**.
+Against an older hub it `SKIP`s saying so, which is deliberately a *different*
+message from "this channel has no vault attached": telling an operator to run
+an attach command their hub does not have is a worse answer than telling them
+to upgrade.
+
+It is also the one step that can never turn a passing `doctor` red. Exit `0`
+still means exactly what it always did — a key resolved, the hub accepts it,
+the grant reaches a vault, a note round-trips — and the binding is the *hub
+operator's* to create, so nothing the agent can do on its own would turn a red
+step green.
 
 `doctor` checks **one hub at a time**. With several configured and no `--hub`
 it exits `1` naming the aliases, rather than silently picking one — "prove I
@@ -367,7 +385,7 @@ have access" has to name which door it proved.
     { "step": "key", "status": "pass", "reason": "signing as npub1… (from config \"keyFile\")",
       "details": { "npub": "npub1…", "source": "config \"keyFile\"" } }
   ],
-  "summary": "PASS — 4/4 checks passed"
+  "summary": "PASS — 4/5 checks passed, 1 skipped"
 }
 ```
 
@@ -475,20 +493,39 @@ not. This subcommand *is* that convention, so no agent has to re-derive it.
 The path comes from `--relay` (default `$BUZZ_RELAY_URL`, scheme and trailing
 slash stripped, **lower-cased** — hostnames are case-insensitive but vault paths
 are not, and a second note differing only in case makes the vault answer either
-path with `ambiguous_path`) and `--channel` (default `$BUZZ_CHANNEL_ID`) — both injected
-into a Buzz agent's environment already, which is what makes this a one-liner
-inside a turn. `--vault` is required for `append` and `init` (the hub requires
-a vault on every tool except `query-notes`). `--json` prints one object:
-`{exists:false}` for a note that is not there yet, otherwise `path`,
-`byteSize`, `updatedAt` and the tail itself.
+path with `ambiguous_path`) and `--channel` (default `$BUZZ_CHANNEL_ID`, then
+`$BUZZ_GIT_ORIGIN_CHANNEL_ID`, which buzz-acp sets on stream channels) — both
+already in a Buzz agent's environment, which is what makes this a one-liner
+inside a turn. `--json` prints one object: `{exists:false}` for a note that is
+not there yet, otherwise `path`, `byteSize`, `updatedAt` and the tail itself.
+
+**`--vault` is optional.** `read` never needs one — `query-notes` fans out
+across every vault the key can reach, and the note's path is unique per
+channel. `append` and `init` do need one (the hub requires a vault on every
+tool except `query-notes`), and without `--vault` they ask the hub which vault
+backs this `(relay, channel)` pair: `GET /api/channel-vault`, NIP-98-signed
+with the agent's own key, the same signing path every other hub call takes.
+Requires a hub that serves that route — parachute-hub `next` after #947,
+**unreleased at the time of writing**.
+
+An explicit `--vault` always wins and makes **no** hub call. A channel with no
+vault attached is an error (exit `1`) naming both fixes — the hub-side
+`parachute vault attach-channel --relay <host> --channel <uuid> --vault <name>`,
+or passing `--vault` yourself — raised *before* the MCP session opens and
+before stdin is read, so an unattached channel costs nothing and loses no
+entry.
 
 ```sh
 # start of turn: what happened here already?
-$ parachute-mcp channel-context read --vault uni --tail 4000
+$ parachute-mcp channel-context read --tail 4000
 
-# end of turn: one entry, from stdin — never argv
+# end of turn: one entry, from stdin — never argv. The vault comes from
+# the channel's binding on the hub.
 $ printf '## %s · Nou\n- did: fixed the DNS resolver\n- next: nothing\n' "$(date -u +%FT%RZ)" \
-    | parachute-mcp channel-context append --vault uni
+    | parachute-mcp channel-context append
+
+# or name it yourself, which skips the lookup entirely
+$ ... | parachute-mcp channel-context append --vault uni
 ```
 
 `read` fetches the tail as a byte window (`content_offset` / `content_length`),
@@ -570,7 +607,7 @@ the bridge says so on stderr.
 | Field | Meaning |
 |---|---|
 | `keyFile` | Path to the signing key file (`nsec1…` or 64-char hex, `~` ok). Overridden by `PARACHUTE_NSEC_FILE`; falls back to the `BUZZ_PRIVATE_KEY` value if no key file is set. |
-| `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and stays a valid MCP tool name (SEP-986: `^[A-Za-z0-9._-]{1,128}$`). |
+| `hubs[].alias` | Namespace prefix. Letters/digits/`_`/`-`, must start and end alphanumeric, no `__` — so `<alias>__<tool>` routes unambiguously and satisfies the MCP tool-name character grammar. In multi-hub mode, a namespaced name over the 128-character MCP limit is omitted from `tools/list` and the `tools` command with a warning on stderr. |
 | `hubs[].url` | The hub's Streamable-HTTP MCP door, e.g. `https://hub.example/mcp` or a vault door `https://hub.example/vault/<name>/mcp`. |
 
 One key signs for every configured hub; the NIP-98 `u` tag is always the

@@ -33,16 +33,22 @@ Bridge mode (an MCP server on stdio, for MCP clients):
 
 CLI mode (one-shot commands, for agents that shell out):
   parachute-mcp doctor [--hub <alias|url>] [--vault <name>] [--json]
-      Prove this harness has working Parachute access, in one command. Four
+      [--relay <wss-url>] [--channel <uuid>]
+      Prove this harness has working Parachute access, in one command. Five
       checks, each PASS / FAIL / SKIP with a one-line reason, stopping at the
       first hard failure:
-        key     resolve the signing key; prints the npub, never the secret
-        hub     NIP-98-signed initialize + tools/list against the hub door
-        vaults  list-vaults — which vaults this key can reach
-        write   create a note under .doctor/, read it back
-                byte-exact, delete it (only with --vault, or when exactly one
-                vault is reachable; it never writes anywhere else)
-      Exit 0 means all of that worked. --json emits one object instead.
+        key      resolve the signing key; prints the npub, never the secret
+        hub      NIP-98-signed initialize + tools/list against the hub door
+        vaults   list-vaults — which vaults this key can reach
+        write    create a note under .doctor/, read it back
+                 byte-exact, delete it (only with --vault, or when exactly one
+                 vault is reachable; it never writes anywhere else)
+        channel  which vault backs this Buzz channel, from the hub's
+                 GET /api/channel-vault. PASS or SKIP, never FAIL: an unbound
+                 channel, no channel id, or a hub that predates the route are
+                 all SKIP with the next thing to do.
+      Exit 0 means the first four worked; the channel step never changes it.
+      --json emits one object instead.
 
   parachute-mcp tools [--hub <alias|url>] [--table]
       List the hubs' tools as JSON (name + description) on stdout.
@@ -61,14 +67,17 @@ CLI mode (one-shot commands, for agents that shell out):
       The shared, append-only memory several agents on one Buzz channel keep in
       a vault, as one command. The note is Channels/<relay-host>/<channel-uuid>,
       derived from --relay (default $BUZZ_RELAY_URL, scheme stripped) and
-      --channel (default $BUZZ_CHANNEL_ID).
+      --channel (default $BUZZ_CHANNEL_ID, then $BUZZ_GIT_ORIGIN_CHANNEL_ID).
         read    print the last --tail bytes (default 8000) of the note. A note
                 that does not exist yet prints nothing and exits 0.
         append  read one entry from STDIN (never argv) and append it, creating
                 the note first if this is the channel's first turn.
         init    create the note with its header. Someone else having created it
                 first is success, not an error.
-      --vault is required for append and init.
+      --vault is OPTIONAL. Without it, append and init ask the hub which vault
+      backs this channel (GET /api/channel-vault); an explicit --vault wins and
+      makes no such call. A channel with no vault attached is an error naming
+      the attach command; read never needs a vault at all.
 
   parachute-mcp http <METHOD> <url> [--body -] [-H 'Name: value']...
       One signed HTTP request — a signed curl for hub endpoints that are not

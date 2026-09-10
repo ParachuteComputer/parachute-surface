@@ -11,6 +11,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { ChannelVaultLookup } from "../channel-vault.js";
 import {
   type ChannelDeps,
   type ChannelOptions,
@@ -139,11 +140,36 @@ function fakeHub(opts: FakeHubOptions = {}): FakeHub {
   return { session, calls, closed: () => closes, content: () => note?.content };
 }
 
+/**
+ * Records every `(relay, channel)` the runner asked the hub about, so a test
+ * can assert BOTH answers that matter: what came back, and — for an explicit
+ * `--vault` — that nothing was asked at all.
+ */
+interface FakeResolver {
+  resolveVault: ChannelDeps["resolveVault"];
+  asked: () => Array<{ relayHost: string; channelId: string }>;
+}
+
+function resolver(lookup: ChannelVaultLookup): FakeResolver {
+  const asked: Array<{ relayHost: string; channelId: string }> = [];
+  return {
+    asked: () => asked,
+    resolveVault: async (target) => {
+      asked.push({ relayHost: target.relayHost, channelId: target.channelId });
+      return lookup;
+    },
+  };
+}
+
 function deps(hub: FakeHub, over: Partial<ChannelDeps> = {}): ChannelDeps {
   return {
     openSession: async () => hub.session,
     classify: () => EXIT.toolError,
     readStdin: async () => "",
+    // Default: nothing is attached. Every pre-existing test passes an explicit
+    // --vault, so this default is never consulted by them — which is itself the
+    // point of the "explicit --vault asks nothing" test below.
+    resolveVault: async () => ({ status: "unbound" }),
     env: {},
     ...over,
   };
@@ -198,6 +224,30 @@ describe("path derivation", () => {
   test("falls back to $BUZZ_RELAY_URL and $BUZZ_CHANNEL_ID", () => {
     const target = deriveTarget({}, { BUZZ_RELAY_URL: RELAY, BUZZ_CHANNEL_ID: CHANNEL });
     expect(target.path).toBe(PATH);
+  });
+
+  test("falls back to $BUZZ_GIT_ORIGIN_CHANNEL_ID when $BUZZ_CHANNEL_ID is unset", () => {
+    // buzz-acp injects no general BUZZ_CHANNEL_ID into MCP subprocesses today;
+    // the per-channel git hook injects BUZZ_GIT_ORIGIN_CHANNEL_ID, and only on
+    // stream channels. Reading both is what makes this a zero-flag command
+    // there and a one-flag command everywhere else.
+    const target = deriveTarget({}, { BUZZ_RELAY_URL: RELAY, BUZZ_GIT_ORIGIN_CHANNEL_ID: CHANNEL });
+    expect(target.path).toBe(PATH);
+  });
+
+  test("$BUZZ_CHANNEL_ID beats $BUZZ_GIT_ORIGIN_CHANNEL_ID", () => {
+    const target = deriveTarget(
+      {},
+      { BUZZ_RELAY_URL: RELAY, BUZZ_CHANNEL_ID: CHANNEL, BUZZ_GIT_ORIGIN_CHANNEL_ID: "other" },
+    );
+    expect(target.channelId).toBe(CHANNEL);
+  });
+
+  test("the error label names the command that asked, not always channel-context", () => {
+    // `doctor` derives the same target; a skip reason reading
+    // "channel-context: needs a channel" would send the operator to the wrong
+    // command.
+    expect(() => deriveTarget({ relay: RELAY }, {}, "doctor")).toThrow(/^doctor: needs a channel/);
   });
 
   test("explicit flags beat the environment", () => {
@@ -297,6 +347,22 @@ describe("error classification", () => {
 // ---------------------------------------------------------------------------
 
 describe("read", () => {
+  test("never asks the hub which vault backs the channel", async () => {
+    // `query-notes` fans out across every reachable vault and the note's path
+    // is unique per channel, so a read has never needed a vault name. Adding a
+    // round trip to the one path that works today, on an unbound channel,
+    // would be a regression dressed as a feature.
+    const hub = fakeHub({ note: { content: "# head\n" } });
+    const ask = resolver({ status: "bound", binding: { vault: "parachute" } });
+    const result = await runChannelContext(
+      options(),
+      deps(hub, { resolveVault: ask.resolveVault }),
+    );
+    expect(result.exitCode).toBe(EXIT.ok);
+    expect(ask.asked()).toEqual([]);
+    expect(hub.calls[0]?.args.vault).toBeUndefined();
+  });
+
   test("a small note comes back in ONE call, complete", async () => {
     const hub = fakeHub({ note: { content: "# head\n\nentry one\n" } });
     const result = await runChannelContext(options(), deps(hub));
@@ -488,11 +554,73 @@ describe("append", () => {
     expect(result.json).toMatchObject({ created: true });
   });
 
-  test("--vault is required", async () => {
+  test("no --vault resolves the channel's vault from the hub and appends there", async () => {
+    const hub = fakeHub({ note: { content: "head" } });
+    const ask = resolver({ status: "bound", binding: { vault: "parachute", mode: "sync" } });
+    const result = await runChannelContext(
+      options({ action: "append" }),
+      deps(hub, { readStdin: async () => "entry", resolveVault: ask.resolveVault }),
+    );
+    expect(result.exitCode).toBe(EXIT.ok);
+    expect(ask.asked()).toEqual([{ relayHost: "buzz.unforced.org", channelId: CHANNEL }]);
+    expect(hub.calls[0]?.args.vault).toBe("parachute");
+    expect(hub.content()).toContain("entry");
+  });
+
+  test("an explicit --vault wins and asks the hub NOTHING", async () => {
+    const hub = fakeHub({ note: { content: "head" } });
+    const ask = resolver({ status: "bound", binding: { vault: "wrong-vault" } });
+    const result = await runChannelContext(
+      options({ action: "append", vault: "uni" }),
+      deps(hub, { readStdin: async () => "entry", resolveVault: ask.resolveVault }),
+    );
+    expect(result.exitCode).toBe(EXIT.ok);
+    expect(ask.asked()).toEqual([]);
+    expect(hub.calls[0]?.args.vault).toBe("uni");
+  });
+
+  test("an unbound channel is an error naming the attach command and --vault", async () => {
     const hub = fakeHub({ note: { content: "x" } });
+    let thrown: unknown;
+    try {
+      await runChannelContext(
+        options({ action: "append" }),
+        deps(hub, { readStdin: async () => "x" }),
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
+    const message = (thrown as Error).message;
+    expect(message).toContain("parachute vault attach-channel");
+    expect(message).toContain(CHANNEL);
+    expect(message).toContain("--vault");
+    // Nothing was written, and stdin was never consumed: the lookup happens
+    // before the session opens, so a channel nobody attached costs no connect.
+    expect(hub.calls).toHaveLength(0);
+  });
+
+  test("a hub that predates the route says so, instead of blaming the channel", async () => {
+    const hub = fakeHub();
+    const ask = resolver({ status: "unsupported", reason: "404 without the route's body" });
     await expect(
-      runChannelContext(options({ action: "append" }), deps(hub, { readStdin: async () => "x" })),
-    ).rejects.toThrow(/--vault/);
+      runChannelContext(
+        options({ action: "append" }),
+        deps(hub, { readStdin: async () => "x", resolveVault: ask.resolveVault }),
+      ),
+    ).rejects.toThrow(/does not serve \/api\/channel-vault yet/);
+    expect(hub.calls).toHaveLength(0);
+  });
+
+  test("a lookup that failed keeps its own exit code rather than becoming a usage error", async () => {
+    const hub = fakeHub();
+    const ask = resolver({ status: "error", reason: "401 — rejected", exitCode: EXIT.auth });
+    const result = await runChannelContext(
+      options({ action: "append" }),
+      deps(hub, { readStdin: async () => "x", resolveVault: ask.resolveVault }),
+    );
+    expect(result.exitCode).toBe(EXIT.auth);
+    expect(result.error).toContain("401");
     expect(hub.calls).toHaveLength(0);
   });
 
@@ -553,10 +681,23 @@ describe("init", () => {
     expect(result.json).toMatchObject({ action: "init", path: PATH, ok: false });
   });
 
-  test("--vault is required", async () => {
+  test("no --vault resolves the channel's vault from the hub", async () => {
+    const hub = fakeHub();
+    const ask = resolver({ status: "bound", binding: { vault: "parachute" } });
+    const result = await runChannelContext(
+      options({ action: "init" }),
+      deps(hub, { resolveVault: ask.resolveVault }),
+    );
+    expect(result.exitCode).toBe(EXIT.ok);
+    expect(ask.asked()).toHaveLength(1);
+    expect(hub.calls[0]?.args.vault).toBe("parachute");
+  });
+
+  test("an unbound channel is an error, and nothing is created", async () => {
     const hub = fakeHub();
     await expect(runChannelContext(options({ action: "init" }), deps(hub))).rejects.toThrow(
       /--vault/,
     );
+    expect(hub.calls).toHaveLength(0);
   });
 });
