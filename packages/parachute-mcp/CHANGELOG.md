@@ -1,5 +1,55 @@
 # Changelog — @openparachute/mcp
 
+## [0.2.0] - 2026-09-22
+
+**Stable promotion of 0.2.0-rc.3.** No new code. Suffix-drop only. npm `@rc`
+is 0.2.0-rc.3; this is the matching `@latest`.
+
+The 0.2.0 line (rc.1-rc.3) turns `@openparachute/mcp` from a bridge into an
+artifact you can also drive from a shell:
+
+- **Single-file executables (rc.1).** `bun build --compile` cross-compiles
+  linux-x64, linux-arm64, darwin-arm64 and darwin-x64, plus `SHA256SUMS`,
+  attached to the `mcp-v<version>` GitHub Release — for agent sandboxes with
+  no Node runtime and no npm egress. The compile disables Bun's `.env` and
+  `bunfig.toml` autoload, which default ON for standalone binaries and read
+  the process cwd, where a stray `.env` could have set `PARACHUTE_NSEC_FILE`
+  and redirected which key the bridge signs with. The README recipes pointing
+  at `mcp-v0.2.0-rc.2` are superseded by this release.
+- **A CLI face on the same binary (rc.1).** `tools`, `call` and `http` share
+  the bridge's config resolution, key resolution and NIP-98 signing. Exit
+  codes: `0` ok, `1` usage/config, `2` network/transport, `3` auth, `4` the
+  tool returned `isError`. `--timeout <seconds>` (default 60) bounds every
+  request, and global flags may go before or after the subcommand. Bridge
+  mode is unchanged.
+- **`parachute-mcp doctor` (rc.2).** One command that proves a harness has
+  working Parachute access and names the layer that broke when it does not:
+  `key`, `hub`, `vaults`, `write`, each PASS/FAIL/SKIP with a one-line reason,
+  stopping at the first hard failure, the exit code alone saying which layer
+  failed, and `--json` for one machine-readable object. The write probe runs
+  only with `--vault <name>` or when exactly one vault is reachable, and
+  cleans up even when the read-back fails.
+- **`parachute-mcp channel-context <read|append|init>` (rc.2).** Shared
+  append-only per-channel memory at `Channels/<relay-host>/<channel-uuid>`, so
+  several agents answering in one Buzz channel write one note; `append` takes
+  its entry from STDIN only, never argv, and append is atomic in the vault.
+- **`channel-context` no longer needs to be told its vault (rc.3).** Without
+  `--vault` it asks the hub which vault backs this `(relay, channel)` pair via
+  a NIP-98-signed `GET /api/channel-vault`. **This needs a hub that serves
+  that route and an operator-created binding** (`parachute vault
+  attach-channel`); an unbound channel exits `1` naming both fixes before the
+  MCP session opens and before stdin is read, and a hub predating the route is
+  reported distinctly from an unbound channel. An explicit `--vault` still
+  wins and makes no hub call. `doctor` gains a fifth step, `channel`, which
+  can never FAIL — only PASS or SKIP.
+- **Fixes and release plumbing.** A namespaced `<alias>__<tool>` name over
+  SEP-986's 128-character cap is omitted from `tools/list` with a stderr
+  diagnostic rather than advertised illegally; `call update-note` and `call
+  delete-note` map a path-only argument onto `id`; a JSON-RPC error out of
+  `tools/call` classifies as exit `4`, not the transport's `2`. The binaries
+  are built and version-checked BEFORE the npm publish (#229), and
+  `STABLE_PROMOTION_ALLOWED_PATHS` gained `packages/parachute-mcp` (#231).
+
 ## [0.2.0-rc.3] - 2026-09-05
 
 - **`channel-context` no longer needs to be told its vault.** `append` and
