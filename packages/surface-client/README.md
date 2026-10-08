@@ -295,6 +295,43 @@ Things worth knowing:
 
 ---
 
+## Running inside a sandboxed host
+
+Hosts that embed third-party interfaces in `<iframe sandbox="allow-scripts">` with `connect-src 'none'` can still give them a stock `VaultClient`: the `./frame` subpath tunnels `fetch` over `postMessage`, so identical interface code runs standalone (OAuth) or sandboxed (host-mediated).
+
+```ts
+// Inside the sandboxed frame — no token, no network.
+import { VaultClient } from "@openparachute/surface-client";
+import { createFrameFetch } from "@openparachute/surface-client/frame";
+
+const vault = new VaultClient({
+  vaultUrl: "frame:", accessToken: "frame", fetchImpl: createFrameFetch(),
+});
+
+// In the host page — owns the real credentials.
+import { serveFrameFetch } from "@openparachute/surface-client/frame";
+
+const dispose = serveFrameFetch(
+  () => iframe.contentWindow,
+  (req) => realVaultFetch(req),           // attach the real token here; return {status, headers?, body?}
+  {
+    routes: [
+      { method: "GET", pattern: /^\/api\/notes(\/[^/]+)?$/ },
+      { method: "POST", pattern: /^\/api\/notes$/ },
+    ],
+    // defaults: maxBodyBytes 64 KiB, maxPending 8, ratePerWindow 60 per 10s
+    channel: "my-host",                   // optional; must match createFrameFetch({ channel })
+  },
+);
+```
+
+- Only path + query cross the boundary; only `content-type` / `accept` headers are forwarded. `Authorization` never is. Bodies must be strings (Blob / FormData / streams throw `TypeError`).
+- The host drops messages whose `event.source` isn't the frame, rate-limits every message before parsing, and answers disallowed routes with `403 {"error_type":"frame_route_denied"}` (→ `VaultPermissionError`) **without calling your handler**. Handler failures become `500 {"error_type":"frame_handler_error"}` with no message leakage; too many in-flight requests get `429 frame_busy`; oversize bodies `413 frame_body_too_large`.
+- A request that gets no reply within `timeoutMs` (default 30s) rejects with `TypeError("frame fetch timeout")`, which `VaultClient` reports as `VaultUnreachableError`. Rate-limited messages are dropped silently, so they surface the same way.
+- Route patterns match the path **without** the query string; anchor them (`^…$`). `subscribe()` (SSE) is not supported over this transport.
+
+---
+
 ## Error handling
 
 `VaultClient` rejects with a typed error hierarchy so you can map failures to UI affordances without string-matching messages. All concrete errors extend the abstract `VaultError`, so `catch (e) { if (e instanceof VaultError) … }` catches any vault failure.

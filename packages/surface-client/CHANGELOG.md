@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — sandboxed-frame transport (`@openparachute/surface-client/frame`)
+
+`createFrameFetch()` (frame side) and `serveFrameFetch()` (host side) tunnel
+`VaultClient` REST calls over postMessage so the same surface code runs inside
+`<iframe sandbox="allow-scripts">` with `connect-src 'none'`. The host enforces
+a route allowlist, body-size / pending / rate limits, and never forwards
+`Authorization`. Types: `FrameRequest`, `FrameResponse`, `FramePolicy`.
+Additive; no existing API changed. Version bump deferred to the release PR.
+
 ## [0.3.7] - 2026-08-30
 
 Stable promotion of `0.3.7-rc.2` — suffix-drop, no code change. See the
