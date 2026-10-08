@@ -316,19 +316,24 @@ const dispose = serveFrameFetch(
   (req) => realVaultFetch(req),           // attach the real token here; return {status, headers?, body?}
   {
     routes: [
-      { method: "GET", pattern: /^\/api\/notes(\/[^/]+)?$/ },
+      { method: "GET", pattern: /^\/api\/notes(\/[A-Za-z0-9_-]+)?$/ },
       { method: "POST", pattern: /^\/api\/notes$/ },
     ],
-    // defaults: maxBodyBytes 64 KiB, maxPending 8, ratePerWindow 60 per 10s
+    // defaults: maxBodyBytes 64 KiB, maxPending 8, ratePerWindow 60 per 10s, handlerTimeoutMs 30000
+    onReject: (reason, req) => console.debug("frame rejected", reason, req), // optional host logging
     channel: "my-host",                   // optional; must match createFrameFetch({ channel })
   },
 );
 ```
 
-- Only path + query cross the boundary; only `content-type` / `accept` headers are forwarded. `Authorization` never is. Bodies must be strings (Blob / FormData / streams throw `TypeError`).
-- The host drops messages whose `event.source` isn't the frame, rate-limits every message before parsing, and answers disallowed routes with `403 {"error_type":"frame_route_denied"}` (→ `VaultPermissionError`) **without calling your handler**. Handler failures become `500 {"error_type":"frame_handler_error"}` with no message leakage; too many in-flight requests get `429 frame_busy`; oversize bodies `413 frame_body_too_large`.
-- A request that gets no reply within `timeoutMs` (default 30s) rejects with `TypeError("frame fetch timeout")`, which `VaultClient` reports as `VaultUnreachableError`. Rate-limited messages are dropped silently, so they surface the same way.
-- Route patterns match the path **without** the query string; anchor them (`^…$`). `subscribe()` (SSE) is not supported over this transport.
+- Only path + query cross the boundary. The host **rebuilds** the headers: keys are lower-cased, only `content-type` / `accept` survive (values ≤ 256 chars, else `400 frame_bad_headers`), so a hostile frame can't smuggle `Authorization`, `Cookie`, `X-Forwarded-*` etc. into your handler. Bodies must be strings (Blob / FormData / streams throw `TypeError`); a body on GET/HEAD is refused (`400 frame_bad_request`).
+- The host **canonicalizes the path** before matching and hands your handler `pathname + search` with the fragment stripped. It refuses (`400 frame_bad_path`) any path containing a backslash, whitespace or control character, a `.` / `..` segment, or a `%2e` / `%2f` / `%5c` escape, or that `new URL(path, base)` would rewrite; over 4096 chars is `413 frame_path_too_long`. Route patterns match the canonical path **without** the query string; anchor them (`^…$`) and use tight classes such as `[A-Za-z0-9_-]+` for ids.
+- The host drops messages whose `event.source` isn't the frame, counts every message against the rate limit before parsing, and answers disallowed routes with `403 {"error_type":"frame_route_denied"}` **without calling your handler**. Handler failures become `500 frame_handler_error` with no message leakage (a handler must return a `FrameResponse` with a string `body` — a real `Response` is rejected with a `console.warn`); too many in-flight requests get `429 frame_busy`; oversize bodies `413 frame_body_too_large`; messages over the rate limit (when they carry an `id`) `429 frame_rate_limited`. The rate limit is a fixed window (a 2× burst is possible at a boundary) measured on a monotonic clock.
+- **Re-mapping in the frame.** So that `VaultClient` doesn't treat host policy as a vault auth failure (which would fire `onAuthRevoked` / `onAuthError`), `createFrameFetch` re-maps these replies and keeps the `error_type` body: `frame_route_denied`, `frame_body_too_large`, `frame_path_too_long`, `frame_bad_path`, `frame_bad_headers`, `frame_bad_request` → **400**; `frame_busy`, `frame_rate_limited` → **503**; `frame_handler_timeout` → **504**; `frame_handler_error` stays 500. `VaultClient` throws a plain `Error` for 400 and `VaultServerError` for 5xx; there's no typed `frame_*` error, so branch on the response `error_type` if you call the fetch directly.
+- **Handler timeout and cancellation.** A handler that runs longer than `handlerTimeoutMs` (default 30000) gets `504 frame_handler_timeout`, its slot is freed and a late settle is ignored. `req.signal` (an `AbortSignal`) aborts on timeout and on dispose — pass it to your upstream `fetch`. Disposing doesn't un-send requests already in flight upstream.
+- **Swapping the interface? Dispose first.** Replies go to the `Window` captured at request time, and a `WindowProxy` survives iframe navigation. When you swap or navigate the iframe's content, call the disposer and create a new `serveFrameFetch`; otherwise in-flight replies for the old interface are delivered to the new document.
+- A request that gets no reply within the frame's `timeoutMs` (default 30s) rejects with `TypeError("frame fetch timeout")` → `VaultUnreachableError`. A `channel` mismatch is silently dropped by design, so a hang on every request means check the `channel` first (`onReject` reports `channel_mismatch`; malformed shapes report `malformed`).
+- **Not supported over this transport:** `subscribe()` (SSE) and the WebSocket transport (blocked by `connect-src 'none'`); `uploadFile` (uses XHR, bypasses `fetchImpl`); `storageUrl()` (returns a `frame:` URL that is useless in `<img src>`); binary attachment reads (`fetchAttachmentBlob` is tunnelled, but the string body corrupts binary data). `onReject(reason, req)` is the host-side hook for logging every refusal.
 
 ---
 

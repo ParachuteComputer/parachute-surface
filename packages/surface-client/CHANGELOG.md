@@ -7,8 +7,16 @@
 `createFrameFetch()` (frame side) and `serveFrameFetch()` (host side) tunnel
 `VaultClient` REST calls over postMessage so the same surface code runs inside
 `<iframe sandbox="allow-scripts">` with `connect-src 'none'`. The host enforces
-a route allowlist, body-size / pending / rate limits, and never forwards
-`Authorization`. Types: `FrameRequest`, `FrameResponse`, `FramePolicy`.
+a route allowlist, body-size / pending / rate limits, and rebuilds request
+headers to a lower-cased `content-type` / `accept` allowlist, so `Authorization`
+is never forwarded. Paths are canonicalized on the host (no backslash, control
+characters, dot-segments or `%2e`/`%2f`/`%5c`; fragment stripped). Handlers get
+an `AbortSignal` and a `handlerTimeoutMs` (default 30s → `504
+frame_handler_timeout`); `onReject(reason, req)` reports every refusal.
+`createFrameFetch` re-maps host-policy replies (`error_type: frame_*`) to
+400 / 503 / 504 so `VaultClient` never fires `onAuthRevoked` for a policy deny.
+Dispose and recreate the server when the iframe's content is swapped. Types:
+`FrameRequest`, `FrameResponse`, `FramePolicy`.
 Additive; no existing API changed. Version bump deferred to the release PR.
 
 ## [0.3.7] - 2026-08-30
