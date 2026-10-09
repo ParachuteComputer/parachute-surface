@@ -10,11 +10,16 @@
 a route allowlist, body-size / pending / rate limits, and rebuilds request
 headers to a lower-cased `content-type` / `accept` allowlist, so `Authorization`
 is never forwarded. Paths are canonicalized on the host (no backslash, control
-characters, dot-segments or `%2e`/`%2f`/`%5c`; fragment stripped). Handlers get
-an `AbortSignal` and a `handlerTimeoutMs` (default 30s → `504
-frame_handler_timeout`); `onReject(reason, req)` reports every refusal.
+characters, dot-segments, `;` or `%2e`/`%2f`/`%5c` in the pathname; fragment
+stripped). Encoded separators in the query are data, so `getNote(path)`,
+slash-bearing tags and `path=` filters work over the frame. Handlers get an
+`AbortSignal` and a `handlerTimeoutMs` (default 30s → `504
+frame_handler_timeout`; values above 2³¹−1 ms are clamped, `0` / negative / NaN
+throw `RangeError`); `onReject(reason, req)` reports every refusal.
 `createFrameFetch` re-maps host-policy replies (`error_type: frame_*`) to
-400 / 503 / 504 so `VaultClient` never fires `onAuthRevoked` for a policy deny.
+400 / 429 / 504 so `VaultClient` never fires `onAuthRevoked` for a policy deny,
+and busy / rate-limited replies are 429 rather than a 5xx that would read as
+"vault unreachable".
 Dispose and recreate the server when the iframe's content is swapped. Types:
 `FrameRequest`, `FrameResponse`, `FramePolicy`.
 Additive; no existing API changed. Version bump deferred to the release PR.

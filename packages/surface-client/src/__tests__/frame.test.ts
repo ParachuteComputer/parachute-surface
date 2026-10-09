@@ -338,7 +338,7 @@ describe("policy", () => {
     const b = fetchImpl("frame:/api/notes");
     await new Promise((r) => setTimeout(r, 5));
     const c = await fetchImpl("frame:/api/notes");
-    expect(c.status).toBe(503);
+    expect(c.status).toBe(429);
     expect(await c.json()).toEqual({ error_type: "frame_busy" });
     expect(calls).toHaveLength(2);
     release();
@@ -360,7 +360,7 @@ describe("policy", () => {
     expect((await fetchImpl("frame:/api/notes")).status).toBe(200);
     // budget exhausted: the next request gets a prompt frame_rate_limited (not a 30s hang)
     const res = await fetchImpl("frame:/api/notes");
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error_type: "frame_rate_limited" });
     expect(calls).toHaveLength(1);
   });
@@ -798,7 +798,7 @@ describe("host-policy replies don't look like vault auth failures (P2-3)", () =>
     expect(revoked).toEqual([]);
   });
 
-  test("busy → 503, handler timeout → 504", async () => {
+  test("busy → 429, handler timeout → 504", async () => {
     const hung = new Promise<FrameResponse>(() => {});
     serveFrameFetch(
       () => frameWin as unknown as Window,
@@ -809,7 +809,7 @@ describe("host-policy replies don't look like vault auth failures (P2-3)", () =>
     const first = fetchImpl("frame:/api/notes");
     await tick(5);
     const busy = await fetchImpl("frame:/api/notes");
-    expect(busy.status).toBe(503);
+    expect(busy.status).toBe(429);
     expect(await busy.json()).toEqual({ error_type: "frame_busy" });
     const timedOut = await first;
     expect(timedOut.status).toBe(504);
@@ -984,5 +984,160 @@ describe("onReject hook (P3-10)", () => {
     raw({});
     await tick();
     expect(seen).toHaveLength(1);
+  });
+});
+
+describe("round 3: encoded separators in the query are data (P2-A)", () => {
+  const permissive = [{ method: "GET", pattern: /^\/api\/.+$/ }];
+
+  test("getNote with a slash in a path-addressed id reaches the handler", async () => {
+    const { calls, client } = setup(
+      async () => json(200, { id: "n1", path: "Journal/2026/10-08 hello" }),
+      {
+        routes: permissive,
+      },
+    );
+    const note = await client.getNote("Journal/2026/10-08 hello");
+    expect(note?.id).toBe("n1");
+    expect(calls[0]?.path).toBe("/api/notes?id=Journal%2F2026%2F10-08+hello&include_content=true");
+  });
+
+  test("queryNotes with a slash-bearing tag reaches the handler", async () => {
+    const { calls, client } = setup(async () => json(200, []), { routes: permissive });
+    await client.queryNotes({ tag: "agent/job" });
+    expect(calls[0]?.path).toBe("/api/notes?tag=agent%2Fjob");
+  });
+
+  test("queryNotes with a path filter reaches the handler", async () => {
+    const { calls, client } = setup(async () => json(200, []), { routes: permissive });
+    await client.queryNotes({ path: "Journal/2026" });
+    expect(calls[0]?.path).toBe("/api/notes?path=Journal%2F2026");
+  });
+
+  test("%2f / %2e / %5c are refused in the pathname but allowed in the query", async () => {
+    const { seen, replies } = rawHost(okHandler, { routes: permissive });
+    raw({ path: "/api/notes/Journal%2F2026" });
+    raw({ path: "/api/notes/a%2eb" });
+    raw({ path: "/api/notes/a%5cb" });
+    raw({ path: "/api/notes?tag=agent%2Fjob" });
+    raw({ path: "/api/notes?q=%2e%2e%2f%5c" });
+    await tick();
+    expect(seen.map((r) => r.path)).toEqual([
+      "/api/notes?tag=agent%2Fjob",
+      "/api/notes?q=%2e%2e%2f%5c",
+    ]);
+    const refused = replies.filter((r) => r.status === 400);
+    expect(refused).toHaveLength(3);
+    for (const r of refused) expect(errType(r)).toBe("frame_bad_path");
+  });
+
+  test("dot segments are still refused in the pathname when the query carries encoded separators", async () => {
+    const { seen, replies } = rawHost(okHandler, { routes: permissive });
+    raw({ path: "/api/notes/../x?tag=a%2Fb" });
+    await tick();
+    expect(seen).toHaveLength(0);
+    expect(replies[0]?.status).toBe(400);
+  });
+});
+
+describe("round 3: policy replies are not vault outages (P2-B)", () => {
+  test("busy → 429 frame_busy, and VaultClient does not report the vault unreachable", async () => {
+    let release!: (r: FrameResponse) => void;
+    const gate = new Promise<FrameResponse>((r) => {
+      release = r;
+    });
+    let calls = 0;
+    serveFrameFetch(
+      () => frameWin as unknown as Window,
+      () => (++calls === 1 ? gate : Promise.resolve(json(200, []))),
+      policy({ maxPending: 1 }),
+    );
+    const fetchImpl = createFrameFetch({ target: hostWin as unknown as Window, channel: "t" });
+    const signals: string[] = [];
+    const client = new VaultClient({
+      vaultUrl: "frame:",
+      accessToken: "frame",
+      fetchImpl,
+      onReachability: (s) => signals.push(s),
+    });
+    const first = client.queryNotes({});
+    await tick(5);
+    const busy = await fetchImpl("frame:/api/notes");
+    expect(busy.status).toBe(429);
+    expect(await busy.json()).toEqual({ error_type: "frame_busy" });
+    await expect(client.queryNotes({})).rejects.toBeInstanceOf(Error);
+    expect(signals).not.toContain("unreachable");
+    release(json(200, []));
+    await first;
+    expect(signals).not.toContain("unreachable");
+  });
+
+  test("rate-limited → 429 frame_rate_limited, and VaultClient does not report the vault unreachable", async () => {
+    serveFrameFetch(
+      () => frameWin as unknown as Window,
+      async () => json(200, []),
+      policy({ ratePerWindow: 1 }),
+    );
+    const fetchImpl = createFrameFetch({ target: hostWin as unknown as Window, channel: "t" });
+    const signals: string[] = [];
+    const client = new VaultClient({
+      vaultUrl: "frame:",
+      accessToken: "frame",
+      fetchImpl,
+      onReachability: (s) => signals.push(s),
+    });
+    await client.queryNotes({});
+    const limited = await fetchImpl("frame:/api/notes");
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error_type: "frame_rate_limited" });
+    await expect(client.queryNotes({})).rejects.toBeInstanceOf(Error);
+    expect(signals).not.toContain("unreachable");
+  });
+});
+
+describe("round 3: handler timeout option is sane at the edges (P3-A)", () => {
+  test("handlerTimeoutMs: Infinity means no practical timeout, not an immediate 504", async () => {
+    const { fetchImpl } = setup(
+      async () => {
+        await tick(30);
+        return json(200, { ok: true });
+      },
+      { handlerTimeoutMs: Number.POSITIVE_INFINITY },
+    );
+    const res = await fetchImpl("frame:/api/notes");
+    expect(res.status).toBe(200);
+  });
+
+  test("handlerTimeoutMs of 0, negative or NaN throws at construction", () => {
+    for (const bad of [0, -1, Number.NaN]) {
+      expect(() =>
+        serveFrameFetch(
+          () => frameWin as unknown as Window,
+          okHandler,
+          policy({ handlerTimeoutMs: bad }),
+        ),
+      ).toThrow(RangeError);
+    }
+  });
+});
+
+describe("round 3: ';' in the pathname is refused (P3-F)", () => {
+  test("matrix-parameter style ';' in the pathname → 400 frame_bad_path, handler not called", async () => {
+    const { seen, replies } = rawHost(okHandler, {
+      routes: [{ method: "GET", pattern: /^\/.+$/ }],
+    });
+    raw({ path: "/api/notes/..;/x" });
+    raw({ path: "/api/notes/a;jsessionid=1" });
+    await tick();
+    expect(seen).toHaveLength(0);
+    expect(replies.map((r) => r.status)).toEqual([400, 400]);
+    expect(errType(replies[0])).toBe("frame_bad_path");
+  });
+
+  test("';' in the query is just data", async () => {
+    const { seen } = rawHost(okHandler, { routes: [{ method: "GET", pattern: /^\/.+$/ }] });
+    raw({ path: "/api/notes?q=a;b" });
+    await tick();
+    expect(seen.map((r) => r.path)).toEqual(["/api/notes?q=a;b"]);
   });
 });

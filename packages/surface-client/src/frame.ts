@@ -27,6 +27,8 @@ const MAX_PATH_LENGTH = 4096;
 const MAX_HEADERS = 8;
 const MAX_HEADER_VALUE = 256;
 const DEFAULT_HANDLER_TIMEOUT_MS = 30_000;
+/** `setTimeout` treats anything larger as 1 ms, so larger timeouts are clamped to this. */
+const MAX_TIMER_MS = 2_147_483_647;
 const FORWARDED_HEADERS = ["content-type", "accept"] as const;
 
 /**
@@ -42,8 +44,8 @@ const FRAME_ERROR_STATUS: Record<string, number> = {
   frame_bad_path: 400,
   frame_bad_headers: 400,
   frame_bad_request: 400,
-  frame_busy: 503,
-  frame_rate_limited: 503,
+  frame_busy: 429,
+  frame_rate_limited: 429,
   frame_handler_timeout: 504,
 };
 
@@ -52,8 +54,9 @@ export interface FrameRequest {
   method: string;
   /**
    * Canonical path + query (no fragment), always starting with a single `/`.
-   * Already checked on the host: no backslash, whitespace/control characters,
-   * `.` / `..` segments or `%2e` / `%2f` / `%5c` escapes.
+   * Already checked on the host: no backslash or whitespace/control characters,
+   * no `.` / `..` segments, and no `%2e` / `%2f` / `%5c` / `;` in the pathname
+   * (the query may carry them as data).
    */
   path: string;
   /** Rebuilt on the host: lower-cased `content-type` / `accept` only, values ≤ 256 chars. */
@@ -90,7 +93,11 @@ export interface FramePolicy {
   windowMs?: number;
   /**
    * Max time a handler may run before the frame gets `504 frame_handler_timeout`,
-   * the pending slot is freed and a late settle is ignored. Default 30000.
+   * the pending slot is freed and a late settle is ignored. Default 30000. Must be
+   * > 0 (else `RangeError`); values above 2³¹−1 ms are clamped, so `Infinity` means
+   * effectively no timeout. Keep the frame's `timeoutMs` above this, or the frame
+   * sees a hang instead of the 504. `maxPending` caps slots, not live work: a
+   * handler that ignores `req.signal` keeps running after its 504.
    */
   handlerTimeoutMs?: number;
   /**
@@ -325,7 +332,7 @@ export function serveFrameFetch(
   const maxPending = policy.maxPending ?? 8;
   const ratePerWindow = policy.ratePerWindow ?? 60;
   const windowMs = policy.windowMs ?? 10_000;
-  const handlerTimeoutMs = policy.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
+  const handlerTimeoutMs = handlerTimeout(policy.handlerTimeoutMs);
   const routes = policy.routes.map((r) => ({ method: r.method.toUpperCase(), pattern: r.pattern }));
 
   let disposed = false;
@@ -517,6 +524,14 @@ export function serveFrameFetch(
   };
 }
 
+function handlerTimeout(ms: number | undefined): number {
+  if (ms === undefined) return DEFAULT_HANDLER_TIMEOUT_MS;
+  if (Number.isNaN(ms) || ms <= 0) {
+    throw new RangeError("serveFrameFetch: handlerTimeoutMs must be greater than 0");
+  }
+  return Math.min(ms, MAX_TIMER_MS);
+}
+
 function bodyWithinLimit(body: string | undefined, max: number): boolean {
   if (body === undefined) return true;
   if (body.length > max) return false; // UTF-8 bytes >= UTF-16 units
@@ -549,9 +564,13 @@ function peekRequest(data: unknown): { id?: string; method?: string; path?: stri
 
 const FRAME_ORIGIN = "http://frame.invalid";
 // `\` (WHATWG treats it as `/`), whitespace and C0/C1 controls (the URL parser
-// strips tab/LF/CR), and encoded dot / slash / backslash.
+// strips tab/LF/CR). Anywhere in the path or query.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
-const FORBIDDEN_PATH = /[\\\u0000-\u0020\u007f-\u009f]|%2e|%2f|%5c/i;
+const FORBIDDEN_PATH = /[\\\u0000-\u0020\u007f-\u009f]/;
+// Encoded dot / slash / backslash, and `;` (matrix params, which some upstreams
+// treat as a path boundary). Pathname only: in the query they are plain data,
+// and `getNote(path)` / slash-bearing tags need `%2f` there.
+const FORBIDDEN_PATHNAME = /%2e|%2f|%5c|;/i;
 
 /**
  * The regex allowlist and the eventual `fetch` must see the same path. Reject
@@ -563,7 +582,7 @@ function canonicalPath(raw: string): string | null {
   const noFragment = hash === -1 ? raw : raw.slice(0, hash);
   const q = noFragment.indexOf("?");
   const pathPart = q === -1 ? noFragment : noFragment.slice(0, q);
-  if (FORBIDDEN_PATH.test(noFragment)) return null;
+  if (FORBIDDEN_PATH.test(noFragment) || FORBIDDEN_PATHNAME.test(pathPart)) return null;
   if (pathPart.split("/").some((seg) => seg === "." || seg === "..")) return null;
   let url: URL;
   try {
