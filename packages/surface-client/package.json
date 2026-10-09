@@ -43,6 +43,10 @@
     "./mount": {
       "types": "./dist/mount.d.ts",
       "import": "./dist/mount.js"
+    },
+    "./frame": {
+      "types": "./dist/frame.d.ts",
+      "import": "./dist/frame.js"
     }
   },
   "files": [
