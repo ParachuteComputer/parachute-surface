@@ -17,13 +17,10 @@ export const CODE_EXTENSIONS: Record<string, string> = {
 };
 
 export function formatForPath(path: string | undefined): NoteFormat {
-  if (!path) return "markdown";
-  // Trim a fragment or query defensively; vault paths shouldn't contain
-  // either but the dispatcher should be robust.
-  const cleaned = path.split(/[?#]/)[0] ?? path;
-  const ext = cleaned.toLowerCase().split(".").pop();
-  // No dot, or a path that ends with a dot — treat as markdown (the default).
-  if (!ext || ext === cleaned.toLowerCase()) return "markdown";
+  // No extension (no dot, a trailing dot, or a dot only in a directory like
+  // `Projects/example.org/note`) — treat as markdown (the default).
+  const ext = extensionOf(path);
+  if (!ext) return "markdown";
 
   if (ext === "md" || ext === "mdx" || ext === "markdown") return "markdown";
   if (ext === "csv") return "csv";
@@ -36,6 +33,8 @@ export function formatForPath(path: string | undefined): NoteFormat {
 /** Lowercase extension (no dot) from a path; empty string for no-extension. */
 export function extensionOf(path: string | undefined): string {
   if (!path) return "";
+  // Trim a fragment or query defensively; vault paths shouldn't contain
+  // either but the dispatcher should be robust.
   const cleaned = path.split(/[?#]/)[0] ?? path;
   const lower = cleaned.toLowerCase();
   const dot = lower.lastIndexOf(".");
