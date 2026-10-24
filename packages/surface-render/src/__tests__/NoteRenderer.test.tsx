@@ -19,6 +19,11 @@ describe("formatForPath", () => {
     expect(formatForPath("src/x.ts")).toBe("code");
     expect(formatForPath("weird.xyz")).toBe("plain");
   });
+  it("ignores dots in directory segments", () => {
+    expect(formatForPath("Projects/example.org/Some note")).toBe("markdown");
+    expect(formatForPath("Projects/example.org/Some note.md")).toBe("markdown");
+    expect(formatForPath("Projects/example.org/data.csv")).toBe("csv");
+  });
   it("extensionOf ignores dots in directory segments", () => {
     expect(extensionOf("a.b/c")).toBe("");
     expect(extensionOf("a/b.ts")).toBe("ts");
