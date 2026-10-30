@@ -20,6 +20,7 @@
  *   - `token-storage` — localStorage-backed token persistence (per app, per vault)
  *   - `sw-reload`     — service-worker reload helper (PWA-mode apps)
  *   - `vault-id`      — canonical URL → vault-id mapping (URL drift fix)
+ *   - `frame`         — postMessage `fetch` + host server for sandboxed iframes
  *
  * Consumers can import from the barrel (`@openparachute/surface-client`)
  * or the named subpath (`@openparachute/surface-client/oauth`) — both
@@ -199,6 +200,17 @@ export type {
   StoredToken,
   PendingOAuthState,
 } from "./types.js";
+
+// Sandboxed-frame transport — run VaultClient inside an
+// `<iframe sandbox="allow-scripts">` via a host-mediated postMessage fetch.
+export {
+  createFrameFetch,
+  serveFrameFetch,
+  type CreateFrameFetchOpts,
+  type FramePolicy,
+  type FrameRequest,
+  type FrameResponse,
+} from "./frame.js";
 
 /**
  * Library semver — surfaced by consumers in "surface-client 0.2.0" diagnostics
