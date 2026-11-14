@@ -155,6 +155,59 @@ describe("RichNoteView host hooks", () => {
     expect(open()?.disabled).toBe(true);
   });
 
+  it("an attachment that arrives after unmount never becomes an object URL", async () => {
+    let finish: (b: Blob) => void = () => {};
+    const fetchBlob = vi.fn(
+      () =>
+        new Promise<Blob>((r) => {
+          finish = r;
+        }),
+    );
+    const create = vi.mocked(URL.createObjectURL);
+    create.mockClear();
+    const note = {
+      ...project,
+      content: `${project.content}\n![plan](/api/storage/att/plan.png)\n`,
+    };
+    const { unmount } = render(<RichNoteView note={note} fetchBlob={fetchBlob} />);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalled());
+    unmount();
+    finish(new Blob(["x"]));
+    await flush();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("without onNavigate, a wikilink only follows an href on this page's origin", () => {
+    const assign = vi.fn();
+    const orig = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { href: "https://app.example/notes/", origin: "https://app.example", assign },
+    });
+    try {
+      for (const href of [
+        "/\\evil.example/x",
+        "//evil.example/x",
+        "javascript:alert(1)",
+        "https://evil.example/",
+      ]) {
+        const { container, unmount } = render(
+          <RichNoteView note={project} resolve={() => ({ href, exists: true })} />,
+        );
+        fireEvent.click(container.querySelector(".rn-wikilink")!);
+        unmount();
+      }
+      expect(assign).not.toHaveBeenCalled();
+      const { container } = render(
+        <RichNoteView note={project} resolve={() => ({ href: "/n/tools", exists: true })} />,
+      );
+      fireEvent.click(container.querySelector(".rn-wikilink")!);
+      expect(assign).toHaveBeenCalledWith("https://app.example/n/tools");
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: orig });
+    }
+  });
+
   it("unmount clears the element", () => {
     const { container, unmount } = render(<RichNoteView note={recipe} />);
     unmount();

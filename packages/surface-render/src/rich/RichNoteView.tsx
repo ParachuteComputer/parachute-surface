@@ -51,14 +51,16 @@ export function RichNoteView(props: RichNoteViewProps) {
   // One mount per note, and per set of hooks the kit was given: a different
   // note starts with a fresh sitting (servings, ticks, timers belong to the
   // note they were set on), and a hook that appears or goes (a note you may
-  // edit, a resolver that loaded) redraws with it. The same note with new
+  // edit, a resolver or fetcher that loaded) redraws with it. A note with
+  // neither id nor path can't be told apart, so it updates in place. The same note with new
   // content updates in place and keeps the sitting.
-  const { note, resolve, openLink, onSave, units } = props;
+  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
   const key = [
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
     openLink ? "l" : "",
     onSave ? "s" : "",
+    fetchBlob ? "b" : "",
     units ?? "",
   ].join("|");
   return <RichNoteMount key={key} {...props} />;

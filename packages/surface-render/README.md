@@ -284,8 +284,9 @@ import "@openparachute/surface-render/rich-notes-kit.css";
 Without `onSave` tasks and logs are read-only. `<RichNoteView note={…}>` is the
 same view on its own (`@openparachute/surface-render/rich`). The same note with
 new content updates in place and keeps the reader's sitting (ticks, servings,
-cook-mode step, timers); a different note (by `id`, else `path`), or a hook
-that appears or goes (`onSave`, `resolve`, `openLink`, `units`), starts fresh.
+cook-mode step, timers); a different note (by `id`, else `path`; give unsaved
+notes one of them), or a hook that appears or goes (`onSave`, `resolve`,
+`openLink`, `fetchBlob`, `units`), starts fresh.
 
 **No network, ever.** The kit loads nothing: a remote image is a link, links
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the
