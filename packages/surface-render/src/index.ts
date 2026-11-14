@@ -52,6 +52,8 @@ export {
   type BlobCapableClient,
   vaultClientFetchBlob,
   isVaultStorageUrl,
+  mediaSrcKind,
+  type MediaSrcKind,
   useBlobObjectUrl,
   type BlobObjectUrlState,
   useVaultFetchBlob,

@@ -64,6 +64,13 @@ export interface MarkdownViewProps {
    */
   fetchBlob?: FetchBlob;
   /**
+   * The vault's base URL (or any URL on its origin). An absolute image URL on
+   * this origin with an `/api/storage/` path is treated as a vault attachment;
+   * without it, only relative `/api/storage/…` paths are. Every other image
+   * URL in a note is never loaded (see {@link VaultImage}).
+   */
+  vaultOrigin?: string;
+  /**
    * Per-element renderer overrides, merged over the defaults. Lets a surface
    * customize any markdown element (`h1`, `code`, `table`, …) without
    * forking the view. Override `img` / `a` to fully replace media/link
@@ -128,8 +135,9 @@ export interface MarkdownViewProps {
  * Wraps `react-markdown` with:
  *  - GFM (tables, strikethrough, task lists),
  *  - the {@link remarkWikilinks} plugin wired to a per-surface `resolve` hook,
- *  - an `img` override that routes `/api/storage/…` images through the
- *    auth'd {@link VaultImage} (when `fetchBlob` is supplied),
+ *  - an `img` override that routes every image through {@link VaultImage}:
+ *    vault attachments load with auth (when `fetchBlob` is supplied), and a
+ *    remote image is never loaded (it shows as a link),
  *  - an `a` override that renders wikilinks + internal links via the
  *    surface's `linkComponent` (default plain `<a>`),
  *  - a documented default class contract (`prose-note` container,
@@ -160,6 +168,7 @@ export function MarkdownView({
   resolve,
   linkComponent,
   fetchBlob,
+  vaultOrigin,
   components,
   className = "prose-note",
   breaks = true,
@@ -172,7 +181,15 @@ export function MarkdownView({
   const defaultComponents: Components = {
     img({ node: _node, src, alt, className: imgClass }) {
       if (typeof src !== "string" || !src) return null;
-      return <VaultImage src={src} alt={alt ?? ""} className={imgClass} fetchBlob={fetchBlob} />;
+      return (
+        <VaultImage
+          src={src}
+          alt={alt ?? ""}
+          className={imgClass}
+          fetchBlob={fetchBlob}
+          vaultOrigin={vaultOrigin}
+        />
+      );
     },
     a({ node: _node, href, className: linkClass, children }) {
       const classes = typeof linkClass === "string" ? linkClass : "";

