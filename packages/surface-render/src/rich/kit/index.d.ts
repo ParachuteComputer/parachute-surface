@@ -25,17 +25,23 @@ export interface Host {
   openLink?(href: string): void;
   /** The image's src as markdown-it normalises it (URL-encoded: `crème.jpg` arrives as `cr%C3%A8me.jpg`; the same
    *  string a markdown host gets), less its `#fragment` → a blob: or data:image/ URL. Asked once per src per view; after a rejection or an unsafe answer, again on the next draw.
-   *  Asked only when the src, read at every level of a lenient decode (each valid `%XX` below `%80` alone, a stray `%`
-   *  kept) to a fixed point within eight levels, has no segment of only dots and spaces with a dot in it (`.`, `..`, `...`, `.. `; ended by `/`, `?`, `#`, `;` or the end), no `\`,
-   *  no control character, no space at either end and no overlong UTF-8 escape (`%C0`, `%C1`, `%E0%8x`, `%E0%9x`, `%F0%8x`),
-   *  and, unless isAttachment said yes to it, no scheme and no leading `//`. Bytes from `%80` up are not decoded, and
-   *  no check is complete for every server: the host still checks the src it is handed.
+   *  Asked only when, read at every level of a lenient decode (each valid `%XX` below `%80` alone, a stray `%` kept) to a
+   *  fixed point within eight levels, the whole src has no `\`, no control character, no space at either end and no
+   *  overlong UTF-8 escape (`%C0`, `%C1`, `%E0%8x`, `%E0%9x`, `%F0%8x`), and its path (the src up to its first literal
+   *  `?`) is not empty and has no segment of only dots and spaces with a dot in it (`.`, `..`, `...`, `.. `; ended by
+   *  `/`, `?`, `#`, `;` or the end) and, unless isAttachment said yes to it, no scheme and no leading `//`. The query is
+   *  not read for those: `a.png?x=..` and `a.png?src=https://x` are asked as written. Bytes from `%80` up are not
+   *  decoded, and no check is complete for every server: the host still checks the src it is handed, its query
+   *  included. A host that reads the src as a file name rather than a URL must cut the query (or refuse a `?`) itself.
    *  Reject, or hand back anything else, and it reads "(not loaded)". */
   image?(src: string): Promise<string>;
   /** Opt-in, used only with image(). Called only for an absolute src (a scheme or a leading `//`), fragment stripped,
-   *  whose authority holds no `@`, `%` or `\`; return true when it is one of the host's own attachments, and it goes to
-   *  image() under the same path checks, and no `//` may appear in its path at any level. Without it, or on false or a throw,
-   *  every absolute src is a link and is never loaded. */
+   *  whose authority holds no `@`, `%` or `\` and is followed by `/`; return true when it is one of the host's own attachments, and it goes to
+   *  image() under the same checks, and no `//` may appear in its path at any level. Without it, or on false or a throw,
+   *  every absolute src is a link and is never loaded.
+   *  The kit checks only the shape of the path. It does not compare origins and does not read the query: the authority
+   *  test lets through any port, a trailing dot and a non-ASCII host. The host MUST compare the src's origin (scheme,
+   *  host and port) with its own before it answers true, and check the query itself. */
   isAttachment?(src: string): boolean;
   keepAwake?(on: boolean): Promise<boolean> | boolean;
   calm?: boolean | (() => boolean);
@@ -46,7 +52,18 @@ export interface Host {
   today?: string;
   now?(): number;
 }
-export interface Handle { readonly root: HTMLElement; readonly doc: Doc; readonly state: object; update(next: Note | Doc | string): void; redraw(): void; destroy(): void }
+export interface Handle {
+  readonly root: HTMLElement; readonly doc: Doc; readonly state: object;
+  /** A fresh note; the sitting is kept. Another note (by id, else path) asks for its attachments afresh. */
+  update(next: Note | Doc | string): void;
+  /** Draws again, reusing each attachment the host already answered (a failed one is asked again). */
+  redraw(): void;
+  /** The host's store changed for the same note (another vault, a late vault URL): forgets every attachment answer
+   *  and draws again, so each is asked afresh. The sitting (open toggles, scale, check-offs, timers) is kept.
+   *  (isAttachment is asked on every draw, so a changed answer to it needs only redraw().) */
+  refreshImages(): void;
+  destroy(): void;
+}
 export interface EditResult { content: string; patch: Patch }
 export function parse(note: Note | string, opts?: { type?: string }): Doc;
 export function mount(el: Element, doc: Doc | Note | string, host?: Host): Handle;

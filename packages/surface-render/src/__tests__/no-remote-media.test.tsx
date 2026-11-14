@@ -289,14 +289,58 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(onSave.mock.calls[1]?.[0]).toContain("- [x] one\n- [x] two");
   });
 
-  it("switching to another vault starts fresh: no image from the last vault", async () => {
+  // Kit 0.4's refreshImages (its item 17): the store behind a same-path note
+  // changed, so every image is asked afresh, and the reader's sitting stays.
+  it("switching to another vault asks every image afresh and keeps the sitting", async () => {
     const a = naiveSurface();
     const b = naiveSurface();
-    const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const onSave = vi.fn(async () => ({ updatedAt: "2026-11-14T00:00:00.000Z" }));
+    const note = {
+      path: "same.md",
+      updatedAt: "2026-11-13T00:00:00.000Z",
+      content: "- [ ] one\n- [ ] two\n\n![r](/api/storage/att/a.png)\n",
+    };
     const { container, rerender } = render(
-      <NoteRenderer note={note} rich fetchBlob={a.fetchBlob} vaultUrl={VAULT} />,
+      <NoteRenderer note={note} rich fetchBlob={a.fetchBlob} onSave={onSave} vaultUrl={VAULT} />,
     );
     await waitFor(() => expect(a.fetchBlob).toHaveBeenCalledTimes(1));
+    const boxes = () => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    fireEvent.click(boxes()[0]);
+    await waitFor(() => expect(container.querySelector(".rn-status")).toHaveTextContent("Saved."));
+    const view = container.querySelector(".rich-note");
+    rerender(
+      <NoteRenderer
+        note={note}
+        rich
+        fetchBlob={b.fetchBlob}
+        onSave={onSave}
+        vaultUrl="https://hub.example/vault/other"
+      />,
+    );
+    await waitFor(() => expect(b.fetchBlob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    expect(a.fetchBlob).toHaveBeenCalledTimes(1);
+    // Not remounted: the same view, the tick still there.
+    expect(container.querySelector(".rich-note")).toBe(view);
+    expect(boxes().map((x) => x.checked)).toEqual([true, false]);
+  });
+
+  it("an image from the last vault that arrives after the switch never becomes an object URL", async () => {
+    const created = vi.mocked(URL.createObjectURL);
+    const revoked = vi.mocked(URL.revokeObjectURL);
+    let release: (b: Blob) => void = () => {};
+    const slow = vi.fn(
+      () =>
+        new Promise<Blob>((r) => {
+          release = r;
+        }),
+    );
+    const b = naiveSurface();
+    const note = { path: "slow.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const { container, rerender } = render(
+      <NoteRenderer note={note} rich fetchBlob={slow} vaultUrl={VAULT} />,
+    );
+    await waitFor(() => expect(slow).toHaveBeenCalledTimes(1));
     rerender(
       <NoteRenderer
         note={note}
@@ -305,20 +349,76 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
         vaultUrl="https://hub.example/vault/other"
       />,
     );
-    await waitFor(() => expect(b.fetchBlob).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    const before = created.mock.calls.length;
+    const revokedBefore = revoked.mock.calls.length;
+    release(new Blob(["late"]));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(created.mock.calls.length).toBe(before);
+    expect(revoked.mock.calls.length).toBe(revokedBefore);
+    expect(container.querySelectorAll("img").length).toBe(1);
   });
 
-  it("a vault that goes away and comes back as another starts fresh", async () => {
+  it("a first vaultUrl asks again for a relative image fetched before it", async () => {
+    const { fetchBlob } = naiveSurface();
+    const note = { path: "first.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const { container, rerender } = render(<NoteRenderer note={note} rich fetchBlob={fetchBlob} />);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(1));
+    const view = container.querySelector(".rich-note");
+    rerender(
+      <NoteRenderer
+        note={note}
+        rich
+        fetchBlob={fetchBlob}
+        vaultUrl="https://hub.example/vault/other"
+      />,
+    );
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(2));
+    expect(container.querySelector(".rich-note")).toBe(view);
+  });
+
+  it("a vault that goes away and comes back as another asks again, in place", async () => {
     const { fetchBlob } = naiveSurface();
     const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
     const props = { note, rich: true, fetchBlob };
     const { container, rerender } = render(<NoteRenderer {...props} vaultUrl={VAULT} />);
     await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(1));
-    rerender(<NoteRenderer {...props} />);
     const view = container.querySelector(".rich-note");
+    rerender(<NoteRenderer {...props} />);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(2));
     rerender(<NoteRenderer {...props} vaultUrl="https://hub.example/vault/other" />);
-    expect(container.querySelector(".rich-note")).not.toBe(view);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(3));
+    expect(container.querySelector(".rich-note")).toBe(view);
+  });
+
+  // Kit 0.4 reads only the path and hands the query over as written (its
+  // items 18-20); isVaultStorageUrl reads the query, so a climb hidden there
+  // is never fetched, whichever renderer draws the note.
+  it("a query that tries to smuggle a path is never fetched, in either renderer", async () => {
+    const smuggled = [
+      `${VAULT}/api/storage/att/a.png?x=/../../other/api/storage/b.png`,
+      `${VAULT}/api/storage/att/a.png?x=%2F..%2F..%2Fother`,
+      `${VAULT}/api/storage/att/a.png?x=%252e%252e/%252e%252e/other`,
+      "/api/storage/att/a.png?x=/../../other/x.png",
+      "/api/storage/..;/other/x.png",
+    ];
+    const content = ["- [ ] look", "", ...smuggled.map((u) => `![q](${u})`)].join("\n\n");
+    for (const rich of [true, false]) {
+      const { fetchImpl, fetchBlob } = naiveSurface();
+      const { container, unmount } = render(
+        <NoteRenderer
+          note={{ path: "smuggle.md", content }}
+          rich={rich}
+          fetchBlob={fetchBlob}
+          vaultUrl={VAULT}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fetchBlob, `rich=${rich}`).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(loadedUrls(container)).toEqual([]);
+      unmount();
+    }
   });
 
   it("without fetchBlob, a full in-vault URL stays a link the reader can open", async () => {

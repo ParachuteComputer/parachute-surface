@@ -58,19 +58,11 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note starts with a fresh sitting (servings, ticks, timers belong to the
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
-  // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting. Any vaultUrl change starts
-  // fresh too (its images are not the last vault's), except the first one
-  // ever given, which only redraws (RichNoteMount).
-  const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
-  const vault = useRef({ url: vaultUrl, n: 0, seen: vaultUrl !== undefined });
-  if (vault.current.url !== vaultUrl) {
-    if (vault.current.seen) vault.current.n++;
-    vault.current.url = vaultUrl;
-    vault.current.seen = true;
-  }
+  // neither id nor path can't be told apart, so it updates in place. The same
+  // note with new content updates in place and keeps the sitting, and so does
+  // a vaultUrl change: its images are asked afresh (RichNoteMount).
+  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
   const key = [
-    vault.current.n,
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
     openLink ? "l" : "",
@@ -90,6 +82,9 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
   // the reader's sitting: ticks, scale, step, timers).
   const latest = useRef(hooks);
   latest.current = hooks;
+  // The object URLs this mount made, and which vault they belong to: a vault
+  // change bumps `gen`, so an image asked before it never becomes a URL.
+  const images = useRef({ gen: 0, urls: [] as string[] });
 
   const parsed = useMemo(
     () => doc ?? parseRichNote({ ...note, content: note.content ?? "" }),
@@ -100,7 +95,6 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const objectUrls: string[] = [];
     let disposed = false;
     const h = latest.current;
     const host: RichHost = {
@@ -111,14 +105,19 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
         const fetchBlob = latest.current.fetchBlob;
         if (!fetchBlob || !isVaultStorageUrl(src, latest.current.vaultUrl))
           throw new Error("not a vault attachment");
+        const gen = images.current.gen;
         const blob = await fetchBlob(src);
         if (disposed) throw new Error("view closed");
+        // Asked under a vault that has since changed: the kit no longer shows it.
+        if (gen !== images.current.gen) throw new Error("vault changed");
         const url = URL.createObjectURL(blob);
-        objectUrls.push(url);
+        images.current.urls.push(url);
         return url;
       },
-      // An absolute src (kit 0.3) is an attachment only when it sits in this
-      // vault; anything else stays a link and is never asked for.
+      // An absolute src is an attachment only when it sits in this vault:
+      // isVaultStorageUrl compares scheme, host and port, and reads the query
+      // (the kit checks only the path's shape). Anything else stays a link and
+      // is never asked for.
       // Without fetchBlob nothing can load, so it stays a link the reader can open.
       isAttachment: (src) =>
         Boolean(latest.current.fetchBlob) && isVaultStorageUrl(src, latest.current.vaultUrl),
@@ -144,7 +143,7 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
       disposed = true;
       handle.current?.destroy();
       handle.current = null;
-      for (const u of objectUrls) URL.revokeObjectURL(u);
+      for (const u of images.current.urls.splice(0)) URL.revokeObjectURL(u);
     };
   }, []);
 
@@ -154,15 +153,23 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     handle.current.update(parsed);
   }, [parsed]);
 
-  // The kit asks `isAttachment` about an absolute image only when it draws, so
-  // a vaultUrl that arrives late redraws the kit's own current doc (a saved
-  // tick included) in place; the sitting stays.
+  // A vaultUrl that changes (arrives late, names another vault, goes away)
+  // changes what each image is: kit 0.4's refreshImages forgets every answer
+  // and redraws the kit's own current doc (a saved tick included), so each
+  // image is asked again under the new vault, and the sitting stays. The doc
+  // stays the one on screen until the host hands the new vault's note in
+  // (as with a remount, which also drew the props' note); its revision makes
+  // a save in that window stale rather than silent.
   const vaultUrl = hooks.vaultUrl;
   const drawnVault = useRef(vaultUrl);
   useEffect(() => {
     if (!handle.current || drawnVault.current === vaultUrl) return;
     drawnVault.current = vaultUrl;
-    handle.current.redraw();
+    images.current.gen++;
+    const stale = images.current.urls.splice(0);
+    handle.current.refreshImages();
+    // The redraw dropped every image drawn from them.
+    for (const u of stale) URL.revokeObjectURL(u);
   }, [vaultUrl]);
 
   return <div ref={ref} className={className} />;

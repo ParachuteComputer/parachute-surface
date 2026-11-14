@@ -101,22 +101,27 @@ export function mount(target, input, host) {
     // The kit's own check reads it at every level of a lenient decode (each valid ASCII escape alone, a stray % kept),
     // to a fixed point, so a scheme, `//` or `..` is refused however many times it was encoded, bad escapes or not.
     const src = raw.replace(/#.*$/s, '');
-    // No `\`, control character, edge space (a URL parser trims it), overlong UTF-8 escape (`%C0%AE` read as `.`), or
-    // segment of dots and spaces (`.`, `..`, `...`, `.. `: what Windows reads as `..`).
-    const clean = (p) => !/[\\\u0000-\u001f\u007f]|^ | $|%c[01]|%e0%[89]|%f0%8/i.test(p) && !/(^|\/)[. ]*\.[. ]*(\/|[?#;]|$)/.test(p);
+    // In the whole src: no `\`, control character, edge space (a URL parser trims it) or overlong UTF-8 escape (`%C0%AE`
+    // read as `.`). In its path only (below): no segment of dots and spaces (`.`, `..`, `...`, `.. `: what Windows reads as `..`).
+    const chars = (p) => !/[\\\u0000-\u001f\u007f]|^ | $|%c[01]|%e0%[89]|%f0%8/i.test(p);
+    const dots = (p) => !/(^|\/)[. ]*\.[. ]*(\/|[?#;]|$)/.test(p);
     const relative = (p) => !/^[a-z][a-z0-9+.-]*:/i.test(p) && !/^\/\//.test(p);
     const decode = (p) => p.replace(/%([0-7][0-9a-f])/gi, (m, h) => String.fromCharCode(parseInt(h, 16)));
     // An absolute URL is a link unless the host says it is one of its own attachments (host.isAttachment, opt-in).
     let own = false;
-    // Its authority must be plain (no `@`, `%` or `\`), so no level of decoding can move it to another host.
-    if (src && !relative(src) && host.image && host.isAttachment && /^([a-z][a-z0-9+.-]*:)?\/\/[^/?#@%\\]+(\/|\?|$)/i.test(src)) { try { own = host.isAttachment(src) === true; } catch (e) { own = false; } }
-    let attachment = !!src;
-    for (let p = src, k = 0; attachment; k++) {
-      attachment = clean(p) && (own ? !/\/\//.test(p.replace(/^([a-z][a-z0-9+.-]*:)?\/\//i, '')) : relative(p));
+    // Its authority must be plain (no `@`, `%` or `\`), so no level of decoding can move it to another host, and a path must follow it.
+    if (src && !relative(src) && host.image && host.isAttachment && /^([a-z][a-z0-9+.-]*:)?\/\/[^/?#@%\\]+\//i.test(src)) { try { own = host.isAttachment(src) === true; } catch (e) { own = false; } }
+    // The dot-segment, scheme and `//` checks read the path only: the src up to its first `?`, where a URL parser starts
+    // the query. The query is the host's to read and goes to it as written (`?x=..` and `?src=https://…` alike). A src
+    // with no path (`?x=1`; `https://vault.test?x` is never asked about) is not an attachment.
+    const q = src.indexOf('?'), path = q < 0 ? src : src.slice(0, q);
+    let attachment = !!path; // an approved absolute src has a path: its authority is followed by `/`
+    for (let p = src, a = path, k = 0; attachment; k++) {
+      attachment = chars(p) && dots(a) && (own ? !/\/\//.test(a.replace(/^([a-z][a-z0-9+.-]*:)?\/\//i, '')) : relative(a));
       const next = decode(p);
-      if (next === p) break; // the fixed point: no %25 is left in it
+      if (next === p) break; // the fixed point: no %25 is left in it (nor in the path, a prefix of it)
       if (k === 7) { attachment = false; break; } // still decoding after seven decodes (eight levels read): refused
-      p = next;
+      a = decode(a); p = next;
     }
     if (attachment && host.image) {
       const img = el('img', 'rn-img'); img.alt = alt;
@@ -480,6 +485,8 @@ export function mount(target, input, host) {
     /** a fresh note (after a save elsewhere, or a reload): the sitting is kept */
     update(next) { source = isDoc(next) ? null : (typeof next === 'string' ? { content: next } : next); const prev = doc; doc = isDoc(next) ? next : parse(next, { type: host.view }); if (sameNote(prev, doc) !== true) images.clear(); draw(); }, // another note asks for its attachments afresh
     redraw: draw,
+    /** the host's store changed (another vault, a late vaultUrl): every attachment is asked for afresh; the sitting stays */
+    refreshImages() { images.clear(); draw(); },
     destroy() { destroyed = true; timers.stopAll(); cleanups.forEach((f) => { try { f(); } catch (e) { /* gone */ } }); target.replaceChildren(); },
     _view: view,
   };

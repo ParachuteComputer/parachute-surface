@@ -25,6 +25,50 @@ describe("isVaultStorageUrl", () => {
     expect(isVaultStorageUrl("https://cdn.example/a.png")).toBe(false);
     expect(isVaultStorageUrl("/static/a.png")).toBe(false);
   });
+
+  // rich-notes-kit 0.4 (its item 20): the kit checks only the path's shape;
+  // the host compares scheme, host and port, and reads the query.
+  it("compares the whole origin: scheme, host and port", () => {
+    const V = "https://hub.example/vault/default";
+    expect(isVaultStorageUrl(`${V}/api/storage/a.png`, V)).toBe(true);
+    for (const src of [
+      "http://hub.example/vault/default/api/storage/a.png",
+      "https://hub.example:8443/vault/default/api/storage/a.png",
+      "https://hub.example./vault/default/api/storage/a.png",
+      "https://hub.exämple/vault/default/api/storage/a.png",
+      "https://hub.example.evil.example/vault/default/api/storage/a.png",
+      "https://hub.example/vault/other/api/storage/a.png",
+      "https://x@hub.example/vault/default/api/storage/a.png",
+    ])
+      expect(isVaultStorageUrl(src, V), src).toBe(false);
+    // the default port is the same origin
+    expect(isVaultStorageUrl("https://hub.example:443/vault/default/api/storage/a.png", V)).toBe(
+      true,
+    );
+  });
+
+  it("reads the query: a climb hidden there is refused, an ordinary query is fine", () => {
+    const V = "https://hub.example/vault/default";
+    for (const src of [
+      `${V}/api/storage/a.png?v=2`,
+      `${V}/api/storage/a.png?x=..`,
+      `${V}/api/storage/a.png?src=https://x.example/y`,
+      "/api/storage/a.png?v=2",
+    ])
+      expect(isVaultStorageUrl(src, V), src).toBe(true);
+    for (const src of [
+      `${V}/api/storage/a.png?x=/../../other/api/storage/b.png`,
+      `${V}/api/storage/a.png?/..`,
+      `${V}/api/storage/a.png?x=%2F..%2Fother`,
+      `${V}/api/storage/a.png?x=%5C..%5Cother`,
+      `${V}/api/storage/a.png?x=%252e%252e/%252e%252e/other`,
+      `${V}/api/storage/a.png?x=%25%32%65%25%32%65/other`,
+      "/api/storage/a.png?x=/../../other/x.png",
+      "/api/storage/..;/other/x.png",
+      `${V}/api/storage/a.png?x=/..;/other`,
+    ])
+      expect(isVaultStorageUrl(src, V), src).toBe(false);
+  });
 });
 
 describe("vaultClientFetchBlob adapter", () => {

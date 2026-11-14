@@ -1,6 +1,6 @@
 # Third-party code in @openparachute/surface-render
 
-## rich-notes-kit 0.3.0 (MIT)
+## rich-notes-kit 0.4.0 (MIT)
 
 Vendored in `src/rich/kit/` (compiled to `dist/rich/kit/`) and `rich-notes-kit.css`. See `src/rich/VENDORED.md`.
 
