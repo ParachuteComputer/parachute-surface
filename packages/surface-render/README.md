@@ -21,6 +21,10 @@ This package owns **"render a note"**:
   note's path; `formatForPath` is exported standalone.
 - **MDX** — `<MdxView>` renders `.mdx` **as markdown by default** (safe; no
   code execution), with an opt-in component-allowlist evaluation seam.
+- **Rich notes** — `<RichNoteView>` and `<NoteRenderer rich>` draw a note that
+  uses a rich pattern (a recipe, minutes, tasks, a dated log, callouts, a
+  chartable table…) with the vendored rich-notes-kit; every other note draws
+  as before. See [**Rich notes**](#rich-notes).
 
 It ships **primitives + good defaults + override hooks**, **not** a turnkey app
 shell. The surface owns routing, chrome, and domain components; this package
@@ -240,6 +244,60 @@ importer's rewrite as two ends of one contract. A surface with raw,
 un-imported `![[…]]` embeds can preprocess them into `/api/storage/…` images
 or `<VaultAudio>` before rendering.
 
+## Rich notes
+
+`<NoteRenderer rich>` draws a markdown note that uses a rich pattern with
+[rich-notes-kit](./src/rich/VENDORED.md) (PATTERNS v0.3, vendored, MIT), and
+every other note with `<MarkdownView>` exactly as before:
+
+| Pattern | Drawn as |
+|---|---|
+| tag `recipe` | ingredient check-offs, servings stepper, US ↔ metric, timers in the steps, cook mode |
+| tag `minutes` | attendance against `quorum`, a tally per vote |
+| tag `session` | pull quotes, who owes what, check-ins chart |
+| tag `chant` (` ```chordpro `) | chords over syllables, transpose |
+| `- [ ] task @owner due 2026-11-20` | a checkbox that saves `[x]` through `onSave`, owner chips, "3 days late" |
+| `- 2026-11-03: …` lines | a timeline, newest first, with a button to add today's line |
+| `> [!NOTE]` … the five GitHub callouts | a callout |
+| `<details><summary>` | a disclosure (any other HTML is text) |
+| a table with an all-number column | a quiet "Chart" switch |
+
+A note with only headings, paragraphs, plain lists, links or metadata has no
+rich pattern and goes to `<MarkdownView>`. `rich` defaults to `false`;
+`overrides.markdown` still wins over it.
+
+```tsx
+import "@openparachute/surface-render/rich-notes-kit.css";
+
+<NoteRenderer
+  note={note}                 // surface-client's Note: content, metadata, tags, id, updatedAt
+  rich
+  resolve={resolve}           // [[wikilinks]] → onNavigate(href); without it they're text
+  onNavigate={navigate}       // your router
+  fetchBlob={fetchBlob}       // the note's own /api/storage/… images; nothing else is fetched
+  onSave={(content, patch) =>
+    vault.updateNote(note.id, { content, if_updated_at: note.updatedAt })}
+  openLink={openExternal}     // an app webview's opener; without it, a target=_blank link
+/>
+```
+
+Without `onSave` tasks and logs are read-only. `<RichNoteView note={…}>` is the
+same view on its own (`@openparachute/surface-render/rich`). The host hooks are
+read when the view mounts; a new `note` updates it in place and keeps the
+reader's sitting (ticks, servings, cook-mode step, timers).
+
+**No network, ever.** The kit loads nothing: a remote image is a link, links
+open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the
+stylesheet has no `url()`, and note text enters the page only as text
+(`<details>`/`<summary>` is the only HTML honoured). The one thing it asks the
+host for, an attachment image, goes through `fetchBlob` only for a vault
+storage path. `RichNoteView.test.tsx` draws every fixture with every control
+opened and fails on any request or URL-loading node.
+
+Theme it with the kit's variables (`--rn-ink`, `--rn-paper`, `--rn-accent`,
+`--rn-serif`, …; see `rich-notes-kit.css`). Dark mode follows
+`prefers-color-scheme`; `[data-screen="ink"]` or `.rn-ink` gives the e-ink look.
+
 ## MDX safety (decision B)
 
 `<MdxView>` renders `.mdx` **as markdown by default** — JSX expressions and
@@ -347,9 +405,12 @@ const overrides: NoteRendererOverrides = {
 @openparachute/surface-render/formats    Csv/Json/Yaml/Code/Plain renderers, parseCsv, highlight hook
 @openparachute/surface-render/note       NoteRenderer, formatForPath, override prop types
 @openparachute/surface-render/mdx        MdxView
+@openparachute/surface-render/rich       RichNoteView, parseRichNote, hasRichPattern
 @openparachute/surface-render/styles.css optional baseline stylesheet (affordance defaults)
+@openparachute/surface-render/rich-notes-kit.css  the rich view's stylesheet (needed with `rich`)
 ```
 
 ## License
 
-AGPL-3.0
+AGPL-3.0. The vendored rich-notes-kit and markdown-it are MIT
+([THIRD_PARTY.md](./THIRD_PARTY.md)).

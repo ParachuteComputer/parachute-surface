@@ -12,7 +12,10 @@
       "web/admin/dist",
       "packages/*/dist",
       "packages/*/node_modules",
-      "packages/*/server/index.bundle.js"
+      "packages/*/server/index.bundle.js",
+      "packages/surface-render/src/rich/kit",
+      "packages/surface-render/src/rich/vendor",
+      "packages/surface-render/rich-notes-kit.css"
     ]
   },
   "formatter": {
