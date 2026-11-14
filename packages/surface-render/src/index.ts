@@ -22,6 +22,7 @@
  *   - `./formats`  — <Csv/Json/Yaml/Code/Plain Renderer> + the highlight hook
  *   - `./note`     — <NoteRenderer> dispatcher + formatForPath
  *   - `./mdx`      — <MdxView> (markdown-by-default; opt-in component allowlist)
+ *   - `./rich`     — <RichNoteView> (rich-notes-kit: recipes, minutes, tasks, logs…)
  */
 
 // Markdown + wikilinks
@@ -94,6 +95,21 @@ export {
   CODE_EXTENSIONS,
   type NoteFormat,
 } from "./note/index.js";
+
+// Rich notes (vendored rich-notes-kit; NoteRenderer's `rich` switch)
+export {
+  RichNoteView,
+  type RichNoteViewProps,
+  parseRichNote,
+  hasRichPattern,
+  RICH_NOTES_KIT_VERSION,
+  RICH_NOTES_CONTRACT,
+  type RichNote,
+  type RichDoc,
+  type RichHost,
+  type RichPatch,
+  type RichHandle,
+} from "./rich/index.js";
 
 // MDX (markdown-by-default; opt-in component evaluation)
 export {

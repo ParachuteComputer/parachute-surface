@@ -32,9 +32,22 @@
       "types": "./dist/mdx/index.d.ts",
       "import": "./dist/mdx/index.js"
     },
-    "./styles.css": "./styles.css"
+    "./rich": {
+      "types": "./dist/rich/index.d.ts",
+      "import": "./dist/rich/index.js"
+    },
+    "./styles.css": "./styles.css",
+    "./rich-notes-kit.css": "./rich-notes-kit.css"
   },
-  "files": ["dist", "styles.css", "README.md", "LICENSE", "CHANGELOG.md"],
+  "files": [
+    "dist",
+    "styles.css",
+    "rich-notes-kit.css",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY.md",
+    "CHANGELOG.md"
+  ],
   "publishConfig": {
     "access": "public"
   },

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 import { CodeRenderer } from "../formats/CodeRenderer.js";
 import { CsvRenderer } from "../formats/CsvRenderer.js";
 import { JsonRenderer } from "../formats/JsonRenderer.js";
@@ -6,13 +6,20 @@ import { PlainRenderer } from "../formats/PlainRenderer.js";
 import { YamlRenderer } from "../formats/YamlRenderer.js";
 import type { HighlightFn } from "../formats/highlight.js";
 import { MarkdownView, type MarkdownViewProps } from "../markdown/MarkdownView.js";
+import { RichNoteView, type RichNoteViewProps } from "../rich/RichNoteView.js";
+import { hasRichPattern, parseRichNote } from "../rich/kit-api.js";
 import { CODE_EXTENSIONS, type NoteFormat, extensionOf, formatForPath } from "./format.js";
 
-/** A note shape this dispatcher needs — just a path (for format detection)
- *  and content. Structurally satisfied by surface-client's `Note`. */
+/** A note shape this dispatcher needs — a path (for format detection) and
+ *  content; the rich view also reads metadata, tags, id and updatedAt when
+ *  they're there. Structurally satisfied by surface-client's `Note`. */
 export interface NoteLike {
   path?: string;
   content?: string;
+  metadata?: Record<string, unknown>;
+  tags?: string[];
+  id?: string;
+  updatedAt?: string;
 }
 
 /** Props the markdown override receives — surface-render's {@link MarkdownViewProps}.
@@ -57,17 +64,18 @@ export interface NoteRendererOverrides {
 }
 
 export interface NoteRendererProps
-  extends Pick<
-    MarkdownViewProps,
-    | "resolve"
-    | "linkComponent"
-    | "fetchBlob"
-    | "vaultUrl"
-    | "components"
-    | "breaks"
-    | "remarkPlugins"
-    | "rehypePlugins"
-  > {
+  extends Pick<RichNoteViewProps, "onNavigate" | "openLink" | "onSave" | "calm" | "units">,
+    Pick<
+      MarkdownViewProps,
+      | "resolve"
+      | "linkComponent"
+      | "fetchBlob"
+      | "vaultUrl"
+      | "components"
+      | "breaks"
+      | "remarkPlugins"
+      | "rehypePlugins"
+    > {
   note: NoteLike;
   /** Container class passed to each format renderer (default `prose-note`). */
   className?: string;
@@ -77,6 +85,14 @@ export interface NoteRendererProps
   overrides?: NoteRendererOverrides;
   /** Force a format instead of deriving from `note.path`. */
   format?: NoteFormat;
+  /**
+   * Draw markdown notes that use a rich pattern with {@link RichNoteView}
+   * (rich-notes-kit, PATTERNS v0.3): a typed note (recipe, minutes, session,
+   * chant), tasks, a dated log, callouts, `<details>` or a chartable table.
+   * Every other note still goes to `<MarkdownView>`, exactly as before.
+   * **Default `false`.** `overrides.markdown` still wins over it.
+   */
+  rich?: boolean;
 }
 
 /**
@@ -84,7 +100,8 @@ export interface NoteRendererProps
  * (or an explicit `format`). Markdown is the default (no extension / `.md` /
  * `.mdx` / `.markdown`); everything else routes to the multi-format
  * primitives. All markdown hooks (`resolve`, `linkComponent`, `fetchBlob`, …)
- * flow through to `<MarkdownView>`.
+ * flow through to `<MarkdownView>`. With `rich`, a markdown note that uses a
+ * rich pattern goes to `<RichNoteView>` instead.
  */
 export function NoteRenderer({
   note,
@@ -92,10 +109,23 @@ export function NoteRenderer({
   highlight,
   overrides,
   format,
+  rich = false,
+  onNavigate,
+  openLink,
+  onSave,
+  calm,
+  units,
   ...markdownProps
 }: NoteRendererProps) {
   const content = note.content ?? "";
   const fmt = format ?? formatForPath(note.path);
+  // Parsed once per note (not per render), so a parent re-render doesn't
+  // redraw the rich view; null when the rich path can't apply.
+  const wantsRich = rich && fmt === "markdown" && !overrides?.markdown;
+  const richDoc = useMemo(
+    () => (wantsRich ? parseRichNote({ ...note, content: note.content ?? "" }) : null),
+    [wantsRich, note],
+  );
 
   switch (fmt) {
     case "markdown": {
@@ -106,7 +136,25 @@ export function NoteRenderer({
       // `highlight` and passes `rehypePlugins` — the markdown `code` override
       // only activates when `highlight` is set, so the two paths never collide.
       const props: MarkdownViewProps = { content, className, highlight, ...markdownProps };
-      return overrides?.markdown ? <>{overrides.markdown(props)}</> : <MarkdownView {...props} />;
+      if (overrides?.markdown) return <>{overrides.markdown(props)}</>;
+      if (richDoc && hasRichPattern(richDoc)) {
+        return (
+          <RichNoteView
+            note={note}
+            doc={richDoc}
+            className={className ?? "rich-note"}
+            resolve={markdownProps.resolve}
+            fetchBlob={markdownProps.fetchBlob}
+            vaultUrl={markdownProps.vaultUrl}
+            onNavigate={onNavigate}
+            openLink={openLink}
+            onSave={onSave}
+            calm={calm}
+            units={units}
+          />
+        );
+      }
+      return <MarkdownView {...props} />;
     }
     case "csv":
       return overrides?.csv ? (

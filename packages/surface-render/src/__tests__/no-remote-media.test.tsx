@@ -100,6 +100,78 @@ describe("remote images in a note never load", () => {
   });
 });
 
+describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
+  const VAULT = "https://hub.example/vault/default";
+  // Tasks make it a rich note; the images are the hostile set above plus
+  // bare relative paths, which the kit hands to the host as attachments.
+  const RICH_NOTE = [
+    NOTE,
+    "",
+    "- [ ] Check the pixels",
+    "",
+    "![bare host](tracker.example/open.png)",
+    "",
+    "![other folder](attachments/other.png)",
+    "",
+    "![other vault](https://hub.example/vault/other/api/storage/a.png)",
+  ].join("\n");
+
+  /** A surface's own fetchBlob that trusts its caller: it fetches whatever
+   *  it is asked for, with the token. Only the guard stands in front of it. */
+  function naiveSurface() {
+    const fetchImpl = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(new Blob(["b"])),
+    );
+    const fetchBlob = vi.fn(async (url: string) => {
+      const target = url.startsWith("/") ? `${VAULT}${url}` : new URL(url, `${VAULT}/`).href;
+      const res = await fetchImpl(target, {
+        headers: { Authorization: "Bearer SECRET" },
+      });
+      return res.blob();
+    });
+    return { fetchImpl, fetchBlob };
+  }
+
+  it("a remote image makes no request, is a plain link, and the token never leaves the vault", async () => {
+    const { fetchImpl, fetchBlob } = naiveSurface();
+    const { container } = render(
+      <NoteRenderer
+        note={{ path: "review.md", content: RICH_NOTE }}
+        rich
+        fetchBlob={fetchBlob}
+        vaultUrl={VAULT}
+      />,
+    );
+    expect(container.querySelector(".rn")).not.toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loadedUrls(container)).toEqual([]);
+    expect(fetchBlob).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const link = container.querySelector('a[href="https://tracker.example/open.png?note=1"]');
+    expect(link).not.toBeNull();
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+  });
+
+  it("its vault attachment still loads, with the token, inside the vault", async () => {
+    const { fetchImpl, fetchBlob } = naiveSurface();
+    const { container } = render(
+      <NoteRenderer
+        note={{
+          path: "review.md",
+          content: `${RICH_NOTE}\n\n![plan](/api/storage/att/plan.png)\n`,
+        }}
+        rich
+        fetchBlob={fetchBlob}
+        vaultUrl={VAULT}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    expect(fetchBlob.mock.calls).toEqual([["/api/storage/att/plan.png"]]);
+    for (const [url] of fetchImpl.mock.calls)
+      expect(url.startsWith(`${VAULT}/api/storage/`), url).toBe(true);
+  });
+});
+
 describe("vault attachments still load", () => {
   it("a relative /api/storage/ image is fetched with auth and shown", async () => {
     const fetchBlob = vi.fn(async () => new Blob(["x"], { type: "image/png" }));
