@@ -288,11 +288,12 @@ same view on its own (`@openparachute/surface-render/rich`). The same note with
 new content updates in place and keeps the reader's sitting (ticks, servings,
 cook-mode step, timers); a different note (by `id`, else `path`; give unsaved
 notes one of them), or a hook that appears or goes (`onSave`, `resolve`,
-`openLink`, `fetchBlob`, `units`), or another `vaultUrl`, starts fresh. A
-`vaultUrl` given for the first time redraws in place, so a full in-vault
-image URL loads without losing the sitting. A surface that switches vaults
-without `vaultUrl` should give notes an `id`, or a same-path note keeps the
-last vault's images.
+`openLink`, `fetchBlob`, `units`) starts fresh. A `vaultUrl` that changes
+(given late, another vault, or gone) keeps the sitting and asks every image
+afresh under the new vault, so a full in-vault image URL loads and no image
+from the last vault stays. Hand the new vault's note in the same render. A
+surface that switches vaults without `vaultUrl` should give notes an `id`, or
+a same-path note keeps the last vault's images.
 
 **No network, ever.** The kit loads nothing: a remote image is a link, links
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the

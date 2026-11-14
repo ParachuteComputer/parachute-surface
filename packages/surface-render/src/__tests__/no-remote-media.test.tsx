@@ -325,6 +325,40 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(boxes().map((x) => x.checked)).toEqual([true, false]);
   });
 
+  it("an image from the last vault that arrives after the switch never becomes an object URL", async () => {
+    const created = vi.mocked(URL.createObjectURL);
+    const revoked = vi.mocked(URL.revokeObjectURL);
+    let release: (b: Blob) => void = () => {};
+    const slow = vi.fn(
+      () =>
+        new Promise<Blob>((r) => {
+          release = r;
+        }),
+    );
+    const b = naiveSurface();
+    const note = { path: "slow.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const { container, rerender } = render(
+      <NoteRenderer note={note} rich fetchBlob={slow} vaultUrl={VAULT} />,
+    );
+    await waitFor(() => expect(slow).toHaveBeenCalledTimes(1));
+    rerender(
+      <NoteRenderer
+        note={note}
+        rich
+        fetchBlob={b.fetchBlob}
+        vaultUrl="https://hub.example/vault/other"
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    const before = created.mock.calls.length;
+    const revokedBefore = revoked.mock.calls.length;
+    release(new Blob(["late"]));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(created.mock.calls.length).toBe(before);
+    expect(revoked.mock.calls.length).toBe(revokedBefore);
+    expect(container.querySelectorAll("img").length).toBe(1);
+  });
+
   it("a first vaultUrl asks again for a relative image fetched before it", async () => {
     const { fetchBlob } = naiveSurface();
     const note = { path: "first.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
@@ -366,6 +400,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       `${VAULT}/api/storage/att/a.png?x=%2F..%2F..%2Fother`,
       `${VAULT}/api/storage/att/a.png?x=%252e%252e/%252e%252e/other`,
       "/api/storage/att/a.png?x=/../../other/x.png",
+      "/api/storage/..;/other/x.png",
     ];
     const content = ["- [ ] look", "", ...smuggled.map((u) => `![q](${u})`)].join("\n\n");
     for (const rich of [true, false]) {

@@ -64,6 +64,8 @@ describe("isVaultStorageUrl", () => {
       `${V}/api/storage/a.png?x=%252e%252e/%252e%252e/other`,
       `${V}/api/storage/a.png?x=%25%32%65%25%32%65/other`,
       "/api/storage/a.png?x=/../../other/x.png",
+      "/api/storage/..;/other/x.png",
+      `${V}/api/storage/a.png?x=/..;/other`,
     ])
       expect(isVaultStorageUrl(src, V), src).toBe(false);
   });

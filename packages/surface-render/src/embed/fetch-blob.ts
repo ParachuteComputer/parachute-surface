@@ -100,7 +100,8 @@ function isAbsoluteUrl(src: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("//");
 }
 
-/** A path that tries to climb out of `/api/storage/` (`..`, `.`, an encoded
+/** A path that tries to climb out of `/api/storage/` (`..`, `.`, `..;` as
+ *  some servers read it, an encoded
  *  dot, slash or backslash), or carries a backslash or control character
  *  (browsers fold `/\host` and `/<TAB>/host` into `//host`), is not a
  *  storage path. Checked at every level of percent-decoding, so `%252e`,
@@ -111,7 +112,7 @@ function hasTraversal(path: string): boolean {
   let p = path;
   for (let level = 0; level < 8; level++) {
     if (
-      /(^|\/)\.{1,2}(\/|[?#]|$)/.test(p) ||
+      /(^|\/)\.{1,2}(\/|[?#;]|$)/.test(p) ||
       /%(2e|2f|5c)/i.test(p) ||
       p.includes("\\") ||
       hasControlChar(p)
