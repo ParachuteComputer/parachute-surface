@@ -251,7 +251,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(container.querySelector(".rn-img-off")).toBeNull();
   });
 
-  it("a vaultUrl that arrives after the first draw lets a full in-vault URL load", async () => {
+  it("a vaultUrl that arrives after the first draw lets a full in-vault URL load, in place", async () => {
     const { fetchBlob } = naiveSurface();
     const note = {
       path: "late.md",
@@ -260,9 +260,26 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     const { container, rerender } = render(<NoteRenderer note={note} rich fetchBlob={fetchBlob} />);
     await new Promise((r) => setTimeout(r, 0));
     expect(fetchBlob).not.toHaveBeenCalled();
+    const view = container.querySelector(".rich-note");
     rerender(<NoteRenderer note={note} rich fetchBlob={fetchBlob} vaultUrl={VAULT} />);
     await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
     expect(fetchBlob.mock.calls).toEqual([[`${VAULT}/api/storage/att/a.png`]]);
+    // Redrawn, not remounted: the reader's sitting stays.
+    expect(container.querySelector(".rich-note")).toBe(view);
+  });
+
+  it("without fetchBlob, a full in-vault URL stays a link the reader can open", async () => {
+    const inVault = `${VAULT}/api/storage/att/a.png`;
+    const { container } = render(
+      <NoteRenderer
+        note={{ path: "nofetch.md", content: `- [ ] look\n\n![a](${inVault})\n` }}
+        rich
+        vaultUrl={VAULT}
+      />,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector(`a.rn-img-off[href="${inVault}"]`)).not.toBeNull();
+    expect(container.querySelector("span.rn-img-off, .rn-img-wait")).toBeNull();
   });
 
   it("a full URL in another vault, on another host, or with an encoded climb stays a link: no request, no token", async () => {
@@ -299,7 +316,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(container.querySelectorAll("img, .rn-img-wait, span.rn-img-off").length).toBe(0);
     expect(
       [...container.querySelectorAll("a.rn-img-off")].map((a) => a.getAttribute("href")),
-    ).toHaveLength(links.length);
+    ).toEqual(links.map((u) => new URL(u).href)); // the kit's safeHref parses the link
   });
 
   it("an attachment with an encoded name, a query or a hash loads from the raw src", async () => {

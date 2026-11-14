@@ -59,9 +59,8 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
   // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting. A new vaultUrl redraws too,
-  // since the kit asks `isAttachment` about an absolute image only when it draws.
-  const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
+  // content updates in place and keeps the sitting.
+  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
   const key = [
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
@@ -69,7 +68,6 @@ export function RichNoteView(props: RichNoteViewProps) {
     onSave ? "s" : "",
     fetchBlob ? "b" : "",
     units ?? "",
-    vaultUrl ?? "",
   ].join("|");
   return <RichNoteMount key={key} {...props} />;
 }
@@ -112,7 +110,9 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
       },
       // An absolute src (kit 0.3) is an attachment only when it sits in this
       // vault; anything else stays a link and is never asked for.
-      isAttachment: (src) => isVaultStorageUrl(src, latest.current.vaultUrl),
+      // Without fetchBlob nothing can load, so it stays a link the reader can open.
+      isAttachment: (src) =>
+        Boolean(latest.current.fetchBlob) && isVaultStorageUrl(src, latest.current.vaultUrl),
       calm: () => Boolean(latest.current.calm),
     };
     if (h.resolve) {
@@ -144,6 +144,16 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     drawn.current = parsed;
     handle.current.update(parsed);
   }, [parsed]);
+
+  // The kit asks `isAttachment` about an absolute image only when it draws, so
+  // a new vaultUrl redraws the same note in place (the sitting stays).
+  const vaultUrl = hooks.vaultUrl;
+  const drawnVault = useRef(vaultUrl);
+  useEffect(() => {
+    if (!handle.current || !drawn.current || drawnVault.current === vaultUrl) return;
+    drawnVault.current = vaultUrl;
+    handle.current.update(drawn.current);
+  }, [vaultUrl]);
 
   return <div ref={ref} className={className} />;
 }
