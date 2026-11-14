@@ -25,9 +25,8 @@ export interface RichNoteViewProps {
    *  `isVaultStorageUrl(src, vaultUrl)`; nothing else is fetched. */
   fetchBlob?: FetchBlob;
   /** The vault's base URL (e.g. `https://hub.example/vault/default`), as on
-   *  `MarkdownView`: the vault an image must sit in to be fetched. The kit
-   *  hands the host only relative paths, so today an absolute URL, even one
-   *  inside this vault, stays a link. */
+   *  `MarkdownView`: the vault an image must sit in to be fetched. A full
+   *  URL inside this vault loads too; any other absolute URL stays a link. */
   vaultUrl?: string;
   /** Saves a one-line content edit (a ticked task, a "made today" line).
    *  Resolve with the saved note, or `{ updatedAt }` (it becomes the next
@@ -97,7 +96,8 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     const h = latest.current;
     const host: RichHost = {
       // `src` is raw, as markdown-it normalised it (the string MarkdownView
-      // gets). This check decides every load; a refusal reads "(not loaded)".
+      // gets, minus any `#fragment`). This check decides every load; a refusal
+      // reads "(not loaded)".
       async image(src) {
         const fetchBlob = latest.current.fetchBlob;
         if (!fetchBlob || !isVaultStorageUrl(src, latest.current.vaultUrl))
@@ -108,6 +108,9 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
         objectUrls.push(url);
         return url;
       },
+      // An absolute src (kit 0.3) is an attachment only when it sits in this
+      // vault; anything else stays a link and is never asked for.
+      isAttachment: (src) => isVaultStorageUrl(src, latest.current.vaultUrl),
       calm: () => Boolean(latest.current.calm),
     };
     if (h.resolve) {

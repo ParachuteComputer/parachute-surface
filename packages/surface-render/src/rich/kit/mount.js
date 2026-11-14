@@ -96,17 +96,27 @@ export function mount(target, input, host) {
     if (at < s.length) parent.appendChild(document.createTextNode(s.slice(at)));
   }
   function image(t) {
-    const src = String(t.attrGet('src') || ''), alt = t.content || '';
-    // The host gets the raw src, as a markdown host does. The kit's own check reads it at every level of decoding, so
-    // a scheme, `//` or `..` is refused however many times it was encoded.
-    const plainPath = (p) => !/^[a-z][a-z0-9+.-]*:/i.test(p) && !/^\/\//.test(p) && !/[\\\u0000-\u001f]/.test(p) && !/(^|\/)\.\.?(\/|[?#]|$)/.test(p);
+    const raw = String(t.attrGet('src') || ''), alt = t.content || '';
+    // The host gets the src as a markdown host does, less its #fragment (a.png and a.png#top are one attachment).
+    // The kit's own check reads it at every level of a lenient decode (each valid ASCII escape alone, a stray % kept),
+    // to a fixed point, so a scheme, `//` or `..` is refused however many times it was encoded, bad escapes or not.
+    const src = raw.replace(/#.*$/s, '');
+    // No `\`, control character, edge space (a URL parser trims it), overlong UTF-8 escape (`%C0%AE` read as `.`), or
+    // segment of dots and spaces (`.`, `..`, `...`, `.. `: what Windows reads as `..`).
+    const clean = (p) => !/[\\\u0000-\u001f\u007f]|^ | $|%c[01]|%e0%[89]|%f0%8/i.test(p) && !/(^|\/)[. ]*\.[. ]*(\/|[?#;]|$)/.test(p);
+    const relative = (p) => !/^[a-z][a-z0-9+.-]*:/i.test(p) && !/^\/\//.test(p);
+    const decode = (p) => p.replace(/%([0-7][0-9a-f])/gi, (m, h) => String.fromCharCode(parseInt(h, 16)));
+    // An absolute URL is a link unless the host says it is one of its own attachments (host.isAttachment, opt-in).
+    let own = false;
+    // Its authority must be plain (no `@`, `%` or `\`), so no level of decoding can move it to another host.
+    if (src && !relative(src) && host.image && host.isAttachment && /^([a-z][a-z0-9+.-]*:)?\/\/[^/?#@%\\]+(\/|\?|$)/i.test(src)) { try { own = host.isAttachment(src) === true; } catch (e) { own = false; } }
     let attachment = !!src;
-    for (let p = src, k = 0; attachment && k < 8; k++) {
-      attachment = plainPath(p);
-      let next; try { next = decodeURIComponent(p); } catch (e) { break; } // a lone % (a name like "100%.png") ends it
-      if (next === p) break;
+    for (let p = src, k = 0; attachment; k++) {
+      attachment = clean(p) && (own ? !/\/\//.test(p.replace(/^([a-z][a-z0-9+.-]*:)?\/\//i, '')) : relative(p));
+      const next = decode(p);
+      if (next === p) break; // the fixed point: no %25 is left in it
+      if (k === 7) { attachment = false; break; } // still decoding after seven decodes (eight levels read): refused
       p = next;
-      if (k === 7) attachment = false; // still decoding after eight levels: refused
     }
     if (attachment && host.image) {
       const img = el('img', 'rn-img'); img.alt = alt;
@@ -115,11 +125,11 @@ export function mount(target, input, host) {
       // refused by the host, or handed back as anything but a blob:/data:image URL → the "(not loaded)" label
       const refused = () => { holder.className = 'rn-img-off'; holder.textContent = 'Image: ' + (alt || 'untitled') + ' (not loaded)'; };
       const p = images.get(src);
-      p.then((u) => { const ok = safeImageUrl(u); if (!ok) { if (images.get(src) === p) images.delete(src); refused(); } else if (holder.isConnected) { img.src = ok; holder.replaceWith(img); } }, refused);
+      p.then((u) => { const ok = safeImageUrl(u); if (!ok) { if (images.get(src) === p) images.delete(src); refused(); } else if (holder.isConnected) { img.src = ok; holder.replaceWith(img); } }, refused).catch(() => { try { refused(); } catch (e) { /* the view is going */ } }); // an odd DOM mid-destroy: no unhandled rejection
       return holder;
     }
     // PATTERNS privacy rule 2: a remote image tells its server the note was opened, so it is never loaded
-    const href = sealed && !host.openLink ? null : safeHref(src);
+    const href = sealed && !host.openLink ? null : safeHref(raw);
     const a = el(href ? 'a' : 'span', 'rn-img-off', 'Image: ' + (alt || 'untitled') + ' (not loaded)');
     if (href) { a.classList.add('rn-link'); a.setAttribute('href', href); a.setAttribute('rel', 'noopener noreferrer nofollow'); a.setAttribute('referrerpolicy', 'no-referrer'); if (!sealed && !host.openLink) a.setAttribute('target', '_blank'); }
     return a;
