@@ -275,6 +275,7 @@ import "@openparachute/surface-render/rich-notes-kit.css";
   resolve={resolve}           // [[wikilinks]] → onNavigate(href); without it they're text
   onNavigate={navigate}       // your router
   fetchBlob={fetchBlob}       // the note's own /api/storage/… images; nothing else is fetched
+  vaultUrl={vaultUrl}         // optional: the vault's base URL, as for MarkdownView
   onSave={(content, patch) =>   // resolve with the saved note; the kit moves its revision on
     vault.updateNote(note.id, { content, if_updated_at: patch.revision ?? note.updatedAt })}
   openLink={openExternal}     // an app webview's opener; without it, a target=_blank link
@@ -292,9 +293,14 @@ notes one of them), or a hook that appears or goes (`onSave`, `resolve`,
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the
 stylesheet has no `url()`, and note text enters the page only as text
 (`<details>`/`<summary>` is the only HTML honoured). The one thing it asks the
-host for, an attachment image, goes through `fetchBlob` only for a vault
-storage path. `RichNoteView.test.tsx` draws every fixture with every control
-opened and fails on any request or URL-loading node.
+host for, an attachment image, goes through `fetchBlob` only when
+`isVaultStorageUrl(src, vaultUrl)` passes, the same check as the table above.
+The kit hands the host only relative paths, so in a rich note an absolute
+URL, even `<vaultUrl>/api/storage/…`, is a link, never loaded.
+`RichNoteView.test.tsx` draws every fixture with every control opened and
+fails on any request or URL-loading node; `no-remote-media.test.tsx` draws a
+rich note full of remote images against a surface `fetchBlob` that would send
+the token anywhere, and fails on any request.
 
 Theme it with the kit's variables (`--rn-ink`, `--rn-paper`, `--rn-accent`,
 `--rn-serif`, …; see `rich-notes-kit.css`). Dark mode follows

@@ -145,6 +145,7 @@ export function NoteRenderer({
             className={className ?? "rich-note"}
             resolve={markdownProps.resolve}
             fetchBlob={markdownProps.fetchBlob}
+            vaultUrl={markdownProps.vaultUrl}
             onNavigate={onNavigate}
             openLink={openLink}
             onSave={onSave}

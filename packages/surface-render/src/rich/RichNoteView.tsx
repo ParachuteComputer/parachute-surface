@@ -21,8 +21,14 @@ export interface RichNoteViewProps {
    *  it the kit uses an ordinary `target=_blank` link. */
   openLink?: (href: string) => void;
   /** Auth'd blob fetcher for the note's own attachments (`/api/storage/…`).
-   *  Nothing else is ever fetched. */
+   *  It is only ever asked for a URL that passes
+   *  `isVaultStorageUrl(src, vaultUrl)`; nothing else is fetched. */
   fetchBlob?: FetchBlob;
+  /** The vault's base URL (e.g. `https://hub.example/vault/default`), as on
+   *  `MarkdownView`: the vault an image must sit in to be fetched. The kit
+   *  hands the host only relative paths, so today an absolute URL, even one
+   *  inside this vault, stays a link. */
+  vaultUrl?: string;
   /** Saves a one-line content edit (a ticked task, a "made today" line).
    *  Resolve with the saved note (its `updatedAt` becomes the next
    *  revision); reject with `{ status: 409 }` when stale. Without it the note is
@@ -91,7 +97,8 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     const host: RichHost = {
       async image(path) {
         const fetchBlob = latest.current.fetchBlob;
-        if (!fetchBlob || !isVaultStorageUrl(path)) throw new Error("not a vault attachment");
+        if (!fetchBlob || !isVaultStorageUrl(path, latest.current.vaultUrl))
+          throw new Error("not a vault attachment");
         const blob = await fetchBlob(path);
         if (disposed) throw new Error("view closed");
         const url = URL.createObjectURL(blob);

@@ -38,7 +38,8 @@
   `overrides.markdown` still wins.
 - **`<RichNoteView>`** (`./rich`): the view on its own. Host hooks from
   surface-render's own props: `resolve` + new `onNavigate` (wikilinks),
-  `fetchBlob` (vault storage images only), new `onSave(content, patch)`
+  `fetchBlob` + `vaultUrl` (images only when `isVaultStorageUrl(src,
+  vaultUrl)` passes; a remote image is a plain link, never loaded), new `onSave(content, patch)`
   (task ticks and log lines; read-only without it), `openLink`, `calm`,
   `units`.
 - `NoteLike` grows optional `metadata`, `tags`, `id`, `updatedAt`
