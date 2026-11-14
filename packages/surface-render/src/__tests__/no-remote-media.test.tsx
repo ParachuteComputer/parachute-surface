@@ -8,7 +8,7 @@
  *
  * Made-up notes and hosts only.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { VaultAudio } from "../embed/VaultAudio.js";
 import { VaultImage } from "../embed/VaultImage.js";
@@ -171,7 +171,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       expect(url.startsWith(`${VAULT}/api/storage/`), url).toBe(true);
   });
 
-  // Kit 0.2 hands host.image the raw src (as MarkdownView gets it), encoded
+  // The kit hands host.image the raw src (as MarkdownView gets it), encoded
   // forms included; the host's isVaultStorageUrl decides every load.
   it("a full URL outside the vault stays a link: no request, no token", async () => {
     const { fetchImpl, fetchBlob } = naiveSurface();
@@ -181,9 +181,8 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       "https://hub.example@evil.example/vault/default/api/storage/a.png",
       "https:%2F%2Fevil.example/vault/default/api/storage/a.png",
     ];
-    // Paths the kit lets through as attachments but the vault check refuses.
-    // A stray `%` ends the kit's decode loop early, so a double-encoded `..`
-    // reaches the host.
+    // Refused by the vault check or, since kit 0.3 decodes leniently to a
+    // fixed point, by the kit itself (the double-encoded `..` behind a `%`).
     const refused = [
       "/api/storage/a%2Fb.png",
       "/api/storage/att%5C..%5Cx.png",
@@ -218,24 +217,159 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(container.querySelector(".rn-img-wait")).toBeNull();
   });
 
-  it("a full URL inside the vault is also a link under kit 0.2 (fail-closed), never fetched", async () => {
-    // The kit asks the host only for scheme-less paths (FEEDBACK-REPLY item 8),
-    // so even this vault's own absolute storage URL is not loaded in a rich note.
+  // Kit 0.3 asks host.isAttachment about an absolute src; RichNoteView answers
+  // with exactly isVaultStorageUrl, so the vault check decides these too.
+  it("a full URL inside the vault loads, with the token, from the vault", async () => {
     const { fetchImpl, fetchBlob } = naiveSurface();
-    const inVault = `${VAULT}/api/storage/att/plan.png`;
+    const inVault = [
+      `${VAULT}/api/storage/att/plan.png`,
+      `${VAULT}/api/storage/att/100%.png`,
+      "/api/storage/att/100%.png",
+    ];
     const { container } = render(
       <NoteRenderer
-        note={{ path: "full.md", content: `- [ ] look\n\n![plan](${inVault})\n` }}
+        note={{
+          path: "full.md",
+          content: ["- [ ] look", "", ...inVault.map((u) => `![a](${u})`)].join("\n\n"),
+        }}
         rich
         fetchBlob={fetchBlob}
         vaultUrl={VAULT}
       />,
     );
+    await waitFor(() =>
+      expect(container.querySelectorAll('img[src="blob:mock"]').length).toBe(inVault.length),
+    );
+    // markdown-it hands a stray `%` over as `%25`.
+    expect(fetchBlob.mock.calls.map(([u]) => u)).toEqual([
+      `${VAULT}/api/storage/att/plan.png`,
+      `${VAULT}/api/storage/att/100%25.png`,
+      "/api/storage/att/100%25.png",
+    ]);
+    for (const [url] of fetchImpl.mock.calls)
+      expect(url.startsWith(`${VAULT}/api/storage/`), url).toBe(true);
+    expect(container.querySelector(".rn-img-off")).toBeNull();
+  });
+
+  it("a vaultUrl that arrives after the first draw lets a full in-vault URL load, in place", async () => {
+    const { fetchBlob } = naiveSurface();
+    const note = {
+      path: "late.md",
+      content: `- [ ] look\n\n![a](${VAULT}/api/storage/att/a.png)\n`,
+    };
+    const { container, rerender } = render(<NoteRenderer note={note} rich fetchBlob={fetchBlob} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchBlob).not.toHaveBeenCalled();
+    const view = container.querySelector(".rich-note");
+    rerender(<NoteRenderer note={note} rich fetchBlob={fetchBlob} vaultUrl={VAULT} />);
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    expect(fetchBlob.mock.calls).toEqual([[`${VAULT}/api/storage/att/a.png`]]);
+    // Redrawn, not remounted: the reader's sitting stays.
+    expect(container.querySelector(".rich-note")).toBe(view);
+  });
+
+  it("a vaultUrl that arrives after a saved tick keeps the tick", async () => {
+    const { fetchBlob } = naiveSurface();
+    const onSave = vi.fn(async () => ({ updatedAt: "2026-11-14T00:00:00.000Z" }));
+    const note = {
+      path: "ticks.md",
+      updatedAt: "2026-11-13T00:00:00.000Z",
+      content: `- [ ] one\n- [ ] two\n\n![a](${VAULT}/api/storage/att/a.png)\n`,
+    };
+    const props = { note, rich: true, fetchBlob, onSave };
+    const { container, rerender } = render(<NoteRenderer {...props} />);
+    const boxes = () => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    fireEvent.click(boxes()[0]);
+    await waitFor(() => expect(container.querySelector(".rn-status")).toHaveTextContent("Saved."));
+    rerender(<NoteRenderer {...props} vaultUrl={VAULT} />);
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    expect(boxes().map((b) => b.checked)).toEqual([true, false]);
+    fireEvent.click(boxes()[1]);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave.mock.calls[1]?.[0]).toContain("- [x] one\n- [x] two");
+  });
+
+  it("switching to another vault starts fresh: no image from the last vault", async () => {
+    const a = naiveSurface();
+    const b = naiveSurface();
+    const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const { container, rerender } = render(
+      <NoteRenderer note={note} rich fetchBlob={a.fetchBlob} vaultUrl={VAULT} />,
+    );
+    await waitFor(() => expect(a.fetchBlob).toHaveBeenCalledTimes(1));
+    rerender(
+      <NoteRenderer
+        note={note}
+        rich
+        fetchBlob={b.fetchBlob}
+        vaultUrl="https://hub.example/vault/other"
+      />,
+    );
+    await waitFor(() => expect(b.fetchBlob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+  });
+
+  it("a vault that goes away and comes back as another starts fresh", async () => {
+    const { fetchBlob } = naiveSurface();
+    const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const props = { note, rich: true, fetchBlob };
+    const { container, rerender } = render(<NoteRenderer {...props} vaultUrl={VAULT} />);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(1));
+    rerender(<NoteRenderer {...props} />);
+    const view = container.querySelector(".rich-note");
+    rerender(<NoteRenderer {...props} vaultUrl="https://hub.example/vault/other" />);
+    expect(container.querySelector(".rich-note")).not.toBe(view);
+  });
+
+  it("without fetchBlob, a full in-vault URL stays a link the reader can open", async () => {
+    const inVault = `${VAULT}/api/storage/att/a.png`;
+    const { container } = render(
+      <NoteRenderer
+        note={{ path: "nofetch.md", content: `- [ ] look\n\n![a](${inVault})\n` }}
+        rich
+        vaultUrl={VAULT}
+      />,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector(`a.rn-img-off[href="${inVault}"]`)).not.toBeNull();
+    expect(container.querySelector("span.rn-img-off, .rn-img-wait")).toBeNull();
+  });
+
+  it("a full URL in another vault, on another host, or with an encoded climb stays a link: no request, no token", async () => {
+    const { fetchImpl, fetchBlob } = naiveSurface();
+    const links = [
+      "https://evil.example/vault/default/api/storage/a.png",
+      "https://hub.example/vault/other/api/storage/a.png",
+      "https://hub.example.evil.example/vault/default/api/storage/a.png",
+      `${VAULT}/api/storage/a%2Fb.png`,
+      `${VAULT}/api/storage/a%2f..%2f..%2fother%2fx.png`,
+      `${VAULT}/api/storage/att%5C..%5Cx.png`,
+      `${VAULT}/api/storage/att%5c..%5cx.png`,
+      `${VAULT}/api/storage/%2e%2e/%2e%2e/other/x.png`,
+      `${VAULT}/api/storage/../../other/x.png`,
+      `${VAULT}/api/storage/%252e%252e/%ff/x.png`,
+    ];
+    const { container } = render(
+      <NoteRenderer
+        note={{
+          path: "links.md",
+          content: ["- [ ] look", "", ...links.map((u) => `![x](${u})`)].join("\n\n"),
+        }}
+        rich
+        fetchBlob={fetchBlob}
+        vaultUrl={VAULT}
+      />,
+    );
+    expect(container.querySelector(".rn")).not.toBeNull();
     await new Promise((r) => setTimeout(r, 50));
     expect(fetchBlob).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(loadedUrls(container)).toEqual([]);
-    expect(container.querySelector(`a[href="${inVault}"]`)).not.toBeNull();
+    // Never asked: each is the kit's plain link, not a refused attachment.
+    expect(container.querySelectorAll("img, .rn-img-wait, span.rn-img-off").length).toBe(0);
+    expect(
+      [...container.querySelectorAll("a.rn-img-off")].map((a) => a.getAttribute("href")),
+    ).toEqual(links.map((u) => new URL(u).href)); // the kit's safeHref parses the link
   });
 
   it("an attachment with an encoded name, a query or a hash loads from the raw src", async () => {
@@ -261,7 +395,8 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     await waitFor(() =>
       expect(container.querySelectorAll('img[src="blob:mock"]').length).toBe(srcs.length),
     );
-    expect(fetchBlob.mock.calls.map(([u]) => u)).toEqual(srcs);
+    // Kit 0.3 cuts the `#fragment` before asking (its item 16).
+    expect(fetchBlob.mock.calls.map(([u]) => u)).toEqual(srcs.map((u) => u.replace(/#.*$/, "")));
     for (const [url] of fetchImpl.mock.calls)
       expect(url.startsWith(`${VAULT}/api/storage/`), url).toBe(true);
   });

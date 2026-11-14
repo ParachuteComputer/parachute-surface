@@ -288,7 +288,11 @@ same view on its own (`@openparachute/surface-render/rich`). The same note with
 new content updates in place and keeps the reader's sitting (ticks, servings,
 cook-mode step, timers); a different note (by `id`, else `path`; give unsaved
 notes one of them), or a hook that appears or goes (`onSave`, `resolve`,
-`openLink`, `fetchBlob`, `units`), starts fresh.
+`openLink`, `fetchBlob`, `units`), or another `vaultUrl`, starts fresh. A
+`vaultUrl` given for the first time redraws in place, so a full in-vault
+image URL loads without losing the sitting. A surface that switches vaults
+without `vaultUrl` should give notes an `id`, or a same-path note keeps the
+last vault's images.
 
 **No network, ever.** The kit loads nothing: a remote image is a link, links
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the
@@ -299,8 +303,9 @@ host for, an attachment image, goes through `fetchBlob` only when
 The kit hands over the raw src, as `MarkdownView` gets it
 (`Pasted%20image.png`, `scan.png?v=2`), and an image that isn't fetched reads
 "Image: alt (not loaded)".
-The kit hands the host only relative paths, so in a rich note an absolute
-URL, even `<vaultUrl>/api/storage/…`, is a link, never loaded.
+An absolute URL is asked for only when it is inside the vault
+(`<vaultUrl>/api/storage/…`, the kit's `host.isAttachment` answered by the
+same check); any other absolute URL is a link, never loaded.
 `RichNoteView.test.tsx` draws every fixture with every control opened and
 fails on any request or URL-loading node; `no-remote-media.test.tsx` draws a
 rich note full of remote images against a surface `fetchBlob` that would send

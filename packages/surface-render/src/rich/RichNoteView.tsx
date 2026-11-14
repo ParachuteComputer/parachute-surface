@@ -25,9 +25,8 @@ export interface RichNoteViewProps {
    *  `isVaultStorageUrl(src, vaultUrl)`; nothing else is fetched. */
   fetchBlob?: FetchBlob;
   /** The vault's base URL (e.g. `https://hub.example/vault/default`), as on
-   *  `MarkdownView`: the vault an image must sit in to be fetched. The kit
-   *  hands the host only relative paths, so today an absolute URL, even one
-   *  inside this vault, stays a link. */
+   *  `MarkdownView`: the vault an image must sit in to be fetched. A full
+   *  URL inside this vault loads too; any other absolute URL stays a link. */
   vaultUrl?: string;
   /** Saves a one-line content edit (a ticked task, a "made today" line).
    *  Resolve with the saved note, or `{ updatedAt }` (it becomes the next
@@ -60,9 +59,18 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
   // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting.
-  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
+  // content updates in place and keeps the sitting. Any vaultUrl change starts
+  // fresh too (its images are not the last vault's), except the first one
+  // ever given, which only redraws (RichNoteMount).
+  const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
+  const vault = useRef({ url: vaultUrl, n: 0, seen: vaultUrl !== undefined });
+  if (vault.current.url !== vaultUrl) {
+    if (vault.current.seen) vault.current.n++;
+    vault.current.url = vaultUrl;
+    vault.current.seen = true;
+  }
   const key = [
+    vault.current.n,
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
     openLink ? "l" : "",
@@ -97,7 +105,8 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     const h = latest.current;
     const host: RichHost = {
       // `src` is raw, as markdown-it normalised it (the string MarkdownView
-      // gets). This check decides every load; a refusal reads "(not loaded)".
+      // gets, minus any `#fragment`). This check decides every load; a refusal
+      // reads "(not loaded)".
       async image(src) {
         const fetchBlob = latest.current.fetchBlob;
         if (!fetchBlob || !isVaultStorageUrl(src, latest.current.vaultUrl))
@@ -108,6 +117,11 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
         objectUrls.push(url);
         return url;
       },
+      // An absolute src (kit 0.3) is an attachment only when it sits in this
+      // vault; anything else stays a link and is never asked for.
+      // Without fetchBlob nothing can load, so it stays a link the reader can open.
+      isAttachment: (src) =>
+        Boolean(latest.current.fetchBlob) && isVaultStorageUrl(src, latest.current.vaultUrl),
       calm: () => Boolean(latest.current.calm),
     };
     if (h.resolve) {
@@ -139,6 +153,17 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     drawn.current = parsed;
     handle.current.update(parsed);
   }, [parsed]);
+
+  // The kit asks `isAttachment` about an absolute image only when it draws, so
+  // a vaultUrl that arrives late redraws the kit's own current doc (a saved
+  // tick included) in place; the sitting stays.
+  const vaultUrl = hooks.vaultUrl;
+  const drawnVault = useRef(vaultUrl);
+  useEffect(() => {
+    if (!handle.current || drawnVault.current === vaultUrl) return;
+    drawnVault.current = vaultUrl;
+    handle.current.redraw();
+  }, [vaultUrl]);
 
   return <div ref={ref} className={className} />;
 }

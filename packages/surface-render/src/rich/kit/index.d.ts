@@ -24,9 +24,19 @@ export interface Host {
   openNote?(target: string): void;
   openLink?(href: string): void;
   /** The image's src as markdown-it normalises it (URL-encoded: `crème.jpg` arrives as `cr%C3%A8me.jpg`; the same
-   *  string a markdown host gets) → a blob: or data:image/ URL.
-   *  Only scheme-less, `//`-free, `..`-free srcs are asked. Reject, or hand back anything else, and it reads "(not loaded)". */
+   *  string a markdown host gets), less its `#fragment` → a blob: or data:image/ URL. Asked once per src per view; after a rejection or an unsafe answer, again on the next draw.
+   *  Asked only when the src, read at every level of a lenient decode (each valid `%XX` below `%80` alone, a stray `%`
+   *  kept) to a fixed point within eight levels, has no segment of only dots and spaces with a dot in it (`.`, `..`, `...`, `.. `; ended by `/`, `?`, `#`, `;` or the end), no `\`,
+   *  no control character, no space at either end and no overlong UTF-8 escape (`%C0`, `%C1`, `%E0%8x`, `%E0%9x`, `%F0%8x`),
+   *  and, unless isAttachment said yes to it, no scheme and no leading `//`. Bytes from `%80` up are not decoded, and
+   *  no check is complete for every server: the host still checks the src it is handed.
+   *  Reject, or hand back anything else, and it reads "(not loaded)". */
   image?(src: string): Promise<string>;
+  /** Opt-in, used only with image(). Called only for an absolute src (a scheme or a leading `//`), fragment stripped,
+   *  whose authority holds no `@`, `%` or `\`; return true when it is one of the host's own attachments, and it goes to
+   *  image() under the same path checks, and no `//` may appear in its path at any level. Without it, or on false or a throw,
+   *  every absolute src is a link and is never loaded. */
+  isAttachment?(src: string): boolean;
   keepAwake?(on: boolean): Promise<boolean> | boolean;
   calm?: boolean | (() => boolean);
   /** The reader's lasting choice; without it amounts and heat show as written until the reader picks a system. */
