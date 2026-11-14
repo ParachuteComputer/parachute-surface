@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { type FetchBlob, isVaultStorageUrl } from "../embed/fetch-blob.js";
 import type { WikilinkResolver } from "../markdown/remark-wikilinks.js";
 import { mountRichNote, parseRichNote } from "./kit-api.js";
-import type { RichDoc, RichHandle, RichHost, RichNote, RichPatch } from "./types.js";
+import type { RichDoc, RichHandle, RichHost, RichNote } from "./kit-api.js";
 
 export interface RichNoteViewProps {
   /** The note: content plus whatever of metadata / tags / path / id /
@@ -30,10 +30,11 @@ export interface RichNoteViewProps {
    *  inside this vault, stays a link. */
   vaultUrl?: string;
   /** Saves a one-line content edit (a ticked task, a "made today" line).
-   *  Resolve with the saved note (its `updatedAt` becomes the next
-   *  revision); reject with `{ status: 409 }` when stale. Without it the note is
+   *  Resolve with the saved note, or `{ updatedAt }` (it becomes the next
+   *  revision); reject with `{ status: 409 }` when stale. Hand the view the
+   *  saved note after this resolves, not inside it. Without it the note is
    *  read-only. */
-  onSave?: (content: string, patch: RichPatch) => Promise<unknown>;
+  onSave?: NonNullable<RichHost["save"]>;
   /** Ink / reduced-motion screens: nothing moves. */
   calm?: boolean;
   /** The reader's lasting choice of units for recipes. */
@@ -95,11 +96,13 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     let disposed = false;
     const h = latest.current;
     const host: RichHost = {
-      async image(path) {
+      // `src` is raw, as markdown-it normalised it (the string MarkdownView
+      // gets). This check decides every load; a refusal reads "(not loaded)".
+      async image(src) {
         const fetchBlob = latest.current.fetchBlob;
-        if (!fetchBlob || !isVaultStorageUrl(path, latest.current.vaultUrl))
+        if (!fetchBlob || !isVaultStorageUrl(src, latest.current.vaultUrl))
           throw new Error("not a vault attachment");
-        const blob = await fetchBlob(path);
+        const blob = await fetchBlob(src);
         if (disposed) throw new Error("view closed");
         const url = URL.createObjectURL(blob);
         objectUrls.push(url);

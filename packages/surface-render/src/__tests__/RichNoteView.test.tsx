@@ -7,7 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MarkdownView } from "../markdown/MarkdownView.js";
 import { NoteRenderer } from "../note/NoteRenderer.js";
 import { RichNoteView } from "../rich/RichNoteView.js";
-import { hasRichPattern, parseRichNote } from "../rich/kit-api.js";
+import { needsRich, parseRichNote } from "../rich/kit-api.js";
 import { RICH, chant, hostile, minutes, plain, project, recipe } from "./fixtures/rich-notes.js";
 
 beforeAll(() => {
@@ -51,10 +51,10 @@ describe("NoteRenderer rich switch", () => {
     expect(container.querySelector(".rn")).toBeNull();
   });
 
-  it("hasRichPattern: typed, tasks, logs, callouts, details, charts yes; plain no", () => {
-    expect(hasRichPattern(parseRichNote({ ...plain, content: plain.content ?? "" }))).toBe(false);
+  it("needsRich: typed, tasks, logs, callouts, details, charts yes; plain no", () => {
+    expect(needsRich(parseRichNote({ ...plain, content: plain.content ?? "" }))).toBe(false);
     for (const n of [recipe, minutes, project, chant]) {
-      expect(hasRichPattern(parseRichNote({ ...n, content: n.content ?? "" }))).toBe(true);
+      expect(needsRich(parseRichNote({ ...n, content: n.content ?? "" }))).toBe(true);
     }
   });
 });

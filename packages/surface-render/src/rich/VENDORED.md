@@ -1,8 +1,8 @@
 # rich-notes-kit, vendored
 
-Kit commit: `2e28dd578f9047ad9d2d2edb730bb7e04e0b2279`
+Kit commit: `3cf968172bd7f76f196c0419983fd233cc1dc486`
 
-rich-notes-kit 0.1.0 (MIT, implements PATTERNS v0.3) draws a note richly:
+rich-notes-kit 0.2.0 (MIT, implements PATTERNS v0.3) draws a note richly:
 recipes, minutes, session notes, chant charts, and for every note tasks, dated
 logs, callouts, `<details>` and charts from number tables. It is framework-free
 and loads nothing.
@@ -15,10 +15,12 @@ with no new package to release first.
 
 **Rules for this folder:**
 
-- `kit/` and `vendor/` are the kit's `src/` and `vendor/markdown-it.mjs`,
-  byte for byte; `../../rich-notes-kit.css` is its `src/kit.css`. Don't edit
+- `kit/` and `vendor/` are the kit's `src/` (its `.js` files and the one type
+  file, `index.d.ts`) and `vendor/markdown-it.mjs`, byte for byte; `../../rich-notes-kit.css` is its `src/kit.css`. Don't edit
   them here: change the kit, run its tests there, then
   `bun scripts/sync-rich-notes-kit.ts <kit checkout>` (`--check` to compare).
 - `tsc` compiles them with `allowJs` (`checkJs` off); biome ignores them.
-- Everything else in surface-render reaches the kit through `../kit-api.ts`.
+- Everything else in surface-render reaches the kit through `../kit-api.ts`,
+  which re-exports the kit's own types (`Note`, `Doc`, `Host`, `Patch`,
+  `Handle` as `RichNote`, `RichDoc`, …) and its `needsRich` rule.
 - Licences: `THIRD_PARTY.md` at the package root.

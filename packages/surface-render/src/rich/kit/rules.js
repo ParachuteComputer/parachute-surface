@@ -1,8 +1,8 @@
 // The reading rules of PATTERNS v0.3, as pure functions over one line of text. No DOM, no network.
-// The regexes for R1, R3 and M2 are the study's own (study/checks/check-examples.js), so the kit and the checks agree
+// The regexes for R1, R3 and M2 are the contract check's own (test/contract/check-examples.cjs), so the kit and the checks agree
 // line for line; test/node/contract.test.mjs runs every case from that file against these functions.
 
-/* ── Numbers: read whole or not at all (v0.3 change 9) ── */
+/* ── Numbers: read whole or not at all (PATTERNS R1 and R3) ── */
 const UF = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125 };
 export const NUM = String.raw`(?:\d+ \d+\/\d+|\d+\/\d+|\d+ ?[½¼¾⅓⅔⅛]|\d+(?:\.\d+)?|[½¼¾⅓⅔⅛])`;
 export const RNG = String.raw`\s?(?:-|–|to)\s?`;
@@ -96,7 +96,7 @@ export function quantities(line) {
   return out;
 }
 
-/** R1 scaling, exactly as the study writes it: every quantity outside parentheses times k. */
+/** R1 scaling, exactly as the contract check writes it: every quantity outside parentheses times k. */
 export function scaleLine(line, k) {
   const re = new RegExp(QTY_SRC, 'g');
   return outside(line, (s) => s.replace(re, (m, a, sep, b) => fraction(value(a) * k) + (b ? sep + fraction(value(b) * k) : '')));

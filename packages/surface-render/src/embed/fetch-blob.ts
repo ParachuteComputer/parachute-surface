@@ -101,12 +101,31 @@ function isAbsoluteUrl(src: string): boolean {
 }
 
 /** A path that tries to climb out of `/api/storage/` (`..`, `.`, an encoded
- *  dot or slash), or carries a backslash or control character (browsers fold
- *  `/\host` and `/<TAB>/host` into `//host`), is not a storage path. */
+ *  dot, slash or backslash), or carries a backslash or control character
+ *  (browsers fold `/\host` and `/<TAB>/host` into `//host`), is not a
+ *  storage path. Checked at every level of percent-decoding, so `%252e`,
+ *  `%25%32%65` and a stray `%` don't hide one from a server or proxy that
+ *  decodes twice. A plain `%25` (a name like `100%.png`) is fine; a name that
+ *  itself holds `%2e`, `%2f` or `%5c` is refused (fails closed). */
 function hasTraversal(path: string): boolean {
-  return (
-    /(^|\/)\.{1,2}(\/|[?#]|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path)
-  );
+  let p = path;
+  for (let level = 0; level < 8; level++) {
+    if (
+      /(^|\/)\.{1,2}(\/|[?#]|$)/.test(p) ||
+      /%(2e|2f|5c)/i.test(p) ||
+      p.includes("\\") ||
+      hasControlChar(p)
+    )
+      return true;
+    // Lenient: each valid escape decodes on its own (a stray `%` stays), and
+    // bytes stand alone; only ASCII matters to the checks above.
+    const next = p.replace(/%([0-9a-f]{2})/gi, (_, h: string) =>
+      String.fromCharCode(Number.parseInt(h, 16)),
+    );
+    if (next === p) return false;
+    p = next;
+  }
+  return true; // still decoding after eight levels
 }
 
 /** A C0 control character or DEL (URL parsers strip tabs and newlines). */

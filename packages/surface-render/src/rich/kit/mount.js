@@ -97,13 +97,25 @@ export function mount(target, input, host) {
   }
   function image(t) {
     const src = String(t.attrGet('src') || ''), alt = t.content || '';
-    let path = null; try { path = decodeURI(src); } catch (e) { path = null; }
-    const attachment = path && !/^[a-z][a-z0-9+.-]*:/i.test(path) && !/^\/\//.test(path) && !/[\\\u0000-\u001f%?#]/.test(path) && !/(^|\/)\.\.?(\/|$)/.test(path);
+    // The host gets the raw src, as a markdown host does. The kit's own check reads it at every level of decoding, so
+    // a scheme, `//` or `..` is refused however many times it was encoded.
+    const plainPath = (p) => !/^[a-z][a-z0-9+.-]*:/i.test(p) && !/^\/\//.test(p) && !/[\\\u0000-\u001f]/.test(p) && !/(^|\/)\.\.?(\/|[?#]|$)/.test(p);
+    let attachment = !!src;
+    for (let p = src, k = 0; attachment && k < 8; k++) {
+      attachment = plainPath(p);
+      let next; try { next = decodeURIComponent(p); } catch (e) { break; } // a lone % (a name like "100%.png") ends it
+      if (next === p) break;
+      p = next;
+      if (k === 7) attachment = false; // still decoding after eight levels: refused
+    }
     if (attachment && host.image) {
       const img = el('img', 'rn-img'); img.alt = alt;
       const holder = el('span', 'rn-img-wait', 'Image: ' + (alt || 'attachment'));
-      if (!images.has(path)) { const p = Promise.resolve().then(() => host.image(path)).catch((e) => { if (images.get(path) === p) images.delete(path); throw e; }); images.set(path, p); } // a failure is asked again next time
-      images.get(path).then((u) => { const ok = safeImageUrl(u); if (ok && holder.isConnected) { img.src = ok; holder.replaceWith(img); } }).catch(() => {});
+      if (!images.has(src)) { const p = Promise.resolve().then(() => host.image(src)).catch((e) => { if (images.get(src) === p) images.delete(src); throw e; }); images.set(src, p); } // a failure (or an unsafe answer) is asked again next time
+      // refused by the host, or handed back as anything but a blob:/data:image URL → the "(not loaded)" label
+      const refused = () => { holder.className = 'rn-img-off'; holder.textContent = 'Image: ' + (alt || 'untitled') + ' (not loaded)'; };
+      const p = images.get(src);
+      p.then((u) => { const ok = safeImageUrl(u); if (!ok) { if (images.get(src) === p) images.delete(src); refused(); } else if (holder.isConnected) { img.src = ok; holder.replaceWith(img); } }, refused);
       return holder;
     }
     // PATTERNS privacy rule 2: a remote image tells its server the note was opened, so it is never loaded
@@ -321,7 +333,7 @@ export function mount(target, input, host) {
   }
 
   function hero(def) {
-    const h = el('header', 'rn-hero');
+    const h = el('div', 'rn-hero'); // a div, not a <header>: a host's rule on header must not reach it
     const top = el('div', 'rn-hero-top');
     const kicker = el('p', 'rn-kicker'); kicker.hidden = true;
     top.appendChild(kicker);
