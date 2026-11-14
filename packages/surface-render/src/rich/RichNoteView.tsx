@@ -59,14 +59,15 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
   // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting. Another vault starts
-  // fresh too (its images are not the last vault's); a vaultUrl arriving for
-  // the first time only redraws (RichNoteMount).
+  // content updates in place and keeps the sitting. Any vaultUrl change starts
+  // fresh too (its images are not the last vault's), except the first one
+  // ever given, which only redraws (RichNoteMount).
   const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
-  const vault = useRef({ url: vaultUrl, n: 0 });
+  const vault = useRef({ url: vaultUrl, n: 0, seen: vaultUrl !== undefined });
   if (vault.current.url !== vaultUrl) {
-    if (vault.current.url !== undefined) vault.current.n++;
+    if (vault.current.seen) vault.current.n++;
     vault.current.url = vaultUrl;
+    vault.current.seen = true;
   }
   const key = [
     vault.current.n,

@@ -290,7 +290,9 @@ cook-mode step, timers); a different note (by `id`, else `path`; give unsaved
 notes one of them), or a hook that appears or goes (`onSave`, `resolve`,
 `openLink`, `fetchBlob`, `units`), or another `vaultUrl`, starts fresh. A
 `vaultUrl` given for the first time redraws in place, so a full in-vault
-image URL loads without losing the sitting.
+image URL loads without losing the sitting. A surface that switches vaults
+without `vaultUrl` should give notes an `id`, or a same-path note keeps the
+last vault's images.
 
 **No network, ever.** The kit loads nothing: a remote image is a link, links
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the

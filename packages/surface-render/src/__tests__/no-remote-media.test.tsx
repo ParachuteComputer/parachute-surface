@@ -280,8 +280,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     const { container, rerender } = render(<NoteRenderer {...props} />);
     const boxes = () => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     fireEvent.click(boxes()[0]);
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => expect(container.querySelector(".rn-status")).toHaveTextContent("Saved."));
     rerender(<NoteRenderer {...props} vaultUrl={VAULT} />);
     await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
     expect(boxes().map((b) => b.checked)).toEqual([true, false]);
@@ -308,6 +307,18 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     );
     await waitFor(() => expect(b.fetchBlob).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+  });
+
+  it("a vault that goes away and comes back as another starts fresh", async () => {
+    const { fetchBlob } = naiveSurface();
+    const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const props = { note, rich: true, fetchBlob };
+    const { container, rerender } = render(<NoteRenderer {...props} vaultUrl={VAULT} />);
+    await waitFor(() => expect(fetchBlob).toHaveBeenCalledTimes(1));
+    rerender(<NoteRenderer {...props} />);
+    const view = container.querySelector(".rich-note");
+    rerender(<NoteRenderer {...props} vaultUrl="https://hub.example/vault/other" />);
+    expect(container.querySelector(".rich-note")).not.toBe(view);
   });
 
   it("without fetchBlob, a full in-vault URL stays a link the reader can open", async () => {
