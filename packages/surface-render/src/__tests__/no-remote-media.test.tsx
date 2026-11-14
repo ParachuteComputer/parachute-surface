@@ -197,8 +197,8 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       />,
     );
     await waitFor(() =>
-      expect(container.querySelectorAll(".rn-img-off").length).toBeGreaterThanOrEqual(
-        refused.length,
+      expect(container.querySelectorAll(".rn-img-off").length).toBe(
+        outside.length + refused.length,
       ),
     );
     expect(loadedUrls(container)).toEqual([]);

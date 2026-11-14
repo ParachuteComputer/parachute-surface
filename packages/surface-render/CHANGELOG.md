@@ -41,8 +41,9 @@
   `fetchBlob` + `vaultUrl` (images only when `isVaultStorageUrl(src,
   vaultUrl)` passes; a remote image is a plain link, never loaded; a refused
   image reads "(not loaded)"), new `onSave(content, patch)`
-  (task ticks and log lines; read-only without it), `openLink`, `calm`,
-  `units`.
+  (task ticks and log lines; read-only without it; typed as the kit's
+  `Host["save"]`, resolving with the saved note or `{ updatedAt }`),
+  `openLink`, `calm`, `units`.
 - `NoteLike` grows optional `metadata`, `tags`, `id`, `updatedAt`
   (surface-client's `Note` already has them).
 - New stylesheet export `./rich-notes-kit.css`; `parseRichNote`,
