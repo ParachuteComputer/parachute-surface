@@ -60,11 +60,15 @@ export function vaultClientFetchBlob(
       // never attached to a host a note merely names.
       let target: string;
       if (isAbsoluteUrl(url)) {
-        if (!isVaultStorageUrl(url, storageUrl(""))) {
-          throw new Error("refusing a URL outside the vault's origin");
+        // The vault's base URL is what `storageUrl` puts before `/api/storage/`.
+        const vaultUrl = storageUrl("").replace(/\/api\/storage\/?$/, "");
+        if (!isVaultStorageUrl(url, vaultUrl)) {
+          throw new Error("refusing a URL outside the vault");
         }
-        target = url;
+        // Fetch exactly the URL that was checked, not the raw string.
+        target = new URL(url).href;
       } else {
+        if (hasTraversal(url)) throw new Error("refusing a URL outside the vault");
         target = storageUrl(stripStoragePrefix(url));
       }
       const token = getToken?.();
@@ -97,15 +101,25 @@ function isAbsoluteUrl(src: string): boolean {
 }
 
 /** A path that tries to climb out of `/api/storage/` (`..`, `.`, an encoded
- *  dot or a backslash) is not a storage path. */
+ *  dot or slash), or carries a backslash or control character (browsers fold
+ *  `/\host` and `/<TAB>/host` into `//host`), is not a storage path. */
 function hasTraversal(path: string): boolean {
-  return /(^|\/)\.{1,2}(\/|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path);
+  return /(^|\/)\.{1,2}(\/|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path);
 }
 
-function httpOrigin(url: string, base?: string): string | null {
+/** A C0 control character or DEL (URL parsers strip tabs and newlines). */
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return true;
+  }
+  return false;
+}
+
+function parseHttpUrl(url: string): URL | null {
   try {
-    const u = new URL(url, base);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : null;
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
   } catch {
     return null;
   }
@@ -118,21 +132,25 @@ function httpOrigin(url: string, base?: string): string | null {
  *
  * - A relative `/api/storage/…` path (what the Obsidian import writes) is
  *   storage.
- * - An absolute URL is storage only when `vaultOrigin` is given (the vault's
- *   base URL, or any URL on its origin) and `src` is on that same origin with
- *   an `/api/storage/` path. Without `vaultOrigin`, no absolute URL is
- *   storage: `https://evil.example/api/storage/x.png` must not get the token.
+ * - An absolute `http(s)://` URL is storage only when `vaultUrl` (the vault's
+ *   base URL, e.g. `https://hub.example/vault/default`) is given and `src` is
+ *   under it: same origin, and its path starts with the vault's path +
+ *   `/api/storage/`. Without `vaultUrl`, no absolute URL is storage:
+ *   `https://evil.example/api/storage/x.png` must not get the token, and nor
+ *   must another vault on the same hub.
  */
-export function isVaultStorageUrl(src: string, vaultOrigin?: string): boolean {
+export function isVaultStorageUrl(src: string, vaultUrl?: string): boolean {
   if (!isAbsoluteUrl(src)) {
     return src.startsWith("/api/storage/") && !hasTraversal(src);
   }
-  if (!vaultOrigin || src.startsWith("//")) return false;
-  const origin = httpOrigin(vaultOrigin);
-  if (!origin || httpOrigin(src) !== origin) return false;
+  if (!vaultUrl || !/^https?:\/\//i.test(src) || hasControlChar(src) || src.includes("\\"))
+    return false;
+  const vault = parseHttpUrl(vaultUrl);
+  const target = parseHttpUrl(src);
+  if (!vault || !target || target.origin !== vault.origin) return false;
   // URL parsing already resolves `..` and `%2e%2e` segments in the pathname.
-  const path = new URL(src).pathname;
-  return path.includes("/api/storage/") && !hasTraversal(path);
+  const base = vault.pathname.replace(/\/$/, "");
+  return target.pathname.startsWith(`${base}/api/storage/`) && !hasTraversal(target.pathname);
 }
 
 /** How a media `src` from note content may be shown. */
@@ -146,8 +164,8 @@ export type MediaSrcKind =
   /** anything else (another scheme, a non-storage path): never loaded, shown as words */
   | "blocked";
 
-export function mediaSrcKind(src: string, vaultOrigin?: string): MediaSrcKind {
-  if (isVaultStorageUrl(src, vaultOrigin)) return "storage";
+export function mediaSrcKind(src: string, vaultUrl?: string): MediaSrcKind {
+  if (isVaultStorageUrl(src, vaultUrl)) return "storage";
   if (/^blob:/i.test(src)) return "inline";
   if (/^data:(image\/(png|jpe?g|gif|webp|avif)|audio\/[a-z0-9.+-]+)[;,]/i.test(src))
     return "inline";

@@ -29,9 +29,9 @@ export interface BlobObjectUrlState {
 export function useBlobObjectUrl(
   src: string,
   fetchBlob: FetchBlob | undefined,
-  vaultOrigin?: string,
+  vaultUrl?: string,
 ): BlobObjectUrlState {
-  const kind = mediaSrcKind(src, vaultOrigin);
+  const kind = mediaSrcKind(src, vaultUrl);
   const needsAuth = kind === "storage";
   const direct = kind === "inline" ? src : null;
   const [url, setUrl] = useState<string | null>(direct);

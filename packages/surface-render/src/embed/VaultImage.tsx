@@ -12,10 +12,10 @@ export interface VaultImageProps {
   /** Auth'd blob fetcher (see {@link FetchBlob}). Required for vault
    *  storage URLs; never called for anything else. */
   fetchBlob?: FetchBlob;
-  /** The vault's base URL (or any URL on its origin). Lets an absolute
-   *  storage URL on the vault's own origin load; without it only relative
+  /** The vault's base URL (e.g. `https://hub.example/vault/default`). Lets
+   *  an absolute storage URL under it load; without it only relative
    *  `/api/storage/…` paths are vault storage. */
-  vaultOrigin?: string;
+  vaultUrl?: string;
 }
 
 /**
@@ -31,8 +31,8 @@ export interface VaultImageProps {
  * taps it. A surface that really wants remote images loaded passes its own
  * `components.img` to `MarkdownView` / `NoteRenderer`.
  */
-export function VaultImage({ src, alt, className, fetchBlob, vaultOrigin }: VaultImageProps) {
-  const { url, loading, error, needsAuth, kind } = useBlobObjectUrl(src, fetchBlob, vaultOrigin);
+export function VaultImage({ src, alt, className, fetchBlob, vaultUrl }: VaultImageProps) {
+  const { url, loading, error, needsAuth, kind } = useBlobObjectUrl(src, fetchBlob, vaultUrl);
 
   if (kind === "remote") {
     return (

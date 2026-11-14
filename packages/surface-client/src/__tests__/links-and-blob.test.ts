@@ -114,18 +114,55 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
     expect(new Headers(calls[0]!.init?.headers).get("authorization")).toBe("Bearer tok-1");
   });
 
-  test("an absolute URL on another origin is refused: no request, so the token never leaves", async () => {
+  test("a URL outside the vault is refused: no request, so the token never leaves", async () => {
     // A note can carry `![](https://evil.example/api/storage/x.png)`; the
-    // path looks like storage but the host is not the vault's.
+    // path looks like storage but the host is not the vault's. Each of these
+    // must be refused before any request.
     const calls: Captured[] = [];
     const client = clientCapturing(calls, blobResponse);
-    await expect(
-      client.fetchAttachmentBlob("https://evil.example/vault/default/api/storage/x.png"),
-    ).rejects.toThrow(/origin/);
-    await expect(client.fetchAttachmentBlob("//evil.example/api/storage/x.png")).rejects.toThrow(
-      /origin/,
-    );
+    for (const url of [
+      "https://evil.example/vault/default/api/storage/x.png",
+      "//evil.example/api/storage/x.png",
+      "https://hub.example@evil.example/vault/default/api/storage/x.png",
+      // another vault, or another app, on the same hub origin
+      "https://hub.example/vault/other/api/storage/x.png",
+      "https://hub.example/admin/api/storage/x.png",
+      // climbing out of the vault's base path
+      "/../../admin/x",
+      // browsers fold `/\host` and `/<TAB>/host` into `//host`
+      "/\\evil.example/x",
+      "/\t/evil.example/x",
+      "javascript:alert(1)",
+    ]) {
+      await expect(client.fetchAttachmentBlob(url), url).rejects.toThrow(/outside the vault/);
+    }
     expect(calls).toHaveLength(0);
+  });
+
+  test("a scheme-relative-looking URL is fetched as exactly what was checked", async () => {
+    // `https:evil.example/x` parses relative to an https base; whatever it
+    // resolves to is the URL fetched, never the raw string.
+    const calls: Captured[] = [];
+    const client = clientCapturing(calls, blobResponse);
+    for (const url of ["https:evil.example/api/storage/x", "https:/evil.example/api/storage/x"]) {
+      await client.fetchAttachmentBlob(url).catch(() => {});
+    }
+    for (const c of calls) expect(new URL(c.url).origin).toBe("https://hub.example");
+  });
+
+  test("a root-relative vault URL still refuses a backslash host trick", async () => {
+    const calls: Captured[] = [];
+    const client = new VaultClient({
+      vaultUrl: "https://hub.example",
+      accessToken: "tok-1",
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        return blobResponse();
+      }) as unknown as typeof fetch,
+    });
+    await expect(client.fetchAttachmentBlob("/\\evil.example/x")).rejects.toThrow();
+    await client.fetchAttachmentBlob("/api/storage/ok.png");
+    expect(calls.map((c) => c.url)).toEqual(["https://hub.example/api/storage/ok.png"]);
   });
 
   test("401 → onAuthError refresh → retried once with the fresh token", async () => {

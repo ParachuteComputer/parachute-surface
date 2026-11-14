@@ -165,16 +165,17 @@ A note never makes the reader's device load anything from outside the vault.
 | `src` | Shown as |
 |---|---|
 | `/api/storage/…` (what the Obsidian import writes) | fetched with auth through `fetchBlob`, shown from an object URL |
-| an absolute URL on the vault's own origin with an `/api/storage/` path | the same, **only** when you pass `vaultOrigin` (the vault's base URL) |
+| an absolute `<vaultUrl>/api/storage/…` URL | the same, **only** when you pass `vaultUrl` (the vault's base URL, e.g. `https://hub.example/vault/default`) |
 | `data:image/png\|jpeg\|gif\|webp\|avif`, `data:audio/…`, `blob:` | shown as is (no request) |
 | any other `http(s)` URL | never loaded: a plain link (`.vault-media-remote`, alt text or the address) that opens in a new tab with no referrer when tapped |
 | anything else (`javascript:`, a non-storage path, …) | never loaded: words (`.vault-media-blocked`) |
 
 So `![](https://tracker.example/x.png)` can't tell a server the note was
 opened, and `![](https://evil.example/api/storage/x.png)` can't collect the
-vault token: an absolute URL is storage only on the origin you name, and the
+vault token: an absolute URL is storage only under the vault you name, and the
 `fetchBlob` adapters and `VaultClient.fetchAttachmentBlob` refuse any other
-origin before making a request. A surface that wants remote images loaded
+vault before making a request (they resolve the URL once and fetch exactly
+what they checked). A surface that wants remote images loaded
 anyway passes its own `components.img`. Pair this with a page CSP that has no
 remote `img-src` / `media-src` / `connect-src`: the renderer is one wall, the
 CSP the second.

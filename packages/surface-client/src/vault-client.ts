@@ -1116,8 +1116,9 @@ export class VaultClient {
 
   /**
    * Auth'd GET of an attachment blob (image/audio render). Accepts an
-   * absolute URL on the vault's own origin (any other origin is refused with
-   * no request, so the token can't be sent to a host a note names), a
+   * absolute URL inside this vault (its origin, under its base path; anything
+   * else is refused with no request, so the token can't be sent to a host a
+   * note names), a
    * vault-relative path (`/api/storage/<path>`), or a
    * bare storage path — the same resolution notes-ui's subclass
    * established (which keeps its own override; this base implementation
@@ -1138,20 +1139,28 @@ export class VaultClient {
    * can extend this class without violating its custody contract.
    */
   async fetchAttachmentBlob(url: string): Promise<Blob> {
-    let target: string;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("//")) {
-      // An absolute URL usually comes from note content, which anyone who can
-      // write a note controls. The bearer goes only to the vault's own origin;
-      // anything else is refused before a request is made.
-      const here = globalThis.location?.href;
-      const vaultOrigin = originOf(this.baseUrl, here);
-      if (!vaultOrigin || originOf(url, here ?? this.baseUrl) !== vaultOrigin) {
-        throw new Error("fetchAttachmentBlob: refusing a URL outside the vault's origin");
-      }
-      target = url;
-    } else {
-      target = `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+    // The url usually comes from note content, which anyone who can write a
+    // note controls. Resolve it once, check that resolved URL, and fetch
+    // exactly it: the bearer goes only to this vault (its origin, under its
+    // base path); anything else is refused before a request is made.
+    const here = globalThis.location?.href;
+    const vault = parseHttpUrl(this.baseUrl, here);
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("//");
+    const raw = absolute ? url : `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+    // A backslash or control character is never in a real storage path, and
+    // browsers fold `/\host` into `//host`.
+    const unsafe = url.includes("\\") || hasControlChar(url);
+    const resolved = unsafe ? null : parseHttpUrl(raw, here ?? vault?.href);
+    const basePath = vault ? vault.pathname.replace(/\/$/, "") : "";
+    if (
+      !vault ||
+      !resolved ||
+      resolved.origin !== vault.origin ||
+      !resolved.pathname.startsWith(`${basePath}/`)
+    ) {
+      throw new Error("fetchAttachmentBlob: refusing a URL outside the vault");
     }
+    const target = resolved.href;
     return this.requestBlobWithRetry(target, url, true);
   }
 
@@ -1234,11 +1243,20 @@ export class VaultClient {
   }
 }
 
-/** The http(s) origin of `url` (resolved against `base`), or null. */
-function originOf(url: string, base?: string): string | null {
+/** A C0 control character or DEL (URL parsers strip tabs and newlines). */
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return true;
+  }
+  return false;
+}
+
+/** `url` parsed against `base`, if it is http(s); otherwise null. */
+function parseHttpUrl(url: string, base?: string): URL | null {
   try {
     const u = new URL(url, base);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.origin : null;
+    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
   } catch {
     return null;
   }

@@ -112,16 +112,18 @@ describe("vault attachments still load", () => {
     const fetchBlob = vi.fn(async () => new Blob(["x"], { type: "image/png" }));
     render(
       <VaultImage
-        src="https://hub.example/api/storage/att/plan.png"
+        src="https://hub.example/vault/default/api/storage/att/plan.png"
         alt="plan"
-        vaultOrigin="https://hub.example/vault/default"
+        vaultUrl="https://hub.example/vault/default"
         fetchBlob={fetchBlob}
       />,
     );
     await waitFor(() =>
       expect(screen.getByRole("img", { name: "plan" })).toHaveAttribute("src", "blob:mock"),
     );
-    expect(fetchBlob).toHaveBeenCalledWith("https://hub.example/api/storage/att/plan.png");
+    expect(fetchBlob).toHaveBeenCalledWith(
+      "https://hub.example/vault/default/api/storage/att/plan.png",
+    );
   });
 
   it("an inline data:image is shown (it makes no request)", () => {
@@ -134,17 +136,35 @@ describe("vault attachments still load", () => {
 });
 
 describe("isVaultStorageUrl", () => {
-  it("is true only for a relative storage path, or an absolute one on the vault's origin", () => {
+  const VAULT = "https://hub.example/vault/default";
+  it("is true for a relative storage path, or an absolute one under the named vault", () => {
     expect(isVaultStorageUrl("/api/storage/a.png")).toBe(true);
-    expect(isVaultStorageUrl("https://evil.example/api/storage/pixel.png")).toBe(false);
-    expect(
-      isVaultStorageUrl("https://evil.example/api/storage/pixel.png", "https://hub.example"),
-    ).toBe(false);
-    expect(
-      isVaultStorageUrl("https://hub.example/api/storage/a.png", "https://hub.example/v/x"),
-    ).toBe(true);
-    expect(isVaultStorageUrl("//evil.example/api/storage/a.png")).toBe(false);
-    expect(isVaultStorageUrl("/api/storage/../../api/notes")).toBe(false);
+    expect(isVaultStorageUrl(`${VAULT}/api/storage/a.png`, VAULT)).toBe(true);
+    expect(isVaultStorageUrl("HTTPS://HUB.EXAMPLE/vault/default/api/storage/a.png", VAULT)).toBe(
+      true,
+    );
+  });
+
+  it("is false for anything a note could use to reach another host or vault", () => {
+    for (const src of [
+      "https://evil.example/api/storage/pixel.png",
+      "https://evil.example/vault/default/api/storage/pixel.png",
+      "https://hub.example@evil.example/vault/default/api/storage/a.png",
+      "https://hub.example/vault/other/api/storage/a.png",
+      "https://hub.example/api/storage/a.png",
+      "https:hub.example/vault/default/api/storage/a.png",
+      "https:/hub.example/vault/default/api/storage/a.png",
+      "https://hub.example/vault/default/api/storage/../../other/a.png",
+      "//hub.example/vault/default/api/storage/a.png",
+      "/api/storage/../../api/notes",
+      "/api/storage/%2e%2e/notes",
+      "/api/storage/.\t./notes",
+      "/api/storage/\\evil",
+    ]) {
+      expect(isVaultStorageUrl(src, VAULT), src).toBe(false);
+    }
+    // Without a named vault, no absolute URL is storage.
+    expect(isVaultStorageUrl(`${VAULT}/api/storage/a.png`)).toBe(false);
   });
 });
 

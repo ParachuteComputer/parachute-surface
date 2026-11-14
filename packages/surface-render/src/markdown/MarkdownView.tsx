@@ -64,12 +64,13 @@ export interface MarkdownViewProps {
    */
   fetchBlob?: FetchBlob;
   /**
-   * The vault's base URL (or any URL on its origin). An absolute image URL on
-   * this origin with an `/api/storage/` path is treated as a vault attachment;
+   * The vault's base URL (e.g. `https://hub.example/vault/default`). An
+   * absolute image URL under it, at `<vaultUrl>/api/storage/…`, is treated as
+   * a vault attachment;
    * without it, only relative `/api/storage/…` paths are. Every other image
    * URL in a note is never loaded (see {@link VaultImage}).
    */
-  vaultOrigin?: string;
+  vaultUrl?: string;
   /**
    * Per-element renderer overrides, merged over the defaults. Lets a surface
    * customize any markdown element (`h1`, `code`, `table`, …) without
@@ -168,7 +169,7 @@ export function MarkdownView({
   resolve,
   linkComponent,
   fetchBlob,
-  vaultOrigin,
+  vaultUrl,
   components,
   className = "prose-note",
   breaks = true,
@@ -187,7 +188,7 @@ export function MarkdownView({
           alt={alt ?? ""}
           className={imgClass}
           fetchBlob={fetchBlob}
-          vaultOrigin={vaultOrigin}
+          vaultUrl={vaultUrl}
         />
       );
     },

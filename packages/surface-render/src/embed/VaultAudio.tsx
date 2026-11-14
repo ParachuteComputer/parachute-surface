@@ -12,8 +12,8 @@ export interface VaultAudioProps {
   /** Auth'd blob fetcher (see {@link FetchBlob}). Required for vault
    *  storage URLs. */
   fetchBlob?: FetchBlob;
-  /** The vault's base URL; see {@link VaultImageProps.vaultOrigin}. */
-  vaultOrigin?: string;
+  /** The vault's base URL; see {@link VaultImageProps.vaultUrl}. */
+  vaultUrl?: string;
   /** Optional caption/label rendered alongside the control. */
   label?: ReactNode;
   /** `<audio>` controls attribute (default true). */
@@ -35,11 +35,11 @@ export function VaultAudio({
   src,
   className,
   fetchBlob,
-  vaultOrigin,
+  vaultUrl,
   label,
   controls = true,
 }: VaultAudioProps) {
-  const { url, loading, error, needsAuth, kind } = useBlobObjectUrl(src, fetchBlob, vaultOrigin);
+  const { url, loading, error, needsAuth, kind } = useBlobObjectUrl(src, fetchBlob, vaultUrl);
 
   return (
     <span className={`vault-audio ${className ?? ""}`.trim()}>
