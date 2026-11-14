@@ -119,12 +119,44 @@ describe("RichNoteView host hooks", () => {
     expect(fetchBlob).toHaveBeenCalledWith("/api/storage/att/plan.png");
   });
 
-  it("a new note updates in place, and unmount clears the element", () => {
-    const { container, rerender, unmount } = render(<RichNoteView note={recipe} />);
+  it("the same note with new content updates in place", () => {
+    const { container, rerender } = render(<RichNoteView note={project} />);
     const el = container.firstElementChild;
-    rerender(<RichNoteView note={minutes} />);
+    rerender(
+      <RichNoteView
+        note={{ ...project, content: `${project.content}\n- 2026-11-12: patched.\n` }}
+      />,
+    );
     expect(container.firstElementChild).toBe(el);
-    expect(container.textContent).toContain("Garden club");
+    expect(container.textContent).toContain("patched.");
+  });
+
+  it("a different note starts fresh: the last note's sitting doesn't carry over", () => {
+    const { container, rerender } = render(<RichNoteView note={recipe} />);
+    const el = container.firstElementChild;
+    const tick = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    fireEvent.click(tick!);
+    expect(container.querySelector('input[type="checkbox"]:checked')).not.toBeNull();
+    const other = { ...recipe, id: "n-recipe-2", path: "Recipes/Other.md" };
+    rerender(<RichNoteView note={other} />);
+    expect(container.firstElementChild).not.toBe(el);
+    expect(container.querySelector('input[type="checkbox"]:checked')).toBeNull();
+  });
+
+  it("onSave arriving after mount makes tasks writable; going away makes them read-only", () => {
+    const onSave = vi.fn(async () => ({}));
+    const { container, rerender } = render(<RichNoteView note={project} />);
+    const open = () =>
+      container.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:checked)');
+    expect(open()?.disabled).toBe(true);
+    rerender(<RichNoteView note={project} onSave={onSave} />);
+    expect(open()?.disabled).toBe(false);
+    rerender(<RichNoteView note={project} />);
+    expect(open()?.disabled).toBe(true);
+  });
+
+  it("unmount clears the element", () => {
+    const { container, unmount } = render(<RichNoteView note={recipe} />);
     unmount();
     expect(container.innerHTML).toBe("");
   });
@@ -190,6 +222,16 @@ describe("a rendered note makes no request", () => {
           seen.push(`sse ${u}`);
         }) as never,
     );
+    // A detached `new Image().src = …` loads too, without ever entering the DOM.
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src")!;
+    Object.defineProperty(HTMLImageElement.prototype, "src", {
+      ...desc,
+      set(v: string) {
+        if (!/^(blob:|data:image\/)/i.test(String(v))) seen.push(`img.src ${v}`);
+        desc.set!.call(this, v);
+      },
+    });
+    restore.push(() => Object.defineProperty(HTMLImageElement.prototype, "src", desc));
     spy(
       window,
       "open",
@@ -209,7 +251,7 @@ describe("a rendered note makes no request", () => {
     const out: string[] = [];
     for (const el of Array.from(root.querySelectorAll("*"))) {
       const tag = el.tagName.toLowerCase();
-      for (const attr of ["src", "srcset", "poster", "data", "background"]) {
+      for (const attr of ["src", "srcset", "poster", "data", "background", "ping"]) {
         const v = el.getAttribute(attr);
         if (v && !/^(blob:|data:image\/(png|jpe?g|gif|webp|avif);)/i.test(v))
           out.push(`${tag}[${attr}]=${v}`);
@@ -228,11 +270,16 @@ describe("a rendered note makes no request", () => {
     record();
     fetch("https://control.example/").catch(() => {});
     new XMLHttpRequest().open("GET", "https://control.example/x");
+    new Image().src = "https://control.example/detached.png";
     const img = document.createElement("img");
     img.setAttribute("src", "https://control.example/i.png");
     const holder = document.createElement("div");
     holder.appendChild(img);
-    expect(seen).toEqual(["fetch https://control.example/", "xhr https://control.example/x"]);
+    expect(seen).toEqual([
+      "fetch https://control.example/",
+      "xhr https://control.example/x",
+      "img.src https://control.example/detached.png",
+    ]);
     expect(loads(holder)).toEqual(["img[src]=https://control.example/i.png"]);
   });
 

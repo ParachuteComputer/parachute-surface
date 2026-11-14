@@ -275,16 +275,17 @@ import "@openparachute/surface-render/rich-notes-kit.css";
   resolve={resolve}           // [[wikilinks]] → onNavigate(href); without it they're text
   onNavigate={navigate}       // your router
   fetchBlob={fetchBlob}       // the note's own /api/storage/… images; nothing else is fetched
-  onSave={(content, patch) =>
-    vault.updateNote(note.id, { content, if_updated_at: note.updatedAt })}
+  onSave={(content, patch) =>   // resolve with the saved note; the kit moves its revision on
+    vault.updateNote(note.id, { content, if_updated_at: patch.revision ?? note.updatedAt })}
   openLink={openExternal}     // an app webview's opener; without it, a target=_blank link
 />
 ```
 
 Without `onSave` tasks and logs are read-only. `<RichNoteView note={…}>` is the
-same view on its own (`@openparachute/surface-render/rich`). The host hooks are
-read when the view mounts; a new `note` updates it in place and keeps the
-reader's sitting (ticks, servings, cook-mode step, timers).
+same view on its own (`@openparachute/surface-render/rich`). The same note with
+new content updates in place and keeps the reader's sitting (ticks, servings,
+cook-mode step, timers); a different note (by `id`, else `path`), or a hook
+that appears or goes (`onSave`, `resolve`, `openLink`, `units`), starts fresh.
 
 **No network, ever.** The kit loads nothing: a remote image is a link, links
 open only on a tap (`https:`, `mailto:`, `geo:` and wikilinks only), the

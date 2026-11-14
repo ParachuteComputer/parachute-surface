@@ -12,7 +12,7 @@ export interface RichNoteViewProps {
    *  parsed to decide), so the note is parsed once. */
   doc?: RichDoc;
   /** Wikilink resolver: `[[target]]` → its href, as in `MarkdownView`.
-   *  Without it a wikilink is plain text. Read when the view mounts. */
+   *  Without it a wikilink is plain text. */
   resolve?: WikilinkResolver;
   /** The surface's router navigate, for wikilinks and internal links. */
   onNavigate?: (href: string) => void;
@@ -47,7 +47,24 @@ export interface RichNoteViewProps {
  * attachment image — goes through `fetchBlob` only for a vault storage path.
  * Note text only ever enters the page as text.
  */
-export function RichNoteView({ note, doc, className = "rich-note", ...hooks }: RichNoteViewProps) {
+export function RichNoteView(props: RichNoteViewProps) {
+  // One mount per note, and per set of hooks the kit was given: a different
+  // note starts with a fresh sitting (servings, ticks, timers belong to the
+  // note they were set on), and a hook that appears or goes (a note you may
+  // edit, a resolver that loaded) redraws with it. The same note with new
+  // content updates in place and keeps the sitting.
+  const { note, resolve, openLink, onSave, units } = props;
+  const key = [
+    note.id ?? note.path ?? "",
+    resolve ? "r" : "",
+    openLink ? "l" : "",
+    onSave ? "s" : "",
+    units ?? "",
+  ].join("|");
+  return <RichNoteMount key={key} {...props} />;
+}
+
+function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNoteViewProps) {
   const ref = useRef<HTMLDivElement>(null);
   const handle = useRef<RichHandle | null>(null);
   const drawn = useRef<RichDoc | null>(null);
@@ -67,12 +84,15 @@ export function RichNoteView({ note, doc, className = "rich-note", ...hooks }: R
     const el = ref.current;
     if (!el) return;
     const objectUrls: string[] = [];
+    let disposed = false;
     const h = latest.current;
     const host: RichHost = {
       async image(path) {
         const fetchBlob = latest.current.fetchBlob;
         if (!fetchBlob || !isVaultStorageUrl(path)) throw new Error("not a vault attachment");
-        const url = URL.createObjectURL(await fetchBlob(path));
+        const blob = await fetchBlob(path);
+        if (disposed) throw new Error("view closed");
+        const url = URL.createObjectURL(blob);
         objectUrls.push(url);
         return url;
       },
@@ -85,11 +105,17 @@ export function RichNoteView({ note, doc, className = "rich-note", ...hooks }: R
       };
     }
     if (h.openLink) host.openLink = (href) => latest.current.openLink?.(href);
-    if (h.onSave) host.save = (content, patch) => latest.current.onSave!(content, patch);
+    if (h.onSave) {
+      host.save = (content, patch) => {
+        const save = latest.current.onSave;
+        return save ? save(content, patch) : Promise.reject(new Error("read-only"));
+      };
+    }
     if (h.units) host.units = h.units;
     handle.current = mountRichNote(el, parsed, host);
     drawn.current = parsed;
     return () => {
+      disposed = true;
       handle.current?.destroy();
       handle.current = null;
       for (const u of objectUrls) URL.revokeObjectURL(u);
@@ -105,12 +131,18 @@ export function RichNoteView({ note, doc, className = "rich-note", ...hooks }: R
   return <div ref={ref} className={className} />;
 }
 
-/** Internal routes go to the surface's navigate; without one, only a
- *  same-site path or an http(s) URL is followed (the resolver owns the href). */
+/** Routes go to the surface's navigate; without one, only an href on this
+ *  page's own origin is followed (the resolver owns the href; parsing it
+ *  first means `/\\host` or `/<TAB>/host` can't leave the site). */
 function navigate(href: string, onNavigate?: (href: string) => void): void {
   if (onNavigate) {
     onNavigate(href);
     return;
   }
-  if (/^(\/(?!\/)|#|https?:\/\/)/i.test(href)) window.location.assign(href);
+  try {
+    const u = new URL(href, window.location.href);
+    if (u.origin === window.location.origin) window.location.assign(u.href);
+  } catch {
+    // not a URL: nothing to follow
+  }
 }
