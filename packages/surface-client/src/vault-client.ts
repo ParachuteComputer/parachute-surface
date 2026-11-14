@@ -1116,10 +1116,10 @@ export class VaultClient {
 
   /**
    * Auth'd GET of an attachment blob (image/audio render). Accepts an
-   * absolute URL inside this vault (its origin, under its base path; anything
-   * else is refused with no request, so the token can't be sent to a host a
-   * note names), a
-   * vault-relative path (`/api/storage/<path>`), or a
+   * absolute URL inside this vault (its origin, under its base path, no
+   * userinfo; anything else, including a backslash, a control character or
+   * an encoded slash, is refused with no request, so the token can't be sent
+   * to a host a note names), a vault-relative path (`/api/storage/<path>`), or a
    * bare storage path — the same resolution notes-ui's subclass
    * established (which keeps its own override; this base implementation
    * makes plain clients blob-capable too).
@@ -1144,18 +1144,22 @@ export class VaultClient {
     // exactly it: the bearer goes only to this vault (its origin, under its
     // base path); anything else is refused before a request is made.
     const here = globalThis.location?.href;
-    const vault = parseHttpUrl(this.baseUrl, here);
+    // The base is a directory: with a root-relative or empty vaultUrl, resolve
+    // "<base>/" so the base path is the vault's, not the current page's.
+    const vault = parseHttpUrl(`${this.baseUrl}/`, here);
     const absolute = /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("//");
     const raw = absolute ? url : `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
     // A backslash or control character is never in a real storage path, and
     // browsers fold `/\host` into `//host`.
-    const unsafe = url.includes("\\") || hasControlChar(url);
+    const unsafe = url.includes("\\") || hasControlChar(url) || /%2f|%5c/i.test(url);
     const resolved = unsafe ? null : parseHttpUrl(raw, here ?? vault?.href);
     const basePath = vault ? vault.pathname.replace(/\/$/, "") : "";
     if (
       !vault ||
       !resolved ||
       resolved.origin !== vault.origin ||
+      resolved.username !== "" ||
+      resolved.password !== "" ||
       !resolved.pathname.startsWith(`${basePath}/`)
     ) {
       throw new Error("fetchAttachmentBlob: refusing a URL outside the vault");

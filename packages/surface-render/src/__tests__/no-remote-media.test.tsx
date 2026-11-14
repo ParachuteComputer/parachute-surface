@@ -158,6 +158,8 @@ describe("isVaultStorageUrl", () => {
       "//hub.example/vault/default/api/storage/a.png",
       "/api/storage/../../api/notes",
       "/api/storage/%2e%2e/notes",
+      "/api/storage/..?x",
+      "https://u:p@hub.example/vault/default/api/storage/a.png",
       "/api/storage/.\t./notes",
       "/api/storage/\\evil",
     ]) {

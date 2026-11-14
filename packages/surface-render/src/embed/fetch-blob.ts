@@ -1,6 +1,6 @@
 /**
  * The auth'd-media primitive: given a storage URL (`/api/storage/…`, or an
- * absolute URL on the vault's own origin), return the blob bytes WITH the surface's
+ * absolute URL under the vault's base URL), return the blob bytes WITH the surface's
  * authorization applied.
  *
  * This is a hook, not a concrete client, on purpose: the embed renderers
@@ -104,7 +104,9 @@ function isAbsoluteUrl(src: string): boolean {
  *  dot or slash), or carries a backslash or control character (browsers fold
  *  `/\host` and `/<TAB>/host` into `//host`), is not a storage path. */
 function hasTraversal(path: string): boolean {
-  return /(^|\/)\.{1,2}(\/|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path);
+  return (
+    /(^|\/)\.{1,2}(\/|[?#]|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path)
+  );
 }
 
 /** A C0 control character or DEL (URL parsers strip tabs and newlines). */
@@ -148,6 +150,7 @@ export function isVaultStorageUrl(src: string, vaultUrl?: string): boolean {
   const vault = parseHttpUrl(vaultUrl);
   const target = parseHttpUrl(src);
   if (!vault || !target || target.origin !== vault.origin) return false;
+  if (target.username || target.password) return false;
   // URL parsing already resolves `..` and `%2e%2e` segments in the pathname.
   const base = vault.pathname.replace(/\/$/, "");
   return target.pathname.startsWith(`${base}/api/storage/`) && !hasTraversal(target.pathname);

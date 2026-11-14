@@ -133,6 +133,9 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
       "/\\evil.example/x",
       "/\t/evil.example/x",
       "javascript:alert(1)",
+      // userinfo, and encoded separators a proxy might decode
+      "https://u:p@hub.example/vault/default/api/storage/x.png",
+      "/api/storage/..%2f..%2fother/x",
     ]) {
       await expect(client.fetchAttachmentBlob(url), url).rejects.toThrow(/outside the vault/);
     }
@@ -148,6 +151,34 @@ describe("VaultClient.fetchAttachmentBlob (base client)", () => {
       await client.fetchAttachmentBlob(url).catch(() => {});
     }
     for (const c of calls) expect(new URL(c.url).origin).toBe("https://hub.example");
+  });
+
+  test("in a browser, an empty or root-relative vaultUrl still fetches its storage", async () => {
+    const g = globalThis as { location?: unknown };
+    const before = g.location;
+    g.location = { href: "https://app.example/notes/n/abc" };
+    try {
+      for (const vaultUrl of ["", "/vault/default"]) {
+        const calls: Captured[] = [];
+        const client = new VaultClient({
+          vaultUrl,
+          accessToken: "tok-1",
+          fetchImpl: (async (url: string, init?: RequestInit) => {
+            calls.push({ url, init });
+            return blobResponse();
+          }) as unknown as typeof fetch,
+        });
+        await client.fetchAttachmentBlob("/api/storage/x.png");
+        expect(calls.map((c) => c.url)).toEqual([
+          `https://app.example${vaultUrl}/api/storage/x.png`,
+        ]);
+        await expect(
+          client.fetchAttachmentBlob("https://evil.example/api/storage/x.png"),
+        ).rejects.toThrow();
+      }
+    } finally {
+      g.location = before;
+    }
   });
 
   test("a root-relative vault URL still refuses a backslash host trick", async () => {
