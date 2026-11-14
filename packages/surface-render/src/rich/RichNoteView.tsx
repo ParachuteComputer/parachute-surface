@@ -59,8 +59,9 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
   // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting.
-  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
+  // content updates in place and keeps the sitting. A new vaultUrl redraws too,
+  // since the kit asks `isAttachment` about an absolute image only when it draws.
+  const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
   const key = [
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
@@ -68,6 +69,7 @@ export function RichNoteView(props: RichNoteViewProps) {
     onSave ? "s" : "",
     fetchBlob ? "b" : "",
     units ?? "",
+    vaultUrl ?? "",
   ].join("|");
   return <RichNoteMount key={key} {...props} />;
 }

@@ -299,8 +299,9 @@ host for, an attachment image, goes through `fetchBlob` only when
 The kit hands over the raw src, as `MarkdownView` gets it
 (`Pasted%20image.png`, `scan.png?v=2`), and an image that isn't fetched reads
 "Image: alt (not loaded)".
-The kit hands the host only relative paths, so in a rich note an absolute
-URL, even `<vaultUrl>/api/storage/…`, is a link, never loaded.
+An absolute URL is asked for only when it is inside the vault
+(`<vaultUrl>/api/storage/…`, the kit's `host.isAttachment` answered by the
+same check); any other absolute URL is a link, never loaded.
 `RichNoteView.test.tsx` draws every fixture with every control opened and
 fails on any request or URL-loading node; `no-remote-media.test.tsx` draws a
 rich note full of remote images against a surface `fetchBlob` that would send
