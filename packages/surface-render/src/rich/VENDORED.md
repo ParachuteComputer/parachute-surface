@@ -1,8 +1,8 @@
 # rich-notes-kit, vendored
 
-Kit commit: `5a4bc17acd1f263280993ead3e4892f33f1b344c`
+Kit commit: `fb610ab8e18eadef67f71dc19e1f412093c20967`
 
-rich-notes-kit 0.3.0 (MIT, implements PATTERNS v0.3) draws a note richly:
+rich-notes-kit 0.4.0 (MIT, implements PATTERNS v0.3) draws a note richly:
 recipes, minutes, session notes, chant charts, and for every note tasks, dated
 logs, callouts, `<details>` and charts from number tables. It is framework-free
 and loads nothing.

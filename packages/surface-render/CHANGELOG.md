@@ -18,7 +18,8 @@
   `<vaultUrl>/api/storage/`, so not another vault on the same hub); a
   relative path climbing out with `..`, an encoded dot/slash/backslash (also
   encoded twice or more, `%252e`), a backslash or a control character doesn't
-  count. Before, such a URL was fetched
+  count. The query of an absolute URL is read with the same rule, so
+  `…/api/storage/a.png?x=/../../other` is refused. Before, such a URL was fetched
   through `fetchBlob`, which sent the vault bearer to that host.
 - **`vaultClientFetchBlob`'s fallback** refuses an absolute URL outside the
   vault before making a request, and fetches the URL it checked (parsed),
@@ -42,7 +43,8 @@
   `fetchBlob` + `vaultUrl` (images only when `isVaultStorageUrl(src,
   vaultUrl)` passes, so a full URL inside the vault loads too; a remote
   image is a plain link, never loaded; a refused image reads "(not
-  loaded)"), new `onSave(content, patch)` (task ticks and log lines;
+  loaded)"; a `vaultUrl` that changes asks every image afresh under the new
+  vault and keeps the reader's sitting), new `onSave(content, patch)` (task ticks and log lines;
   read-only without it; typed as the kit's `Host["save"]`, resolving with
   the saved note or `{ updatedAt }`),
   `openLink`, `calm`, `units`.
@@ -50,7 +52,7 @@
   (surface-client's `Note` already has them).
 - New stylesheet export `./rich-notes-kit.css`; `parseRichNote`,
   `needsRich` (the kit's own rule), `RICH_NOTES_KIT_VERSION`, `RICH_NOTES_CONTRACT`.
-- The kit (MIT, 0.3.0) is vendored as source in `src/rich/kit/`, typed by
+- The kit (MIT, 0.4.0) is vendored as source in `src/rich/kit/`, typed by
   its own `index.d.ts`, with
   markdown-it 15 (`src/rich/vendor/`), compiled by `tsc` (`allowJs`): no new
   dependency and no new package to publish. `scripts/sync-rich-notes-kit.ts`

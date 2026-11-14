@@ -58,19 +58,11 @@ export function RichNoteView(props: RichNoteViewProps) {
   // note starts with a fresh sitting (servings, ticks, timers belong to the
   // note they were set on), and a hook that appears or goes (a note you may
   // edit, a resolver or fetcher that loaded) redraws with it. A note with
-  // neither id nor path can't be told apart, so it updates in place. The same note with new
-  // content updates in place and keeps the sitting. Any vaultUrl change starts
-  // fresh too (its images are not the last vault's), except the first one
-  // ever given, which only redraws (RichNoteMount).
-  const { note, resolve, openLink, onSave, fetchBlob, units, vaultUrl } = props;
-  const vault = useRef({ url: vaultUrl, n: 0, seen: vaultUrl !== undefined });
-  if (vault.current.url !== vaultUrl) {
-    if (vault.current.seen) vault.current.n++;
-    vault.current.url = vaultUrl;
-    vault.current.seen = true;
-  }
+  // neither id nor path can't be told apart, so it updates in place. The same
+  // note with new content updates in place and keeps the sitting, and so does
+  // a vaultUrl change: its images are asked afresh (RichNoteMount).
+  const { note, resolve, openLink, onSave, fetchBlob, units } = props;
   const key = [
-    vault.current.n,
     note.id ?? note.path ?? "",
     resolve ? "r" : "",
     openLink ? "l" : "",
@@ -117,8 +109,10 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
         objectUrls.push(url);
         return url;
       },
-      // An absolute src (kit 0.3) is an attachment only when it sits in this
-      // vault; anything else stays a link and is never asked for.
+      // An absolute src is an attachment only when it sits in this vault:
+      // isVaultStorageUrl compares scheme, host and port, and reads the query
+      // (the kit checks only the path's shape). Anything else stays a link and
+      // is never asked for.
       // Without fetchBlob nothing can load, so it stays a link the reader can open.
       isAttachment: (src) =>
         Boolean(latest.current.fetchBlob) && isVaultStorageUrl(src, latest.current.vaultUrl),
@@ -154,15 +148,16 @@ function RichNoteMount({ note, doc, className = "rich-note", ...hooks }: RichNot
     handle.current.update(parsed);
   }, [parsed]);
 
-  // The kit asks `isAttachment` about an absolute image only when it draws, so
-  // a vaultUrl that arrives late redraws the kit's own current doc (a saved
-  // tick included) in place; the sitting stays.
+  // A vaultUrl that changes (arrives late, names another vault, goes away)
+  // changes what each image is: kit 0.4's refreshImages forgets every answer
+  // and redraws the kit's own current doc (a saved tick included), so each
+  // image is asked again under the new vault, and the sitting stays.
   const vaultUrl = hooks.vaultUrl;
   const drawnVault = useRef(vaultUrl);
   useEffect(() => {
     if (!handle.current || drawnVault.current === vaultUrl) return;
     drawnVault.current = vaultUrl;
-    handle.current.redraw();
+    handle.current.refreshImages();
   }, [vaultUrl]);
 
   return <div ref={ref} className={className} />;

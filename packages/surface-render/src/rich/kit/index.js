@@ -17,7 +17,7 @@ import practice from './types/practice.js';
 
 [recipe, minutes, session, practice].forEach(registerType);
 
-export const version = '0.3.0';
+export const version = '0.4.0';
 export const contract = 'PATTERNS v0.3';
 export const edit = Object.freeze({ toggleTask, appendLog });
 export function render(el, note, host) { return mount(el, parse(note, { type: host && host.view }), host); }

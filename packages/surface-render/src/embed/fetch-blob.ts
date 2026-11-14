@@ -156,7 +156,8 @@ function parseHttpUrl(url: string): URL | null {
  * - An absolute `http(s)://` URL is storage only when `vaultUrl` (the vault's
  *   base URL, e.g. `https://hub.example/vault/default`) is given and `src` is
  *   under it: same origin, and its path starts with the vault's path +
- *   `/api/storage/`. Without `vaultUrl`, no absolute URL is storage:
+ *   `/api/storage/`, and neither its path nor its query climbs (`/../`, an
+ *   encoded `.`, `/` or `\`, at any level of decoding). Without `vaultUrl`, no absolute URL is storage:
  *   `https://evil.example/api/storage/x.png` must not get the token, and nor
  *   must another vault on the same hub.
  */
@@ -171,8 +172,14 @@ export function isVaultStorageUrl(src: string, vaultUrl?: string): boolean {
   if (!vault || !target || target.origin !== vault.origin) return false;
   if (target.username || target.password) return false;
   // URL parsing already resolves `..` and `%2e%2e` segments in the pathname.
+  // The query is read with the same rule as a relative src's (rich-notes-kit
+  // 0.4 hands it over unread): a `/../` or an encoded `/`, `\` or `.` there is
+  // refused, in case a server or proxy reads it as a path.
   const base = vault.pathname.replace(/\/$/, "");
-  return target.pathname.startsWith(`${base}/api/storage/`) && !hasTraversal(target.pathname);
+  return (
+    target.pathname.startsWith(`${base}/api/storage/`) &&
+    !hasTraversal(target.pathname + target.search)
+  );
 }
 
 /** How a media `src` from note content may be shown. */
