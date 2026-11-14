@@ -189,6 +189,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       "/api/storage/att%5C..%5Cx.png",
       "/static/logo.png",
       "/api/storage/%252e%252e/%252e%252e/other/x.png?%",
+      "/api/storage/%25%32%65%25%32%65/other/x.png?%",
     ];
     const { container } = render(
       <NoteRenderer
@@ -244,6 +245,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       "/api/storage/att/cr%C3%A8me.jpg",
       "/api/storage/att/scan.png?v=2",
       "/api/storage/att/100%25.png",
+      "/api/storage/att/100%2525%20off.png#top",
     ];
     const { container } = render(
       <NoteRenderer
@@ -332,7 +334,13 @@ describe("isVaultStorageUrl", () => {
       "/api/storage/%25252E%25252E/notes",
       "/api/storage/a%252Fb.png",
       "/api/storage/a%255Cb.png",
+      "/api/storage/%25%32%65%25%32%65/notes",
+      "/api/storage/%252%65%252%65/notes",
+      "/api/storage/a%25%32%66b.png",
+      "/api/storage/%2525%2532%2565%2525%2532%2565/notes",
+      "/api/storage/%25%30%30x.png",
       `${VAULT}/api/storage/%252e%252e/other/a.png`,
+      `${VAULT}/api/storage/%25%32%65%25%32%65/other/a.png`,
     ]) {
       expect(isVaultStorageUrl(src, VAULT), src).toBe(false);
     }
