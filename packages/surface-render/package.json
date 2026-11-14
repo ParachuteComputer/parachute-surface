@@ -54,7 +54,7 @@
   "scripts": {
     "gen-version": "bun scripts/gen-version.ts",
     "prebuild": "bun scripts/gen-version.ts",
-    "build": "tsc",
+    "build": "tsc && bun scripts/copy-kit-types.ts",
     "prepare": "bun run build",
     "prepublishOnly": "bun run build",
     "test": "vitest run",

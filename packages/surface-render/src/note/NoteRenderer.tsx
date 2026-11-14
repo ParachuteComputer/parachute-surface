@@ -7,7 +7,7 @@ import { YamlRenderer } from "../formats/YamlRenderer.js";
 import type { HighlightFn } from "../formats/highlight.js";
 import { MarkdownView, type MarkdownViewProps } from "../markdown/MarkdownView.js";
 import { RichNoteView, type RichNoteViewProps } from "../rich/RichNoteView.js";
-import { hasRichPattern, parseRichNote } from "../rich/kit-api.js";
+import { needsRich, parseRichNote } from "../rich/kit-api.js";
 import { CODE_EXTENSIONS, type NoteFormat, extensionOf, formatForPath } from "./format.js";
 
 /** A note shape this dispatcher needs — a path (for format detection) and
@@ -137,7 +137,7 @@ export function NoteRenderer({
       // only activates when `highlight` is set, so the two paths never collide.
       const props: MarkdownViewProps = { content, className, highlight, ...markdownProps };
       if (overrides?.markdown) return <>{overrides.markdown(props)}</>;
-      if (richDoc && hasRichPattern(richDoc)) {
+      if (richDoc && needsRich(richDoc)) {
         return (
           <RichNoteView
             note={note}

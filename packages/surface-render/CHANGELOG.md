@@ -39,14 +39,16 @@
 - **`<RichNoteView>`** (`./rich`): the view on its own. Host hooks from
   surface-render's own props: `resolve` + new `onNavigate` (wikilinks),
   `fetchBlob` + `vaultUrl` (images only when `isVaultStorageUrl(src,
-  vaultUrl)` passes; a remote image is a plain link, never loaded), new `onSave(content, patch)`
+  vaultUrl)` passes; a remote image is a plain link, never loaded; a refused
+  image reads "(not loaded)"), new `onSave(content, patch)`
   (task ticks and log lines; read-only without it), `openLink`, `calm`,
   `units`.
 - `NoteLike` grows optional `metadata`, `tags`, `id`, `updatedAt`
   (surface-client's `Note` already has them).
 - New stylesheet export `./rich-notes-kit.css`; `parseRichNote`,
-  `hasRichPattern`, `RICH_NOTES_KIT_VERSION`, `RICH_NOTES_CONTRACT`.
-- The kit (MIT, 0.1.0) is vendored as source in `src/rich/kit/` with
+  `needsRich` (the kit's own rule), `RICH_NOTES_KIT_VERSION`, `RICH_NOTES_CONTRACT`.
+- The kit (MIT, 0.2.0) is vendored as source in `src/rich/kit/`, typed by
+  its own `index.d.ts`, with
   markdown-it 15 (`src/rich/vendor/`), compiled by `tsc` (`allowJs`): no new
   dependency and no new package to publish. `scripts/sync-rich-notes-kit.ts`
   re-syncs from a kit checkout; `THIRD_PARTY.md` carries the licences.

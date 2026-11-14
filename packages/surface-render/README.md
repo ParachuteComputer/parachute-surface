@@ -264,7 +264,8 @@ every other note with `<MarkdownView>` exactly as before:
 
 A note with only headings, paragraphs, plain lists, links or metadata has no
 rich pattern and goes to `<MarkdownView>`. `rich` defaults to `false`;
-`overrides.markdown` still wins over it.
+`overrides.markdown` still wins over it. The line is the kit's own
+`needsRich(doc)`, exported here too.
 
 ```tsx
 import "@openparachute/surface-render/rich-notes-kit.css";
@@ -276,7 +277,7 @@ import "@openparachute/surface-render/rich-notes-kit.css";
   onNavigate={navigate}       // your router
   fetchBlob={fetchBlob}       // the note's own /api/storage/… images; nothing else is fetched
   vaultUrl={vaultUrl}         // optional: the vault's base URL, as for MarkdownView
-  onSave={(content, patch) =>   // resolve with the saved note; the kit moves its revision on
+  onSave={(content, patch) =>   // resolve with the saved note ({updatedAt}); hand the new note in after, not inside
     vault.updateNote(note.id, { content, if_updated_at: patch.revision ?? note.updatedAt })}
   openLink={openExternal}     // an app webview's opener; without it, a target=_blank link
 />
@@ -295,6 +296,9 @@ stylesheet has no `url()`, and note text enters the page only as text
 (`<details>`/`<summary>` is the only HTML honoured). The one thing it asks the
 host for, an attachment image, goes through `fetchBlob` only when
 `isVaultStorageUrl(src, vaultUrl)` passes, the same check as the table above.
+The kit hands over the raw src, as `MarkdownView` gets it
+(`Pasted%20image.png`, `scan.png?v=2`), and an image that isn't fetched reads
+"Image: alt (not loaded)".
 The kit hands the host only relative paths, so in a rich note an absolute
 URL, even `<vaultUrl>/api/storage/…`, is a link, never loaded.
 `RichNoteView.test.tsx` draws every fixture with every control opened and
@@ -413,7 +417,7 @@ const overrides: NoteRendererOverrides = {
 @openparachute/surface-render/formats    Csv/Json/Yaml/Code/Plain renderers, parseCsv, highlight hook
 @openparachute/surface-render/note       NoteRenderer, formatForPath, override prop types
 @openparachute/surface-render/mdx        MdxView
-@openparachute/surface-render/rich       RichNoteView, parseRichNote, hasRichPattern
+@openparachute/surface-render/rich       RichNoteView, parseRichNote, needsRich
 @openparachute/surface-render/styles.css optional baseline stylesheet (affordance defaults)
 @openparachute/surface-render/rich-notes-kit.css  the rich view's stylesheet (needed with `rich`)
 ```

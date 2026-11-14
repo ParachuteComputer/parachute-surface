@@ -101,7 +101,7 @@ export {
   RichNoteView,
   type RichNoteViewProps,
   parseRichNote,
-  hasRichPattern,
+  needsRich,
   RICH_NOTES_KIT_VERSION,
   RICH_NOTES_CONTRACT,
   type RichNote,

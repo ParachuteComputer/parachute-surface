@@ -1,6 +1,7 @@
 /**
  * Copy rich-notes-kit into surface-render, unchanged:
  *   <kit>/src/*.js, src/types/*.js → src/rich/kit/
+ *   <kit>/src/index.d.ts           → src/rich/kit/index.d.ts (the kit's types)
  *   <kit>/vendor/markdown-it.mjs   → src/rich/vendor/
  *   <kit>/src/kit.css              → rich-notes-kit.css
  * and record the kit commit in src/rich/VENDORED.md.
@@ -29,6 +30,7 @@ for (const dir of ["src", "src/types"]) {
     pairs.push([join(kitRoot, dir, f), join(pkg, "src/rich/kit", dir.slice(4), f)]);
   }
 }
+pairs.push([join(kitRoot, "src/index.d.ts"), join(pkg, "src/rich/kit/index.d.ts")]);
 pairs.push([join(kitRoot, "vendor/markdown-it.mjs"), join(pkg, "src/rich/vendor/markdown-it.mjs")]);
 pairs.push([join(kitRoot, "src/kit.css"), join(pkg, "rich-notes-kit.css")]);
 
