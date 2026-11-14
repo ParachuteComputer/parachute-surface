@@ -156,6 +156,30 @@ identity is stable (important — `fetchBlob` is an effect dependency downstream
 The lower-level `vaultClientFetchBlob(client)` adapter is still exported for
 non-hook contexts.
 
+### Only vault attachments load
+
+A note never makes the reader's device load anything from outside the vault.
+`VaultImage` / `VaultAudio` (and so every image `MarkdownView` and
+`NoteRenderer` draw) treat a `src` like this:
+
+| `src` | Shown as |
+|---|---|
+| `/api/storage/…` (what the Obsidian import writes) | fetched with auth through `fetchBlob`, shown from an object URL |
+| an absolute `<vaultUrl>/api/storage/…` URL | the same, **only** when you pass `vaultUrl` (the vault's base URL, e.g. `https://hub.example/vault/default`) |
+| `data:image/png\|jpeg\|gif\|webp\|avif`, `data:audio/…`, `blob:` | shown as is (no request) |
+| any other `http(s)` URL | never loaded: a plain link (`.vault-media-remote`, alt text or the address) that opens in a new tab with no referrer when tapped |
+| anything else (`javascript:`, a non-storage path, …) | never loaded: words (`.vault-media-blocked`) |
+
+So `![](https://tracker.example/x.png)` can't tell a server the note was
+opened, and `![](https://evil.example/api/storage/x.png)` can't collect the
+vault token: an absolute URL is storage only under the vault you name, and the
+`fetchBlob` adapters and `VaultClient.fetchAttachmentBlob` refuse any other
+vault before making a request (they resolve the URL once and fetch exactly
+what they checked). A surface that wants remote images loaded
+anyway passes its own `components.img`. Pair this with a page CSP that has no
+remote `img-src` / `media-src` / `connect-src`: the renderer is one wall, the
+CSP the second.
+
 ## Syntax highlighting (one hook, everywhere)
 
 There is **one** `highlight` hook — `(code, lang) => htmlString` — and it now
@@ -256,6 +280,8 @@ defaults in the [optional baseline stylesheet](#optional-baseline-stylesheet).
 | `csv-warning` | `CsvRenderer` | `<p>` | Malformed-CSV inline warning. |
 | `vault-media-loading` | `VaultImage`, `VaultAudio` | `<span>` | Shown while an auth'd blob fetch is in flight. |
 | `vault-media-error` | `VaultImage`, `VaultAudio` | `<span>` | Shown when the auth'd fetch fails (renders the message). |
+| `vault-media-remote` | `VaultImage`, `VaultAudio` | `<a>` | A remote http(s) src, not loaded: a link the reader can open. |
+| `vault-media-blocked` | `VaultImage`, `VaultAudio` | `<span>` | Any other non-vault src, not loaded: shown as words. |
 | `vault-audio` | `VaultAudio` | wrapper `<span>` | Audio-embed container. |
 | `vault-audio-label` | `VaultAudio` | `<span>` | Optional caption next to the control. |
 
@@ -275,7 +301,8 @@ import "@openparachute/surface-render/styles.css";
 Scope, on purpose:
 
 - It styles the **affordance** classes (`csv-scroll`, `csv-warning`,
-  `vault-media-loading`, `vault-media-error`, `vault-audio*`, dashed
+  `vault-media-loading`, `vault-media-error`, `vault-media-remote`,
+  `vault-media-blocked`, `vault-audio*`, dashed
   `wikilink-unresolved`) and a minimal no-theme `.hljs` (display block +
   overflow).
 - It does **not** theme `.prose-note` typography — that's your design decision.

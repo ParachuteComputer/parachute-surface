@@ -87,6 +87,13 @@ span.wikilink-unresolved {
   font-size: 0.875em;
   color: var(--sr-error-fg, #b91c1c);
 }
+/* A note's remote image or audio is never loaded: it shows as a link
+ * (`.vault-media-remote`) or, for any other src, as words (`.vault-media-blocked`). */
+.vault-media-remote,
+.vault-media-blocked {
+  font-size: 0.875em;
+  color: var(--sr-muted-fg, #6b7280);
+}
 
 /* ── Audio embeds ──────────────────────────────────────────────────────────
  * `.vault-audio` wraps the control (+ optional `.vault-audio-label`).

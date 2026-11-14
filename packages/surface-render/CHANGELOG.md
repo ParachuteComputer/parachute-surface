@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Security — a note's remote images never load; the vault token stays on the vault's origin
+
+- **`VaultImage` / `VaultAudio` load only vault attachments.** A remote
+  http(s) `src` used to render directly, so `![](https://tracker.example/x.png)`
+  told that server the note was opened, when and from where. It now renders
+  as a plain link (`.vault-media-remote`; alt text or the address, new tab, no
+  referrer) and is never loaded. Any other non-vault src (`javascript:`, a
+  non-storage path) renders as words (`.vault-media-blocked`). `blob:` and
+  inline `data:image/…` / `data:audio/…` still show (no request).
+  `MarkdownView`, `NoteRenderer` and `MdxView` inherit this.
+- **`isVaultStorageUrl(src, vaultUrl?)`** no longer treats
+  `https://<any host>/api/storage/…` as storage. An absolute URL counts only
+  under the vault passed as `vaultUrl` (same origin, path under
+  `<vaultUrl>/api/storage/`, so not another vault on the same hub); a
+  relative path climbing out with `..`, an encoded dot/slash, a backslash or
+  a control character doesn't count. Before, such a URL was fetched
+  through `fetchBlob`, which sent the vault bearer to that host.
+- **`vaultClientFetchBlob`'s fallback** refuses an absolute URL outside the
+  vault before making a request, and fetches the URL it checked (parsed),
+  not the raw string.
+- New `vaultUrl` prop on `VaultImage`, `VaultAudio`, `MarkdownView` and
+  `NoteRenderer`, for surfaces whose notes hold absolute storage URLs on
+  their own vault. New exports `mediaSrcKind`, `MediaSrcKind`;
+  `useBlobObjectUrl` takes `vaultUrl` and returns `kind`.
+- **Behaviour change.** A surface that relied on remote images rendering
+  inline passes its own `components.img`.
+
 ## [0.3.1] - 2026-08-30
 
 Stable promotion of `0.3.1-rc.1` — suffix-drop, no code change. Ships the

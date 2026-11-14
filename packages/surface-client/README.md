@@ -287,7 +287,7 @@ Things worth knowing:
 
 ### Auth'd media — `fetchAttachmentBlob()`
 
-`VaultClient.fetchAttachmentBlob(url)` GETs an attachment blob with the client's full auth contract (bearer header, refresh-on-401 retry, structured errors). It accepts an absolute URL, a vault-relative `/api/storage/<path>`, or a bare storage path. surface-render's `vaultClientFetchBlob` adapter prefers this method, so a plain `VaultClient` renders auth-gated images/audio with zero extra wiring. By design there is **no `getAccessToken` accessor** — the token stays inside the client (the same custody contract surface-host's scoped server-side client relies on).
+`VaultClient.fetchAttachmentBlob(url)` GETs an attachment blob with the client's full auth contract (bearer header, refresh-on-401 retry, structured errors). It accepts an absolute URL inside this vault (same origin, under the vault's base path), a vault-relative `/api/storage/<path>`, or a bare storage path; anything else is refused before a request, so the token never goes to a host a note names. surface-render's `vaultClientFetchBlob` adapter prefers this method, so a plain `VaultClient` renders auth-gated images/audio with zero extra wiring. By design there is **no `getAccessToken` accessor** — the token stays inside the client (the same custody contract surface-host's scoped server-side client relies on).
 
 ### Don't redeclare the core types
 

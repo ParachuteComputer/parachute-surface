@@ -62,6 +62,7 @@ export interface NoteRendererProps
     | "resolve"
     | "linkComponent"
     | "fetchBlob"
+    | "vaultUrl"
     | "components"
     | "breaks"
     | "remarkPlugins"

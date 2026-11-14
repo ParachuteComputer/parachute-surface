@@ -17,7 +17,11 @@ beforeAll(() => {
 describe("isVaultStorageUrl", () => {
   it("matches relative + absolute storage URLs, not other URLs", () => {
     expect(isVaultStorageUrl("/api/storage/a.png")).toBe(true);
-    expect(isVaultStorageUrl("https://v.example/api/storage/a.png")).toBe(true);
+    expect(isVaultStorageUrl("https://v.example/api/storage/a.png", "https://v.example")).toBe(
+      true,
+    );
+    // An absolute URL is storage only on the vault's own (named) origin.
+    expect(isVaultStorageUrl("https://v.example/api/storage/a.png")).toBe(false);
     expect(isVaultStorageUrl("https://cdn.example/a.png")).toBe(false);
     expect(isVaultStorageUrl("/static/a.png")).toBe(false);
   });
@@ -62,10 +66,14 @@ describe("VaultImage", () => {
     expect(fetchBlob).toHaveBeenCalledWith("/api/storage/p.png");
   });
 
-  it("renders non-storage URLs directly without fetching", () => {
+  it("never loads a non-storage URL: it shows as a link, with no fetch", () => {
     const fetchBlob = vi.fn();
     render(<VaultImage src="https://cdn.example/p.png" alt="pic" fetchBlob={fetchBlob} />);
-    expect(screen.getByRole("img")).toHaveAttribute("src", "https://cdn.example/p.png");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("link", { name: "pic" })).toHaveAttribute(
+      "href",
+      "https://cdn.example/p.png",
+    );
     expect(fetchBlob).not.toHaveBeenCalled();
   });
 

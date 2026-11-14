@@ -1,6 +1,6 @@
 /**
- * The auth'd-media primitive: given a storage URL (`/api/storage/…` or an
- * absolute vault URL), return the blob bytes WITH the surface's
+ * The auth'd-media primitive: given a storage URL (`/api/storage/…`, or an
+ * absolute URL under the vault's base URL), return the blob bytes WITH the surface's
  * authorization applied.
  *
  * This is a hook, not a concrete client, on purpose: the embed renderers
@@ -55,8 +55,22 @@ export function vaultClientFetchBlob(
     const storageUrl = client.storageUrl.bind(client);
     const getToken = client.getAccessToken?.bind(client);
     return async (url: string): Promise<Blob> => {
-      // Absolute URLs pass through; storage paths get expanded.
-      const target = /^https?:\/\//.test(url) ? url : storageUrl(stripStoragePrefix(url));
+      // Storage paths get expanded. An absolute URL is fetched only when it is
+      // on the vault's own origin (the one `storageUrl` builds): the token is
+      // never attached to a host a note merely names.
+      let target: string;
+      if (isAbsoluteUrl(url)) {
+        // The vault's base URL is what `storageUrl` puts before `/api/storage/`.
+        const vaultUrl = storageUrl("").replace(/\/api\/storage\/?$/, "");
+        if (!isVaultStorageUrl(url, vaultUrl)) {
+          throw new Error("refusing a URL outside the vault");
+        }
+        // Fetch exactly the URL that was checked, not the raw string.
+        target = new URL(url).href;
+      } else {
+        if (hasTraversal(url)) throw new Error("refusing a URL outside the vault");
+        target = storageUrl(stripStoragePrefix(url));
+      }
       const token = getToken?.();
       const res = await fetchImpl(target, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -79,7 +93,85 @@ function stripStoragePrefix(url: string): string {
   return m?.[1] ?? url;
 }
 
-/** True if `src` points at the vault's auth-gated storage endpoint. */
-export function isVaultStorageUrl(src: string): boolean {
-  return src.startsWith("/api/storage/") || /^https?:\/\/[^/]+\/api\/storage\//.test(src);
+/** True for a URL with a scheme (`https:`, `data:`, `javascript:` …) or a
+ *  protocol-relative `//host/…` — anything that does not stay on this page's
+ *  own path space. */
+function isAbsoluteUrl(src: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("//");
+}
+
+/** A path that tries to climb out of `/api/storage/` (`..`, `.`, an encoded
+ *  dot or slash), or carries a backslash or control character (browsers fold
+ *  `/\host` and `/<TAB>/host` into `//host`), is not a storage path. */
+function hasTraversal(path: string): boolean {
+  return (
+    /(^|\/)\.{1,2}(\/|[?#]|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path)
+  );
+}
+
+/** A C0 control character or DEL (URL parsers strip tabs and newlines). */
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) return true;
+  }
+  return false;
+}
+
+function parseHttpUrl(url: string): URL | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True if `src` points at the vault's auth-gated storage endpoint — the only
+ * kind of URL surface-render ever fetches, and the only kind the vault token
+ * is sent with.
+ *
+ * - A relative `/api/storage/…` path (what the Obsidian import writes) is
+ *   storage.
+ * - An absolute `http(s)://` URL is storage only when `vaultUrl` (the vault's
+ *   base URL, e.g. `https://hub.example/vault/default`) is given and `src` is
+ *   under it: same origin, and its path starts with the vault's path +
+ *   `/api/storage/`. Without `vaultUrl`, no absolute URL is storage:
+ *   `https://evil.example/api/storage/x.png` must not get the token, and nor
+ *   must another vault on the same hub.
+ */
+export function isVaultStorageUrl(src: string, vaultUrl?: string): boolean {
+  if (!isAbsoluteUrl(src)) {
+    return src.startsWith("/api/storage/") && !hasTraversal(src);
+  }
+  if (!vaultUrl || !/^https?:\/\//i.test(src) || hasControlChar(src) || src.includes("\\"))
+    return false;
+  const vault = parseHttpUrl(vaultUrl);
+  const target = parseHttpUrl(src);
+  if (!vault || !target || target.origin !== vault.origin) return false;
+  if (target.username || target.password) return false;
+  // URL parsing already resolves `..` and `%2e%2e` segments in the pathname.
+  const base = vault.pathname.replace(/\/$/, "");
+  return target.pathname.startsWith(`${base}/api/storage/`) && !hasTraversal(target.pathname);
+}
+
+/** How a media `src` from note content may be shown. */
+export type MediaSrcKind =
+  /** vault storage: fetched with auth, shown from an object URL */
+  | "storage"
+  /** `blob:` or an inline `data:` image/audio: shown as is, no request */
+  | "inline"
+  /** an http(s) URL anywhere else: never loaded, shown as a link */
+  | "remote"
+  /** anything else (another scheme, a non-storage path): never loaded, shown as words */
+  | "blocked";
+
+export function mediaSrcKind(src: string, vaultUrl?: string): MediaSrcKind {
+  if (isVaultStorageUrl(src, vaultUrl)) return "storage";
+  if (/^blob:/i.test(src)) return "inline";
+  if (/^data:(image\/(png|jpe?g|gif|webp|avif)|audio\/[a-z0-9.+-]+)[;,]/i.test(src))
+    return "inline";
+  if (/^https?:\/\//i.test(src) || src.startsWith("//")) return "remote";
+  return "blocked";
 }
