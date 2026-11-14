@@ -8,7 +8,7 @@
  *
  * Made-up notes and hosts only.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { VaultAudio } from "../embed/VaultAudio.js";
 import { VaultImage } from "../embed/VaultImage.js";
@@ -266,6 +266,48 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
     expect(fetchBlob.mock.calls).toEqual([[`${VAULT}/api/storage/att/a.png`]]);
     // Redrawn, not remounted: the reader's sitting stays.
     expect(container.querySelector(".rich-note")).toBe(view);
+  });
+
+  it("a vaultUrl that arrives after a saved tick keeps the tick", async () => {
+    const { fetchBlob } = naiveSurface();
+    const onSave = vi.fn(async () => ({ updatedAt: "2026-11-14T00:00:00.000Z" }));
+    const note = {
+      path: "ticks.md",
+      updatedAt: "2026-11-13T00:00:00.000Z",
+      content: `- [ ] one\n- [ ] two\n\n![a](${VAULT}/api/storage/att/a.png)\n`,
+    };
+    const props = { note, rich: true, fetchBlob, onSave };
+    const { container, rerender } = render(<NoteRenderer {...props} />);
+    const boxes = () => [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    fireEvent.click(boxes()[0]);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+    rerender(<NoteRenderer {...props} vaultUrl={VAULT} />);
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
+    expect(boxes().map((b) => b.checked)).toEqual([true, false]);
+    fireEvent.click(boxes()[1]);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave.mock.calls[1]?.[0]).toContain("- [x] one\n- [x] two");
+  });
+
+  it("switching to another vault starts fresh: no image from the last vault", async () => {
+    const a = naiveSurface();
+    const b = naiveSurface();
+    const note = { path: "same.md", content: "- [ ] look\n\n![r](/api/storage/att/a.png)\n" };
+    const { container, rerender } = render(
+      <NoteRenderer note={note} rich fetchBlob={a.fetchBlob} vaultUrl={VAULT} />,
+    );
+    await waitFor(() => expect(a.fetchBlob).toHaveBeenCalledTimes(1));
+    rerender(
+      <NoteRenderer
+        note={note}
+        rich
+        fetchBlob={b.fetchBlob}
+        vaultUrl="https://hub.example/vault/other"
+      />,
+    );
+    await waitFor(() => expect(b.fetchBlob).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(container.querySelector('img[src="blob:mock"]')).not.toBeNull());
   });
 
   it("without fetchBlob, a full in-vault URL stays a link the reader can open", async () => {
