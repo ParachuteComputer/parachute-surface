@@ -182,7 +182,14 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       "https:%2F%2Fevil.example/vault/default/api/storage/a.png",
     ];
     // Paths the kit lets through as attachments but the vault check refuses.
-    const refused = ["/api/storage/a%2Fb.png", "/api/storage/att%5C..%5Cx.png", "/static/logo.png"];
+    // A stray `%` ends the kit's decode loop early, so a double-encoded `..`
+    // reaches the host.
+    const refused = [
+      "/api/storage/a%2Fb.png",
+      "/api/storage/att%5C..%5Cx.png",
+      "/static/logo.png",
+      "/api/storage/%252e%252e/%252e%252e/other/x.png?%",
+    ];
     const { container } = render(
       <NoteRenderer
         note={{
@@ -223,7 +230,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
         vaultUrl={VAULT}
       />,
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 50));
     expect(fetchBlob).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(loadedUrls(container)).toEqual([]);
@@ -236,6 +243,7 @@ describe("a rich note (NoteRenderer rich) keeps the same guarantees", () => {
       "/api/storage/att/Pasted%20image.png",
       "/api/storage/att/cr%C3%A8me.jpg",
       "/api/storage/att/scan.png?v=2",
+      "/api/storage/att/100%25.png",
     ];
     const { container } = render(
       <NoteRenderer
@@ -319,6 +327,12 @@ describe("isVaultStorageUrl", () => {
       "https://u:p@hub.example/vault/default/api/storage/a.png",
       "/api/storage/.\t./notes",
       "/api/storage/\\evil",
+      // encoded more than once: a server or proxy that decodes twice climbs out
+      "/api/storage/%252e%252e/notes",
+      "/api/storage/%25252E%25252E/notes",
+      "/api/storage/a%252Fb.png",
+      "/api/storage/a%255Cb.png",
+      `${VAULT}/api/storage/%252e%252e/other/a.png`,
     ]) {
       expect(isVaultStorageUrl(src, VAULT), src).toBe(false);
     }

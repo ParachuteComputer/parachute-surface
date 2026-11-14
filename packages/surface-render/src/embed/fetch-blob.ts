@@ -101,11 +101,16 @@ function isAbsoluteUrl(src: string): boolean {
 }
 
 /** A path that tries to climb out of `/api/storage/` (`..`, `.`, an encoded
- *  dot or slash), or carries a backslash or control character (browsers fold
- *  `/\host` and `/<TAB>/host` into `//host`), is not a storage path. */
+ *  dot, slash or backslash, however many times encoded: `%2e`, `%252e`, …),
+ *  or carries a backslash or control character (browsers fold `/\host` and
+ *  `/<TAB>/host` into `//host`), is not a storage path. A plain `%25` (a name
+ *  like `100%.png`) is fine. */
 function hasTraversal(path: string): boolean {
   return (
-    /(^|\/)\.{1,2}(\/|[?#]|$)/.test(path) || /%2e|%2f|%5c|\\/i.test(path) || hasControlChar(path)
+    /(^|\/)\.{1,2}(\/|[?#]|$)/.test(path) ||
+    /%(25)*(2e|2f|5c)/i.test(path) ||
+    path.includes("\\") ||
+    hasControlChar(path)
   );
 }
 

@@ -16,8 +16,9 @@
   `https://<any host>/api/storage/…` as storage. An absolute URL counts only
   under the vault passed as `vaultUrl` (same origin, path under
   `<vaultUrl>/api/storage/`, so not another vault on the same hub); a
-  relative path climbing out with `..`, an encoded dot/slash, a backslash or
-  a control character doesn't count. Before, such a URL was fetched
+  relative path climbing out with `..`, an encoded dot/slash/backslash (also
+  encoded twice or more, `%252e`), a backslash or a control character doesn't
+  count. Before, such a URL was fetched
   through `fetchBlob`, which sent the vault bearer to that host.
 - **`vaultClientFetchBlob`'s fallback** refuses an absolute URL outside the
   vault before making a request, and fetches the URL it checked (parsed),
