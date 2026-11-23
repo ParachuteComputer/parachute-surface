@@ -871,13 +871,19 @@ export class VaultClient {
     return (await this.queryNotes(recordsQueryParams(q))).map(toRecord);
   }
 
-  /** {@link getNote} in record words: with its body (and its links, when asked). */
+  /** {@link getNote} in record words: with its body (and its links, when asked); null when there is none. */
   async getRecord(
     idOrPath: string,
     opts: { includeLinks?: boolean; includeAttachments?: boolean } = {},
   ): Promise<VaultRecord | null> {
-    const n = await this.getNote(idOrPath, opts);
-    return n ? toRecord(n) : null;
+    // none there: null, as a Parachute applet's getRecord answers (the hub says 404 for a missing ?id=)
+    try {
+      const n = await this.getNote(idOrPath, opts);
+      return n ? toRecord(n) : null;
+    } catch (e) {
+      if (e instanceof VaultNotFoundError) return null;
+      throw e;
+    }
   }
 
   /** {@link createNote} in record words. */

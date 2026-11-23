@@ -21,8 +21,9 @@ import type {
 
 /** One end of a link, in record words. */
 export type RecordSummary = Omit<NoteSummary, "metadata"> & { fields?: Record<string, unknown> };
-/** A link, both ends in record words. */
+/** A link in record words: its own data as `fields`, and both ends. */
 export type RecordLink = Omit<NoteLink, "sourceNote" | "targetNote"> & {
+  fields?: Record<string, unknown>;
   sourceNote?: RecordSummary;
   targetNote?: RecordSummary;
 };
@@ -65,9 +66,13 @@ export function toRecord(n: Note): VaultRecord {
   if (metadata !== undefined) r.fields = metadata;
   if (links !== undefined) {
     r.links = links.map((l) => {
-      const { sourceNote, targetNote, ...lr } = l;
+      // a link's own data (`metadata` on the hub's link rows) is renamed as a record's is
+      const { sourceNote, targetNote, metadata, ...lr } = l as NoteLink & {
+        metadata?: Record<string, unknown>;
+      };
       return {
         ...lr,
+        ...(metadata !== undefined ? { fields: metadata } : {}),
         ...(sourceNote ? { sourceNote: summary(sourceNote) } : {}),
         ...(targetNote ? { targetNote: summary(targetNote) } : {}),
       };

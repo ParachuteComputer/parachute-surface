@@ -40,6 +40,7 @@ const NOTE = {
       sourceId: "n1",
       targetId: "n2",
       relationship: "mentions",
+      metadata: { weight: 2 },
       targetNote: { id: "n2", path: "Books/Arrakis", metadata: { kind: "place" } },
     },
   ],
@@ -74,7 +75,9 @@ describe("record words", () => {
     expect(rows[0]!).toMatchObject({ id: "n1", body: "# Dune", fields: { rating: 5 } });
     expect(rows[0]!).not.toHaveProperty("content");
     expect(rows[0]!).not.toHaveProperty("metadata");
-    // a link's ends are records too
+    // a link's own data, and its ends, in record words too
+    expect(rows[0]!.links?.[0]).toMatchObject({ fields: { weight: 2 } });
+    expect(rows[0]!.links?.[0]).not.toHaveProperty("metadata");
     expect(rows[0]!.links?.[0]?.targetNote).toEqual({
       id: "n2",
       path: "Books/Arrakis",
@@ -82,14 +85,16 @@ describe("record words", () => {
     });
   });
 
-  test("getRecord: by id or path, with its body and links when asked", async () => {
+  test("getRecord: by path, with its body and links when asked; null when there is none", async () => {
     const { c, seen } = client(() => [NOTE]);
     const r = await c.getRecord("Books/Dune", { includeLinks: true });
     const q = new URL(seen[0]!.url).searchParams;
     expect(q.get("id")).toBe("Books/Dune");
     expect(q.get("include_links")).toBe("true");
     expect(r?.body).toBe("# Dune");
-    expect((await client(() => []).c.getRecord("gone")) ?? null).toBeNull();
+    expect(await client(() => []).c.getRecord("gone")).toBeNull();
+    // a hub answers a missing ?id= with a 404: still null, as an applet's getRecord answers
+    expect(await client(() => ({ error: "not_found" }), 404).c.getRecord("gone")).toBeNull();
   });
 
   test("createRecord and updateRecord send body and fields as content and metadata", async () => {

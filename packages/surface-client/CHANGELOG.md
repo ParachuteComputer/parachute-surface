@@ -12,7 +12,9 @@ come back in the same words. They ride the notes routes, so they work on a
 hub before the record door (0.8) and with it. A web app and an applet
 written against them read alike, so code moves between the two unchanged.
 The note calls are unchanged. `toRecord` and `recordsQueryParams` are
-exported for code that holds notes already.
+exported for code that holds notes already. `getRecord` answers `null` for
+a record that isn't there. Not yet: `types` apart from tags (0.9's record
+door takes them; the notes routes these ride don't).
 
 ### Security — `fetchAttachmentBlob` sends the bearer only to this vault
 
