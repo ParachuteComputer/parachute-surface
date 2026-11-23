@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added — record words: `queryRecords`, `getRecord`, `createRecord`, `updateRecord`
+
+The note calls in the words core 0.9's record door and Parachute's applets
+use: a record's text is `body` (a note's `content`) and its data `fields`
+(`metadata`); a query takes `includeBody`, `includeFields`, `fields` to
+filter by a field (`{ rating: { gte: 4 } }`) and `search`. A link's ends
+come back in the same words. They ride the notes routes, so they work on a
+hub before the record door (0.8) and with it. A web app and an applet
+written against them read alike, so code moves between the two unchanged.
+The note calls are unchanged. `toRecord` and `recordsQueryParams` are
+exported for code that holds notes already.
+
 ### Security — `fetchAttachmentBlob` sends the bearer only to this vault
 
 `VaultClient.fetchAttachmentBlob` used to pass any absolute URL through with
