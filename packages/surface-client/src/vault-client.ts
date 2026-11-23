@@ -38,15 +38,24 @@
  *     match what the modern fetch-style callers want.
  */
 
-import { toNotesSearchParams, type NotesQueryInput } from "./notes-query.js";
+import { type NotesQueryInput, toNotesSearchParams } from "./notes-query.js";
 import {
-  assertSubscribableQuery,
+  type CreateRecordPayload,
+  type RecordsQuery,
+  type UpdateRecordPayload,
+  type VaultRecord,
+  recordsQueryParams,
+  toCreateNote,
+  toRecord,
+  toUpdateNote,
+} from "./records.js";
+import {
   type SubscribeHandlers,
   type SubscribeOptions,
   type SubscribeTransport,
   type WebSocketCtor,
+  assertSubscribableQuery,
 } from "./subscribe.js";
-import { startWsSubscription } from "./ws-transport.js";
 import type {
   CreateNotePayload,
   FindPathResult,
@@ -61,6 +70,7 @@ import type {
   UploadProgress,
   VaultInfo,
 } from "./vault-types.js";
+import { startWsSubscription } from "./ws-transport.js";
 
 /**
  * Common base class for every `VaultClient` error.
@@ -136,7 +146,10 @@ export class VaultAuthError extends VaultError {
  * "token is dead / expired, re-auth" UX of a bare `VaultAuthError`.
  */
 export class VaultPermissionError extends VaultAuthError {
-  constructor(message = "Insufficient permission", opts: { errorType?: string; body?: string } = {}) {
+  constructor(
+    message = "Insufficient permission",
+    opts: { errorType?: string; body?: string } = {},
+  ) {
     super(message, 403, opts);
     this.name = "VaultPermissionError";
   }
@@ -355,10 +368,7 @@ export class VaultClient {
     tokenProvider?: () => Promise<string> | string;
     fetchImpl?: typeof fetch;
     onAuthError?: () => Promise<string | null>;
-    onAuthRevoked?: (
-      status: number,
-      detail?: { errorType?: string; message?: string },
-    ) => void;
+    onAuthRevoked?: (status: number, detail?: { errorType?: string; message?: string }) => void;
     onReachability?: (signal: ReachabilitySignal, reason?: string) => void;
   }): VaultClient {
     const origin = opts.hubOrigin.replace(/\/$/, "");
@@ -851,6 +861,46 @@ export class VaultClient {
     const init: RequestInit = { method: "PATCH", body: JSON.stringify(payload) };
     if (opts.signal) init.signal = opts.signal;
     return this.request<Note>(`/api/notes/${encodeURIComponent(id)}`, init);
+  }
+
+  // ── Record words (records.ts): the calls above, with `body` and `fields`,
+  //    as Parachute's applets and core 0.9's record door say them ──
+
+  /** {@link queryNotes} in record words. */
+  async queryRecords(q: RecordsQuery = {}): Promise<VaultRecord[]> {
+    return (await this.queryNotes(recordsQueryParams(q))).map(toRecord);
+  }
+
+  /** {@link getNote} in record words: with its body (and its links, when asked); null when there is none. */
+  async getRecord(
+    idOrPath: string,
+    opts: { includeLinks?: boolean; includeAttachments?: boolean } = {},
+  ): Promise<VaultRecord | null> {
+    // none there: null, as a Parachute applet's getRecord answers (the hub says 404 for a missing ?id=)
+    try {
+      const n = await this.getNote(idOrPath, opts);
+      return n ? toRecord(n) : null;
+    } catch (e) {
+      if (e instanceof VaultNotFoundError) return null;
+      throw e;
+    }
+  }
+
+  /** {@link createNote} in record words. */
+  async createRecord(
+    payload: CreateRecordPayload,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<VaultRecord> {
+    return toRecord(await this.createNote(toCreateNote(payload), opts));
+  }
+
+  /** {@link updateNote} in record words. A 409 still throws {@link VaultConflictError}. */
+  async updateRecord(
+    id: string,
+    payload: UpdateRecordPayload,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<VaultRecord> {
+    return toRecord(await this.updateNote(id, toUpdateNote(payload), opts));
   }
 
   async deleteNote(id: string, opts: { signal?: AbortSignal } = {}): Promise<void> {

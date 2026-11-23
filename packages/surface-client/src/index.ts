@@ -209,6 +209,16 @@ export type {
  * `package.json` and the build regenerates `src/version.ts`.
  */
 export { SURFACE_CLIENT_VERSION } from "./version.js";
+export {
+  recordsQueryParams,
+  toRecord,
+  type CreateRecordPayload,
+  type RecordLink,
+  type RecordSummary,
+  type RecordsQuery,
+  type UpdateRecordPayload,
+  type VaultRecord,
+} from "./records.js";
 // Local binding required to reference the value in the APP_CLIENT_VERSION alias
 // below — a re-export alone doesn't bring the name into local value scope.
 import { SURFACE_CLIENT_VERSION } from "./version.js";
